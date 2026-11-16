@@ -16,5 +16,5 @@ echo "theme installed: $T"
 
 if [[ ${1:-} == --enable ]]; then
   install -Dm644 ../lightdm/60-nody-greeter.conf /etc/lightdm/lightdm.conf.d/60-nody-greeter.conf
-  echo "nody-greeter enabled (takes effect at next logout)"
+  echo "nody-greeter enabled (LightDM reads config only at start: reboot or restart lightdm)"
 fi
