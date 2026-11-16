@@ -54,3 +54,11 @@ if [[ $ARCH == amd64 ]]; then
     rm -f /tmp/blender.tar.xz
   fi
 fi
+
+# --- networkmanager-dmenu (Wi-Fi menu in rofi) ----------------------------
+if command -v nmcli >/dev/null; then
+  echo "==> networkmanager-dmenu"
+  sudo curl -fsSL -o /usr/local/bin/networkmanager_dmenu \
+    https://raw.githubusercontent.com/firecat53/networkmanager-dmenu/main/networkmanager_dmenu
+  sudo chmod +x /usr/local/bin/networkmanager_dmenu
+fi

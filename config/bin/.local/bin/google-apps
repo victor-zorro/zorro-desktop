@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Gmail, Calendar and Drive in their own Firefox profile and window
+P="$HOME/.local/share/firefox-google"
+mkdir -p "$P"
+printf 'user_pref("browser.startup.page", 3);\n' > "$P/user.js"   # restore tabs
+if [[ ! -f $P/sessionstore.jsonlz4 && ! -d $P/sessionstore-backups ]]; then
+  exec firefox --class GoogleApps --profile "$P" \
+    https://mail.google.com https://calendar.google.com https://drive.google.com
+fi
+exec firefox --class GoogleApps --profile "$P"

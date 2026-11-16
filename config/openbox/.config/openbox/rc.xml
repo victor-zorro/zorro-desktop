@@ -190,6 +190,7 @@
 </dock>
 
 <keyboard>
+    <keybind key="W-w"><action name="Execute"><command>networkmanager_dmenu</command></action></keybind>
     <!-- zorro-desktop keybinds -->
     <!-- Super+Left / Right: snap to half screen, Super+Up: maximize -->
     <keybind key="W-Left">
@@ -777,6 +778,7 @@
 
   # end of the example
 -->
+  <application class="GoogleApps"><desktop>2</desktop><maximized>yes</maximized></application>
 </applications>
 
 </openbox_config>

@@ -2,3 +2,7 @@
 network-manager
 brightnessctl
 tlp
+# Wi-Fi menu (rofi) + advanced connection editor
+python3-gi
+gir1.2-nm-1.0
+network-manager-gnome
