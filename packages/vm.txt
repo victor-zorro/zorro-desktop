@@ -1,0 +1,3 @@
+# Proxmox / QEMU guest
+qemu-guest-agent
+spice-vdagent

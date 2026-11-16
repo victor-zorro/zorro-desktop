@@ -1,0 +1,36 @@
+# Base tools
+curl
+gnupg
+git
+gh
+stow
+pciutils
+nano
+tmux
+# X + Openbox + login
+xorg
+openbox
+obconf
+lightdm
+lightdm-gtk-greeter
+accountsservice
+x11-xserver-utils
+dbus-x11
+# GPU: Mesa (OpenGL/Vulkan) for Intel, AMD and VMs
+libgl1-mesa-dri
+mesa-vulkan-drivers
+fonts-dejavu
+fonts-noto-color-emoji
+# Terminal, launcher, notifications
+kitty
+rofi
+dunst
+libnotify-bin
+# Desktop plumbing
+lxpolkit
+gnome-keyring
+libpam-gnome-keyring
+xdg-desktop-portal-gtk
+pipewire
+pipewire-pulse
+wireplumber

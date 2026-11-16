@@ -1,0 +1,3 @@
+# GPU firmware (Debian non-free-firmware; Intel + AMD, harmless if one is unused)
+firmware-misc-nonfree
+firmware-amd-graphics

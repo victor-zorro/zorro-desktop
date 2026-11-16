@@ -1,0 +1,29 @@
+    <!-- zorro-desktop keybinds -->
+    <!-- Super+Left / Right: snap to half screen, Super+Up: maximize -->
+    <keybind key="W-Left">
+      <action name="UnmaximizeFull"/>
+      <action name="MoveResizeTo"><x>0</x><y>0</y><width>50%</width><height>100%</height></action>
+    </keybind>
+    <keybind key="W-Right">
+      <action name="UnmaximizeFull"/>
+      <action name="MoveResizeTo"><x>-0</x><y>0</y><width>50%</width><height>100%</height></action>
+    </keybind>
+    <keybind key="W-Up"><action name="ToggleMaximize"/></keybind>
+    <!-- Super+Space: apps, Super+Tab: open windows, Super+Enter: terminal -->
+    <keybind key="W-space"><action name="Execute"><command>rofi -show drun</command></action></keybind>
+    <keybind key="W-Tab"><action name="Execute"><command>rofi -show window</command></action></keybind>
+    <keybind key="W-Return"><action name="Execute"><command>kitty</command></action></keybind>
+    <!-- Super+B: time, date and battery as a notification -->
+    <keybind key="W-b"><action name="Execute"><command>sh -c '$HOME/.local/bin/zstatus'</command></action></keybind>
+    <!-- Super+1..4: switch desktop -->
+    <keybind key="W-1"><action name="GoToDesktop"><to>1</to></action></keybind>
+    <keybind key="W-2"><action name="GoToDesktop"><to>2</to></action></keybind>
+    <keybind key="W-3"><action name="GoToDesktop"><to>3</to></action></keybind>
+    <keybind key="W-4"><action name="GoToDesktop"><to>4</to></action></keybind>
+    <!-- Laptop media keys (ignored on machines without them) -->
+    <keybind key="XF86MonBrightnessUp"><action name="Execute"><command>brightnessctl set +10%</command></action></keybind>
+    <keybind key="XF86MonBrightnessDown"><action name="Execute"><command>brightnessctl set 10%-</command></action></keybind>
+    <keybind key="XF86AudioRaiseVolume"><action name="Execute"><command>wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+</command></action></keybind>
+    <keybind key="XF86AudioLowerVolume"><action name="Execute"><command>wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-</command></action></keybind>
+    <keybind key="XF86AudioMute"><action name="Execute"><command>wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle</command></action></keybind>
+    <keybind key="XF86AudioMicMute"><action name="Execute"><command>wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle</command></action></keybind>

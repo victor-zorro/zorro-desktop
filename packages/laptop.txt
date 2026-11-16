@@ -1,0 +1,4 @@
+# Laptop hardware
+network-manager
+brightnessctl
+tlp

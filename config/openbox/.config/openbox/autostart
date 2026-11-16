@@ -1,0 +1,8 @@
+# Openbox autostart (shared across machines)
+# Machine-specific items only start when the tool is installed.
+
+gnome-keyring-daemon --start --components=secrets &
+lxpolkit &
+dunst &
+
+command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only

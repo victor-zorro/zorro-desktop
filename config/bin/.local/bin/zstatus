@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Show time, date, battery and volume as a dunst notification
+body=$(date '+%A %d %B')
+for bat in /sys/class/power_supply/BAT*; do
+  [[ -e $bat ]] || continue
+  body+=$'\n'"Battery: $(cat "$bat/capacity")% ($(cat "$bat/status"))"
+done
+vol=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null) && body+=$'\n'"$vol"
+notify-send -t 4000 "$(date +%H:%M)" "$body"
