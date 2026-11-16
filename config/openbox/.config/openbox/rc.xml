@@ -898,11 +898,9 @@
   # end of the example
 -->
     <application class="WhatsApp">
-      <desktop>3</desktop>
       <maximized>yes</maximized>
     </application>
     <application class="GoogleApps">
-      <desktop>2</desktop>
       <maximized>yes</maximized>
     </application>
   </applications>

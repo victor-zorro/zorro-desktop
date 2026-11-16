@@ -4,6 +4,8 @@
 gnome-keyring-daemon --start --components=secrets &
 lxpolkit &
 dunst &
+# Lock with the LightDM greeter before sleep and when the screen blanks
+xss-lock -- dm-tool lock &
 
 command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 (sleep 3 && "$HOME/.local/bin/google-apps") &

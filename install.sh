@@ -152,6 +152,9 @@ dbus-run-session -- gsettings set org.gnome.desktop.interface gtk-theme Adwaita-
 
 if has laptop; then
   sudo install -Dm644 system/tlp/10-battery.conf /etc/tlp.d/10-battery.conf
+  # Lid: suspend, hibernate after 10 min (swap must be >= RAM, resume= in initramfs)
+  sudo install -Dm644 system/systemd/logind-lid.conf /etc/systemd/logind.conf.d/zorro-lid.conf
+  sudo install -Dm644 system/systemd/sleep-zorro.conf /etc/systemd/sleep.conf.d/zorro.conf
 fi
 
 log "Time zone: Europe/Berlin"
