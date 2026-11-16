@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+wifi=$(nmcli -t -f active,ssid,signal dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2" ("$3"%)"; exit}')
+if [[ -n $wifi ]]; then echo "Wi-Fi    $wifi"
+elif nmcli -t -f type,state dev 2>/dev/null | grep -q '^ethernet:connected'; then echo "Wi-Fi    off (wired)"
+else echo "Wi-Fi    not connected"; fi
+ip=$(hostname -I 2>/dev/null | awk '{print $1}'); echo "IP       ${ip:--}"
+nb=$(netbird status 2>/dev/null | awk -F': ' '/^NetBird IP/{print $2}')
+[[ -n $nb ]] && echo "NetBird  ${nb%/*}"
+exit 0

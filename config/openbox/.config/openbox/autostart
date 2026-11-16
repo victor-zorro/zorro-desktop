@@ -7,3 +7,4 @@ dunst &
 
 command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 (sleep 3 && "$HOME/.local/bin/google-apps") &
+(sleep 2 && conky -d) &

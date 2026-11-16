@@ -34,3 +34,10 @@ xdg-desktop-portal-gtk
 pipewire
 pipewire-pulse
 wireplumber
+# Dark mode + screenshots
+gnome-themes-extra
+dconf-gsettings-backend
+libglib2.0-bin
+maim
+xclip
+conky-std

@@ -129,6 +129,10 @@ for pkg in config/*/; do
   stow -d config -t "$HOME" --restow "$(basename "$pkg")"
 done
 
+log "Dark mode preference"
+dbus-run-session -- gsettings set org.gnome.desktop.interface color-scheme prefer-dark || true
+dbus-run-session -- gsettings set org.gnome.desktop.interface gtk-theme Adwaita-dark || true
+
 # --- Locale: UTF-8, English language, European formats -------------------
 log "Locale: en_US.UTF-8 with en_IE formats (24h, A4, metric, €)"
 sudo apt install -y --no-install-recommends locales
