@@ -21,6 +21,8 @@ libgl1-mesa-dri
 mesa-vulkan-drivers
 mesa-utils
 vulkan-tools
+# Window control (focus-or-launch for app scripts)
+wmctrl
 fonts-dejavu
 fonts-noto-color-emoji
 # Terminal, launcher, notifications

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# WhatsApp Web in its own Firefox profile and window (class WhatsApp).
+# Already open? Bring that window to the front instead of starting a second one.
+if command -v wmctrl >/dev/null && wmctrl -lx | awk '$3 ~ /\.WhatsApp$/ {f=1} END {exit !f}'; then
+  exec wmctrl -x -a WhatsApp
+fi
+P="$HOME/.local/share/firefox-whatsapp"
+mkdir -p "$P"
+cat > "$P/user.js" <<'PREFS'
+user_pref("browser.startup.page", 1);
+user_pref("browser.startup.homepage", "https://web.whatsapp.com");
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.tabs.warnOnClose", false);
+PREFS
+exec firefox --class WhatsApp --profile "$P" https://web.whatsapp.com

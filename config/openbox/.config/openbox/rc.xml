@@ -178,6 +178,12 @@
   </dock>
   <keyboard>
     <keybind key="Print"><action name="Execute"><command>sh -c '$HOME/.local/bin/zshot'</command></action></keybind>
+    <!-- Super+A: WhatsApp (focus if open, otherwise start) -->
+    <keybind key="W-a">
+      <action name="Execute">
+        <command>sh -c '$HOME/.local/bin/whatsapp'</command>
+      </action>
+    </keybind>
     <keybind key="W-w">
       <action name="Execute">
         <command>networkmanager_dmenu</command>
@@ -891,6 +897,10 @@
 
   # end of the example
 -->
+    <application class="WhatsApp">
+      <desktop>3</desktop>
+      <maximized>yes</maximized>
+    </application>
     <application class="GoogleApps">
       <desktop>2</desktop>
       <maximized>yes</maximized>
