@@ -140,6 +140,12 @@ done
 grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \
   || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 
+log "sudo -A: graphical password dialog"
+ASKPASS=/usr/lib/openssh/gnome-ssh-askpass
+if [[ -x $ASKPASS ]] && ! grep -q '^Path askpass' /etc/sudo.conf 2>/dev/null; then
+  echo "Path askpass $ASKPASS" | sudo tee -a /etc/sudo.conf >/dev/null
+fi
+
 log "Dark mode preference"
 dbus-run-session -- gsettings set org.gnome.desktop.interface color-scheme prefer-dark || true
 dbus-run-session -- gsettings set org.gnome.desktop.interface gtk-theme Adwaita-dark || true

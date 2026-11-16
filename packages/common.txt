@@ -31,6 +31,8 @@ kitty
 rofi
 dunst
 libnotify-bin
+# Password dialog for sudo -A (also from Claude Code)
+ssh-askpass-gnome
 # Desktop plumbing
 lxpolkit
 gnome-keyring
