@@ -126,8 +126,19 @@ fi
 log "Linking configs with stow"
 mkdir -p "$HOME/.config" "$HOME/.local/bin"
 for pkg in config/*/; do
-  stow -d config -t "$HOME" --restow "$(basename "$pkg")"
+  pkg=$(basename "$pkg")
+  # systemd: link the unit files, not the folder, so 'systemctl --user enable'
+  # writes its *.wants links in ~ instead of inside the repo
+  if [[ $pkg == systemd && -L $HOME/.config/systemd ]]; then
+    stow -d config -t "$HOME" -D systemd
+  fi
+  opts=(); [[ $pkg == systemd ]] && opts=(--no-folding)
+  stow -d config -t "$HOME" "${opts[@]}" --restow "$pkg"
 done
+
+# Scripts in ~/.local/bin on PATH for every shell
+grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \
+  || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
 
 log "Dark mode preference"
 dbus-run-session -- gsettings set org.gnome.desktop.interface color-scheme prefer-dark || true

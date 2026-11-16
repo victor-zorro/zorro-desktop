@@ -19,6 +19,8 @@ dbus-x11
 # GPU: Mesa (OpenGL/Vulkan) for Intel, AMD and VMs
 libgl1-mesa-dri
 mesa-vulkan-drivers
+mesa-utils
+vulkan-tools
 fonts-dejavu
 fonts-noto-color-emoji
 # Terminal, launcher, notifications
