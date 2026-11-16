@@ -41,3 +41,4 @@ libglib2.0-bin
 maim
 xclip
 conky-std
+systemd-timesyncd

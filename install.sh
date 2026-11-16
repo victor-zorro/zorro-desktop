@@ -137,6 +137,10 @@ if has laptop; then
   sudo install -Dm644 system/tlp/10-battery.conf /etc/tlp.d/10-battery.conf
 fi
 
+log "Time zone: Europe/Berlin"
+sudo timedatectl set-timezone Europe/Berlin
+sudo timedatectl set-ntp true || true
+
 # --- Locale: UTF-8, English language, European formats -------------------
 log "Locale: en_US.UTF-8 with en_IE formats (24h, A4, metric, €)"
 sudo apt install -y --no-install-recommends locales
