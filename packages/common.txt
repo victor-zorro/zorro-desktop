@@ -21,8 +21,9 @@ libgl1-mesa-dri
 mesa-vulkan-drivers
 mesa-utils
 vulkan-tools
-# Window control (focus-or-launch for app scripts)
+# Window control (focus-or-launch for app scripts), input devices
 wmctrl
+xinput
 fonts-dejavu
 fonts-noto-color-emoji
 # Terminal, launcher, notifications
@@ -38,6 +39,7 @@ xdg-desktop-portal-gtk
 pipewire
 pipewire-pulse
 wireplumber
+pulseaudio-utils
 # Dark mode + screenshots
 gnome-themes-extra
 dconf-gsettings-backend

@@ -6,3 +6,5 @@ tlp
 python3-gi
 gir1.2-nm-1.0
 network-manager-gnome
+# Firmware updates (BIOS, devices) via LVFS
+fwupd
