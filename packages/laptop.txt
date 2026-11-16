@@ -8,3 +8,5 @@ gir1.2-nm-1.0
 network-manager-gnome
 # Firmware updates (BIOS, devices) via LVFS
 fwupd
+# fwupd finds the EFI partition through udisks2 (a recommend, so not pulled in)
+udisks2
