@@ -187,6 +187,9 @@ sudo udevadm trigger --subsystem-match=input --action=change || true
 # LightDM has no [Install] section; it runs via display-manager.service
 echo /usr/sbin/lightdm | sudo tee /etc/X11/default-display-manager >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive dpkg-reconfigure lightdm
+sudo install -Dm644 system/lightdm/50-zorro.conf /etc/xdg/lightdm/lightdm-gtk-greeter.conf.d/50-zorro.conf
+# Animated web login (nody-greeter + theme 'zorro'); GTK greeter above stays as fallback
+[[ -x /opt/nody-greeter/nody-greeter ]] && sudo system/web-greeter/install-theme.sh --enable
 sudo systemctl set-default graphical.target
 
 # --- Done ---------------------------------------------------------------

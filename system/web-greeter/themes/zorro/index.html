@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>zorro</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="fx"></canvas>
+
+  <div id="clock" class="hud hidden">
+    <div id="time" class="glitch" data-text="00:00">00:00</div>
+    <div id="date">—</div>
+  </div>
+
+  <main id="login" class="hidden">
+    <div id="host" class="label">signal</div>
+    <div id="user" class="glitch" data-text=""></div>
+    <form id="form" autocomplete="off">
+      <input id="entry" type="password" spellcheck="false" autocomplete="off">
+      <span class="caret">_</span>
+    </form>
+    <div id="msg"></div>
+  </main>
+
+  <nav id="power" class="hud hidden">
+    <button data-act="suspend">suspend</button>
+    <button data-act="restart">reboot</button>
+    <button data-act="shutdown">power off</button>
+  </nav>
+
+  <script src="js/fx.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>

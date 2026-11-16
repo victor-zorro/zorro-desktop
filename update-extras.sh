@@ -23,6 +23,12 @@ gh_deb() {
 gh_deb emqx/MQTTX "$MQTTX_PAT"
 gh_deb localsend/localsend "$LS_PAT"
 
+# nody-greeter: web-based LightDM greeter for the animated login screen (amd64 only)
+if [[ $ARCH == amd64 ]]; then
+  . /etc/os-release
+  gh_deb JezerM/nody-greeter "${ID}\\.deb$"
+fi
+
 # --- rclone (Google Drive mount/sync) ------------------------------------
 # Official build: Debian's package is too old for reliable bisync.
 echo "==> rclone"

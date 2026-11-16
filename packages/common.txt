@@ -13,6 +13,8 @@ openbox
 obconf
 lightdm
 lightdm-gtk-greeter
+# nody-greeter (web login screen, from update-extras.sh) needs the LightDM typelib
+gir1.2-lightdm-1
 accountsservice
 x11-xserver-utils
 dbus-x11
