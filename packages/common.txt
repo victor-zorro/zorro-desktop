@@ -17,6 +17,7 @@ lightdm-gtk-greeter
 # LightDM above is only the fallback.
 python3-gi
 gir1.2-gtk-3.0
+librsvg2-common          # SVG icons in GTK apps (checkboxes in the Drive app)
 gir1.2-webkit2-4.1
 python3-pam
 xauth
