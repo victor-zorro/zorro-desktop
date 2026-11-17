@@ -54,7 +54,14 @@ a tiny `zorro-thinkpad key NAME` that sends one message over a unix socket.
 
 | File | What |
 |---|---|
-| `zorro-thinkpad` | key actions, `keyd`, indicator and the app |
+| `zorro-thinkpad` | entry point (also linked as `zorro-settings`); the code is in `zsettings/` |
+| `zsettings/cli.py` | command line: `key`, `keyd`, `osd`, `morse`, `--page`, `--apply-windows` |
+| `zsettings/base.py` | settings file (atomic, locked writes), small helpers, indicator client |
+| `zsettings/keys.py`, `lights.py`, `keyd.py` | Fn key actions; red dot, LEDs, Morse; the background part |
+| `zsettings/power.py`, `hardware.py` | TLP + battery; hardware check rows |
+| `zsettings/windows.py`, `look.py` | window theme, picom, kitty, GTK css; login look + presets |
+| `zsettings/fxshim.py` | loads the shared overlay look (apps/zorro-fx) with a plain fallback |
+| `zsettings/app.py`, `ui.py`, `pages_*.py` | the Zorro app: window, shared widgets, one module per tab group |
 | `zorro-thinkpad-helper` | root helper, fixed verbs only (`power`, `fullcharge`); installed as a root-owned copy |
 | `org.zorro.thinkpad.policy` | polkit: the active local session may run the helper without a password |
 | `70-zorro-thinkpad.rules` | udev: brightness + ThinkPad LEDs (level, blink mode) writable for group video, Extra Buttons readable |
