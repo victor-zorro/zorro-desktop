@@ -572,12 +572,16 @@ except ImportError:                     # zorro-fx missing: a plain dark box
 
 OSD_CSS = b'''
     .zosd { background: none; padding: 12px 18px; }      /* Snow paints the black */
-    .zosd label { color: #d8d8de; font-size: 12pt; }
-    .zosd image { color: #d8d8de; }
+    .zosd label { color: #d8d8de; font-size: 12pt;           /* chromatic split, like the */
+                  text-shadow: -1.2px 0 rgba(255,42,74,0.65),  /* login screen's lens        */
+                               1.2px 0 rgba(25,230,255,0.65); }
+    .zosd image { color: #d8d8de;
+                  -gtk-icon-shadow: -1.2px 0 rgba(255,42,74,0.6), 1.2px 0 rgba(25,230,255,0.6); }
     .zosd progressbar trough { min-height: 6px; border-radius: 3px;
                                background: rgba(255,255,255,0.18); border: none; }
     .zosd progressbar progress { min-height: 6px; border-radius: 3px;
-                                 background: #d8d8de; border: none; }
+                                 background: #d8d8de; border: none;
+                                 box-shadow: -1.5px 0 rgba(255,42,74,0.7), 1.5px 0 rgba(25,230,255,0.7); }
 '''
 
 
@@ -1160,9 +1164,9 @@ window.client.padding.height: 0
 menu.overlap.x: 0
 menu.overlap.y: 0
 
-window.active.border.color: #2c2c33
+window.active.border.color: #ff2a4a
 window.inactive.border.color: #141417
-window.active.title.separator.color: #2c2c33
+window.active.title.separator.color: {acc}
 window.inactive.title.separator.color: #141417
 window.active.client.color: #0b0b0d
 window.inactive.client.color: #0b0b0d

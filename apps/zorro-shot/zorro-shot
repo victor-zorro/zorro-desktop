@@ -242,7 +242,8 @@ def run_overlay(start_mode):
             css = Gtk.CssProvider()
             css.load_from_data(b'''
                 .zshot-bar { background: none; padding: 6px; }       /* Snow paints the black */
-                .zshot-hint { color: #d8d8de; background: none; padding: 4px 10px; }
+                .zshot-hint { color: #d8d8de; background: none; padding: 4px 10px;
+                              text-shadow: -1.2px 0 rgba(255,42,74,0.65), 1.2px 0 rgba(25,230,255,0.65); }
             ''')
             Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
                                                      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
