@@ -1,0 +1,152 @@
+#!/usr/bin/python3
+"""zorro-winicons: give every window the icon from the Zorro-Lucide theme, so Alt+Tab,
+the window menu and other window lists show the same white line icons as the launcher.
+
+Programs set their own window icon (_NET_WM_ICON, e.g. the Firefox logo); this replaces
+it as soon as a window appears. It waits for X to report a changed window list
+(xprop -spy), so it costs nothing while nothing happens. Openbox autostart starts it.
+"""
+import configparser
+import os
+import re
+import subprocess
+import threading
+from pathlib import Path
+
+import gi
+gi.require_version('GdkPixbuf', '2.0')
+from gi.repository import GdkPixbuf, GLib  # noqa: E402
+
+THEME = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'icons/Zorro-Lucide/scalable'
+CLASS_ICON = {                  # window class -> icon name (others: from the .desktop files)
+    'GoogleApps': 'zorro-google', 'WhatsApp': 'zorro-whatsapp', 'firefox': 'firefox',
+    'firefox-esr': 'firefox', 'kitty': 'kitty', 'Thunar': 'org.xfce.thunar', 'vlc': 'vlc',
+    'Ristretto': 'org.xfce.ristretto', 'Signal': 'signal-desktop', 'MQTTX': 'mqttx',
+    'Blender': 'blender', 'Zorro-thinkpad': 'preferences-desktop', 'Zorro-drive': 'folder-remote',
+    'Gvim': 'gvim', 'localsend_app': 'localsend_app', 'Claude': 'claude-desktop',
+}
+done = {}
+
+
+def desktop_icons():
+    """window class (StartupWMClass or file name) -> Icon, from all .desktop files"""
+    out = {}
+    dirs = [Path.home() / '.local/share/applications', Path('/usr/local/share/applications'),
+            Path('/usr/share/applications')]
+    for d in dirs:
+        for f in d.glob('*.desktop') if d.is_dir() else []:
+            cp = configparser.ConfigParser(interpolation=None, strict=False)
+            try:
+                cp.read(f, encoding='utf-8')
+                e = cp['Desktop Entry']
+            except (configparser.Error, KeyError, UnicodeDecodeError):
+                continue
+            icon = e.get('Icon', '')
+            if not icon or os.path.isabs(icon):
+                continue
+            for key in (e.get('StartupWMClass', ''), f.stem, f.stem.split('.')[-1]):
+                if key:
+                    out.setdefault(key.lower(), icon)
+    return out
+
+
+DESKTOP = desktop_icons()
+
+
+def wm_class(xid):
+    out = subprocess.run(['xprop', '-id', xid, 'WM_CLASS'], capture_output=True, text=True).stdout
+    m = re.findall(r'"([^"]*)"', out)
+    return m[-1] if m else ''
+
+
+def pixbufs(icon):
+    svg = THEME / f'{icon}.svg'
+    if not svg.exists():
+        return None
+    try:
+        return [GdkPixbuf.Pixbuf.new_from_file_at_size(str(svg), s, s) for s in (48, 32, 16)]
+    except GLib.Error:
+        return None
+
+
+def argb(pb):
+    """a pixbuf as _NET_WM_ICON numbers: width, height, then ARGB per pixel"""
+    if not pb.get_has_alpha():
+        pb = pb.add_alpha(False, 0, 0, 0)
+    w, h, rs, data = pb.get_width(), pb.get_height(), pb.get_rowstride(), pb.get_pixels()
+    out = [w, h]
+    for y in range(h):
+        row = data[y * rs:y * rs + w * 4]
+        for x in range(0, w * 4, 4):
+            r, g, b, a = row[x], row[x + 1], row[x + 2], row[x + 3]
+            out.append(a << 24 | r << 16 | g << 8 | b)
+    return out
+
+
+def set_icon(xid):
+    cls = wm_class(xid)
+    if not cls:
+        return False
+    icon = CLASS_ICON.get(cls) or DESKTOP.get(cls.lower())
+    pbs = pixbufs(icon) if icon else None
+    if not pbs:
+        return False
+    nums = []
+    for pb in pbs:
+        nums += argb(pb)
+    x11_set_icon(int(xid, 16), nums)
+    return False
+
+
+_x = {}
+
+
+def x11_set_icon(window, nums):
+    """XChangeProperty(_NET_WM_ICON) through libX11 (format 32 = C longs); GDK crashes on
+    other programs' windows and xprop -set stops after 64 numbers"""
+    import ctypes
+    import ctypes.util
+    if not _x:
+        lib = ctypes.cdll.LoadLibrary(ctypes.util.find_library('X11') or 'libX11.so.6')
+        lib.XOpenDisplay.restype = ctypes.c_void_p
+        lib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        lib.XInternAtom.restype = ctypes.c_ulong
+        lib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        lib.XChangeProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong,
+                                        ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_void_p, ctypes.c_int]
+        lib.XFlush.argtypes = [ctypes.c_void_p]
+        dpy = lib.XOpenDisplay(None)
+        _x.update(lib=lib, dpy=dpy, icon=lib.XInternAtom(dpy, b'_NET_WM_ICON', 0),
+                  cardinal=lib.XInternAtom(dpy, b'CARDINAL', 0))
+    lib, dpy = _x['lib'], _x['dpy']
+    data = (ctypes.c_ulong * len(nums))(*nums)
+    lib.XChangeProperty(dpy, window, _x['icon'], _x['cardinal'], 32, 0,   # 0 = PropModeReplace
+                        ctypes.cast(data, ctypes.c_void_p), len(nums))
+    lib.XFlush(dpy)
+
+
+def on_list(line):
+    xids = set(re.findall(r'0x[0-9a-fA-F]+', line))
+    for xid in xids - set(done):
+        done[xid] = True
+        GLib.timeout_add(400, set_icon, xid)     # let the program set its own icon first
+    for xid in set(done) - xids:
+        done.pop(xid, None)
+    return False
+
+
+def watch():
+    p = subprocess.Popen(['xprop', '-spy', '-root', '_NET_CLIENT_LIST'],
+                         stdout=subprocess.PIPE, text=True)
+    for line in p.stdout:
+        GLib.idle_add(on_list, line)
+
+
+def main():
+    threading.Thread(target=watch, daemon=True).start()
+    GLib.MainLoop().run()
+
+
+if __name__ == '__main__':
+    main()

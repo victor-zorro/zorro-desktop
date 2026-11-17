@@ -13,3 +13,7 @@ icons the mapping uses are kept here).
   .desktop files that point at an icon file (Blender).
 - GTK uses it through `gtk-icon-theme-name` in `config/gtk`. Google apps and WhatsApp
   (Firefox profiles) get their own icons: `zorro-google` (mail), `zorro-whatsapp`.
+
+`zorro-winicons` (Openbox autostart) gives every window the same icon (`_NET_WM_ICON`), so
+Alt+Tab and the window menu show the white Lucide icons too. It waits on X's window-list
+change (`xprop -spy`), no polling, and writes the property through libX11.
