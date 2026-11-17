@@ -18,6 +18,4 @@ fi
 command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 (sleep 3 && "$HOME/.local/bin/google-apps") &
 (sleep 4 && "$HOME/.local/bin/whatsapp") &
-# moving background (apps/zorro-backdrop) first, conky's panel goes on top of it
-command -v zorro-backdrop >/dev/null && zorro-backdrop &
 (sleep 2 && conky -d) &
