@@ -1,0 +1,163 @@
+#!/usr/bin/python3
+"""zorro-wall: the living wallpaper. The login screen's engine (apps/zorro-dm/theme, fx.js)
+running as the desktop background: iridescent deep sea with the wireframe animal.
+
+Calm on purpose: 12 frames a second on the charger, 6 on battery, half resolution, nothing while
+windows cover the desktop. The look follows the login screen (/etc/zorro-dm/look.json)
+with the TV effects toned down, unless set otherwise in the Zorro app → Desktop → Wallpaper.
+
+  zorro-wall          run (Openbox autostart starts it)
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('WebKit2', '4.1')
+from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
+
+HERE = Path(os.path.realpath(__file__)).parent
+THEME = HERE.parent / 'zorro-dm' / 'theme'
+CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-wall' / 'config.json'
+LOGIN_LOOK = Path('/etc/zorro-dm/look.json')
+
+DEFAULTS = {
+    'enabled': True,
+    'follow_login': True,       # same animal / background / colours as the login screen
+    'fps_ac': 12, 'fps_battery': 6,
+    'render_scale': 0.5,        # half resolution: soft and grainy anyway, 4x less work
+    'look': {},                 # own look when follow_login is off (same keys as look.json)
+}
+CALM = {                        # a desktop is looked at for hours: less TV noise, no CRT
+    'crt': False, 'bars': False, 'glitch_rate': 0.15, 'glitch_strength': 0.5,
+    'scratches': 0.25, 'dust': 0.25, 'grain': 0.6, 'flicker': 0.3, 'chroma': 0.6,
+    'scanlines': 0.6,
+}
+
+
+def load_conf():
+    c = dict(DEFAULTS)
+    try:
+        c.update(json.loads(CONF.read_text()))
+    except (OSError, ValueError):
+        pass
+    return c
+
+
+def on_battery():
+    for ps in Path('/sys/class/power_supply').glob('*'):
+        try:
+            if (ps / 'type').read_text().strip() == 'Mains':
+                return (ps / 'online').read_text().strip() != '1'
+        except OSError:
+            pass
+    return False
+
+
+def look(c):
+    base = {}
+    if c.get('follow_login', True):
+        try:
+            base = json.loads(LOGIN_LOOK.read_text())
+        except (OSError, ValueError):
+            base = {}
+    else:
+        base = dict(c.get('look', {}))
+    out = dict(base)
+    out.update(CALM)
+    for k in ('glitch_rate', 'grain', 'chroma'):        # keep the user's lower values
+        if k in base:
+            out[k] = min(float(base[k]), CALM[k])
+    out['fps'] = c['fps_battery'] if on_battery() else c['fps_ac']
+    out['render_scale'] = c.get('render_scale', 0.5)
+    return out
+
+
+class Wall(Gtk.Window):
+    def __init__(self):
+        super().__init__(title='zorro-wall')
+        self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
+        self.set_decorated(False)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+        self.set_accept_focus(False)
+        self.stick()
+        self.set_keep_below(True)
+        self.conf = load_conf()
+        self.stamp = None
+        self.look = look(self.conf)
+        ucm = WebKit2.UserContentManager()
+        ucm.add_script(WebKit2.UserScript.new(
+            'window.ZORRO_LOOK = ' + json.dumps(self.look) + ';',
+            WebKit2.UserContentInjectedFrames.TOP_FRAME, WebKit2.UserScriptInjectionTime.START,
+            None, None))
+        self.view = WebKit2.WebView.new_with_user_content_manager(ucm)
+        st = self.view.get_settings()
+        st.set_enable_webgl(True)
+        black = Gdk.RGBA()
+        black.parse('black')
+        self.view.set_background_color(black)
+        self.view.connect('context-menu', lambda *a: True)
+        self.view.connect('web-process-terminated', lambda v, r: GLib.timeout_add(
+            2000, lambda: v.reload() and False))
+        self.view.load_uri('file://' + str(THEME / 'secondary.html'))
+        self.add(self.view)
+        self.add_events(Gdk.EventMask.VISIBILITY_NOTIFY_MASK)
+        self.connect('visibility-notify-event', self.on_visibility)
+        self.connect('realize', lambda w: w.get_window().lower())
+        scr = self.get_screen()
+        scr.connect('monitors-changed', lambda s: self.fit())
+        scr.connect('size-changed', lambda s: self.fit())
+        self.fit()
+        self.show_all()
+        GLib.timeout_add_seconds(5, self.check)
+
+    def fit(self):
+        disp = Gdk.Display.get_default()
+        rect = disp.get_monitor(0).get_geometry()
+        for i in range(1, disp.get_n_monitors()):
+            rect = rect.union(disp.get_monitor(i).get_geometry())
+        self.move(rect.x, rect.y)
+        self.resize(rect.width, rect.height)
+
+    def js(self, code):
+        self.view.evaluate_javascript(code, -1, None, None, None, None, None)
+
+    def on_visibility(self, _w, ev):
+        self.js(f'window.FX && FX.pause({"true" if ev.state == Gdk.VisibilityState.FULLY_OBSCURED else "false"})')
+        return False
+
+    def check(self):
+        """settings changed, login look changed, or charger plugged / unplugged"""
+        stamp = []
+        for p in (CONF, LOGIN_LOOK):
+            try:
+                stamp.append(p.stat().st_mtime)
+            except OSError:
+                stamp.append(None)
+        stamp.append(on_battery())
+        if stamp != self.stamp:
+            self.stamp = stamp
+            self.conf = load_conf()
+            if not self.conf.get('enabled', True):
+                Gtk.main_quit()
+                return False
+            new = look(self.conf)
+            if new != self.look:
+                self.look = new
+                self.js(f'window.FX && FX.setLook({json.dumps(new)})')
+        return True
+
+
+def main():
+    if not load_conf().get('enabled', True):
+        sys.exit(0)
+    Wall()
+    Gtk.main()
+
+
+if __name__ == '__main__':
+    main()

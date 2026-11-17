@@ -272,6 +272,12 @@ def main():
             self.stick()
             self.set_keep_below(True)
             self.set_app_paintable(True)
+            scr = self.get_screen()
+            # with a compositor (picom) the window is truly see-through: the wallpaper shows
+            # in the spill cloud; without one the window is cut to the circle itself
+            self.composited = bool(scr.is_composited() and scr.get_rgba_visual())
+            if self.composited:
+                self.set_visual(scr.get_rgba_visual())
             self.connect('draw', self.paint_bg)
             self.conf, self.conf_mtime = load_conf(), None
             self.data, self.lock = {}, threading.Lock()
@@ -299,6 +305,9 @@ def main():
             self.layout()
             self.show_all()
             scr = self.get_screen()             # screens added / removed / resized (F7)
+            # picom started or stopped: the drawing mode is fixed per window, so restart
+            scr.connect('composited-changed', lambda s: os.execv(sys.executable,
+                                                                 [sys.executable] + sys.argv))
             scr.connect('monitors-changed', lambda s: self.layout())
             scr.connect('size-changed', lambda s: self.layout())
             GLib.timeout_add(1000, self.every_second)
@@ -337,18 +346,24 @@ def main():
             if not gw:
                 return False
             reg = cairo.Region()
-            r = full / 2
-            for y in range(full):
+            r = full / 2 if self.composited else d / 2 + 1     # no compositor: no cloud
+            off = 0 if self.composited else spill
+            for y in range(int(2 * r)):
                 dy = y + 0.5 - r
                 half = math.sqrt(max(0.0, r * r - dy * dy))
                 if half >= 0.5:
                     reg.union(cairo.RectangleInt(int(r - half), y, max(1, int(2 * half)), 1))
-            gw.shape_combine_region(reg, 0, 0)
+            gw.shape_combine_region(reg, off, off)
             return False
 
         def paint_bg(self, _w, cr):
-            cr.set_source_rgb(0, 0, 0)          # the spill area: same black as the desktop
-            cr.paint()
+            if self.composited:
+                cr.set_operator(0)              # CLEAR: transparent, the wallpaper shows
+                cr.paint()
+                cr.set_operator(2)
+            else:
+                cr.set_source_rgb(0, 0, 0)
+                cr.paint()
             return False
 
         # -- zones

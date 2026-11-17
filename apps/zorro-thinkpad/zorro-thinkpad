@@ -1270,6 +1270,8 @@ def apply_windows(login=False):
 # ---- login / lock screen look ---------------------------------------------------------------
 
 DM_DIR = Path(os.path.realpath(__file__)).parent.parent / 'zorro-dm'
+WALL_DEFAULTS = {'enabled': True, 'follow_login': True, 'fps_ac': 12, 'fps_battery': 6,
+                 'render_scale': 0.5, 'look': {}}
 LOOK_FILE = '/etc/zorro-dm/look.json'
 _look_draft = {}
 LOOK_ANIMALS = {'whale': 'Blue whale', 'vaquita': 'Vaquita (rarest porpoise)',
@@ -1462,6 +1464,7 @@ def cmd_app(select=None):
             tp.section('lights', 'Lights', self.lights_page())
             tp.section('hw', 'Hardware', self.hw_page())
             desk = Group()
+            desk.section('wall', 'Wallpaper', self.wall_page())
             desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
             desk.section('fx', 'Overlays', self.fx_page('overlay'))
             desk.section('windows', 'Windows', self.windows_page())
@@ -2115,6 +2118,71 @@ def cmd_app(select=None):
                               'Title bars applied; transparency needs: sudo apt install picom')
             threading.Thread(target=work, daemon=True).start()
             return False
+
+        # -- living wallpaper (apps/zorro-wall)
+        def wall_page(self):
+            box = Pages()
+            conf = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-wall' / 'config.json'
+            try:
+                c = json.loads(conf.read_text())
+            except (OSError, ValueError):
+                c = {}
+            c = {**WALL_DEFAULTS, **c}
+            c['look'] = {**{'animal': 'whale', 'background': 'deep'}, **c.get('look', {})}
+
+            def save(**kv):
+                c.update(kv)
+                write_atomic(conf, json.dumps(c, indent=2) + '\n')
+                if kv.get('enabled') and not run('pgrep', '-f', 'bin/zorro-wall$').strip():
+                    spawn([str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-wall' / 'zorro-wall')])
+
+            def grid(rows):
+                g = Gtk.Grid(column_spacing=12, row_spacing=8)
+                for i, (label, w) in enumerate(rows):
+                    g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                    g.attach(w, 1, i, 1, 1)
+                return g
+
+            def switch(key, on_change=None):
+                sw = Gtk.Switch(active=bool(c[key]), halign=Gtk.Align.START)
+                sw.connect('notify::active', lambda w, _p: (save(**{key: w.get_active()}),
+                                                           on_change and on_change(w.get_active())))
+                return sw
+
+            def scale(key, lo, hi, step, fmt):
+                sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
+                sc.set_hexpand(True)
+                sc.set_value(float(c[key]))
+                sc.set_value_pos(Gtk.PositionType.RIGHT)
+                sc.connect('format-value', lambda w, v: fmt(v))
+                sc.connect('value-changed', lambda w: save(**{key: round(w.get_value(), 2)}))
+                return sc
+
+            def combo(key, options):
+                cb = Gtk.ComboBoxText()
+                for k, label in options.items():
+                    cb.append(k, label)
+                cb.set_active_id(c['look'].get(key))
+                cb.connect('changed', lambda w: save(look={**c['look'], key: w.get_active_id()}))
+                return cb
+
+            box.add(heading('Living wallpaper', 'Wallpaper'))
+            own = grid([('Animal', combo('animal', LOOK_ANIMALS)),
+                        ('Background', combo('background', LOOK_BACKGROUNDS))])
+            own.set_sensitive(not c['follow_login'])
+            box.add(grid([('On', switch('enabled')),
+                          ('Same look as the login screen',
+                           switch('follow_login', lambda on: own.set_sensitive(not on)))]))
+            box.add(own)
+            box.add(note('The login engine as the desktop: the iridescent background with the '
+                         'wireframe animal and marine snow, with the TV effects toned down.'))
+            box.add(heading('Battery', 'Battery'))
+            box.add(grid([('Frames per second on the charger', scale('fps_ac', 2, 30, 1, lambda v: f'{v:.0f}')),
+                          ('Frames per second on battery', scale('fps_battery', 1, 20, 1, lambda v: f'{v:.0f}')),
+                          ('Resolution', scale('render_scale', 0.25, 1, 0.05, lambda v: f'{v * 100:.0f}%'))]))
+            box.add(note('It stops drawing while windows cover the desktop. Lower resolution is '
+                         'softer and much lighter; 50% looks the same on this grainy style.'))
+            return box
 
         # -- login / lock screen look (apps/zorro-dm theme, /etc/zorro-dm/look.json)
         def look_page(self):

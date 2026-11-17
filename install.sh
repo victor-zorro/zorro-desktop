@@ -157,6 +157,8 @@ for kv in DOWNLOAD:Downloads PICTURES:Pictures DOCUMENTS:Documents; do
   mkdir -p "$HOME/${kv#*:}"
   xdg-user-dirs-update --set "${kv%%:*}" "$HOME/${kv#*:}"
 done
+log "Living wallpaper (apps/zorro-wall)"
+apps/zorro-wall/install.sh
 log "Info circle on the desktop (apps/zorro-orb)"
 apps/zorro-orb/install.sh
 

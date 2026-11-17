@@ -23,6 +23,7 @@
     background: 'deep',            // deep (dark, pools of light), waves, streaks, black
     bg_strength: 1, bg_speed: 1, bg_aberration: 1,
     fps: 30,                       // the wallpaper asks for less
+    render_scale: 1,               // < 1: draw smaller and let the screen scale it up
   };
   const BG_MODES = { waves: 0, streaks: 1, deep: 2 };
   const CBLUR_MODES = { lens: 0, prism: 1, glow: 2 };
@@ -44,7 +45,8 @@
   let W = 0, H = 0;
 
   function resize() {
-    W = Math.floor(innerWidth * DPR); H = Math.floor(innerHeight * DPR);
+    const k = DPR * Math.min(1, Math.max(0.25, +cfg.render_scale || 1));
+    W = Math.floor(innerWidth * k); H = Math.floor(innerHeight * k);
     glc.width = W; glc.height = H;
     wc.width = Math.floor(W * WHALE_SCALE); wc.height = Math.floor(H * WHALE_SCALE);
     if (gl) gl.viewport(0, 0, W, H);
@@ -720,8 +722,9 @@
     for (const f of listeners) f(strength, ms);
   }
 
-  let lastFrame = 0;
+  let lastFrame = 0, paused = false;
   function frame(now) {
+    if (paused) return;                     // FX.pause(false) starts it again
     // at most 30 frames a second: the lock screen can stay up for hours
     if (now - lastFrame < 1000 / Math.max(1, Math.min(60, +cfg.fps || 30)) - 1) {
       requestAnimationFrame(frame); return;
@@ -811,6 +814,12 @@
       Object.assign(cfg, obj || {});
       if (cfg.animal !== animal) { pass = null; nextPassAt = 0; firstPass = true; }
       makeSnow();
+    },
+    // the wallpaper stops drawing while windows cover it
+    pause(on) {
+      if (paused === !!on) return;
+      paused = !!on;
+      if (!paused) { lastFrame = 0; requestAnimationFrame(frame); }
     },
     startedAt: START,
   };

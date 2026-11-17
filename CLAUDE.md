@@ -15,6 +15,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
   - `apps/zorro-thinkpad/` — the Zorro settings app (zorro-settings, F9) + ThinkPad keys/indicator (keyd), power, LEDs, LTE, hardware
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
+  - `apps/zorro-wall/` — living wallpaper: the login engine (iridescent deep sea + wireframe animal) on the desktop
   - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones
   - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
