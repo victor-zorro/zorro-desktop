@@ -1,1 +1,5 @@
+configuration {
+  icon-theme: "Zorro-Lucide";
+  show-icons: true;
+}
 @theme "Arc-Dark"

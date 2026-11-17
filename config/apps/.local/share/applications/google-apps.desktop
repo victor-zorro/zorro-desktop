@@ -2,5 +2,5 @@
 Type=Application
 Name=Google (Mail, Calendar, Drive)
 Exec=sh -c '$HOME/.local/bin/google-apps'
-Icon=firefox
+Icon=zorro-google
 StartupWMClass=GoogleApps

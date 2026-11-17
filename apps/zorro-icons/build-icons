@@ -1,0 +1,68 @@
+#!/usr/bin/python3
+"""build-icons: the "Zorro-Lucide" icon theme, white line icons with some transparency.
+
+Made from the Lucide icons in lucide/ (ISC, see lucide/LICENSE) with mapping.json:
+standard icon names and app icons become Lucide line icons; anything not mapped falls back
+to Adwaita. Output: ~/.local/share/icons/Zorro-Lucide (GTK picks it up by name).
+
+  build-icons [--opacity 0.82]     (the Zorro app → Desktop → Text & colours runs this)
+Also writes user overrides for apps that point at an icon file instead of a name (Blender).
+"""
+import configparser
+import json
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+HERE = Path(os.path.realpath(__file__)).parent
+OUT = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'icons' / 'Zorro-Lucide'
+APPS = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'applications'
+
+
+def build(opacity):
+    m = json.loads((HERE / 'mapping.json').read_text())
+    tmp = OUT.with_name('.Zorro-Lucide.new')
+    shutil.rmtree(tmp, ignore_errors=True)
+    (tmp / 'scalable').mkdir(parents=True)
+    src = {}
+    for name, lucide in {**m['apps'], **m['symbols']}.items():
+        if lucide not in src:
+            svg = (HERE / 'lucide' / f'{lucide}.svg').read_text()
+            svg = re.sub(r'<!--.*?-->\s*', '', svg, flags=re.S)
+            # white, slightly see-through lines
+            svg = svg.replace('stroke="currentColor"',
+                              f'stroke="#ffffff" stroke-opacity="{opacity:.2f}"')
+            src[lucide] = svg
+        for n in (name, f'{name}-symbolic'):
+            (tmp / 'scalable' / f'{n}.svg').write_text(src[lucide])
+    (tmp / 'index.theme').write_text(
+        '[Icon Theme]\nName=Zorro-Lucide\nComment=White Lucide line icons (zorro-desktop)\n'
+        'Inherits=Adwaita,hicolor\nDirectories=scalable\n\n'
+        '[scalable]\nSize=24\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=Applications\n')
+    shutil.copy(HERE / 'lucide' / 'LICENSE', tmp / 'LICENSE-lucide')
+    shutil.rmtree(OUT, ignore_errors=True)
+    tmp.rename(OUT)
+    os.utime(OUT)                        # GTK notices the change
+    # apps that point at an icon file: a user copy of their .desktop with a themed name
+    for desk, icon in m.get('desktop_overrides', {}).items():
+        for d in ('/usr/share/applications', '/usr/local/share/applications'):
+            f = Path(d) / desk
+            if f.exists():
+                text = re.sub(r'^Icon=.*$', f'Icon={icon}', f.read_text(), flags=re.M)
+                APPS.mkdir(parents=True, exist_ok=True)
+                (APPS / desk).write_text(text)
+                break
+    print(f'Zorro-Lucide: {len(list((OUT / "scalable").iterdir()))} icons in {OUT}')
+
+
+def main():
+    opacity = 0.82
+    if '--opacity' in sys.argv:
+        opacity = min(1.0, max(0.2, float(sys.argv[sys.argv.index('--opacity') + 1])))
+    build(opacity)
+
+
+if __name__ == '__main__':
+    main()

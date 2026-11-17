@@ -3,5 +3,5 @@ Type=Application
 Name=WhatsApp
 Comment=WhatsApp Web in its own Firefox window
 Exec=sh -c '$HOME/.local/bin/whatsapp'
-Icon=firefox
+Icon=zorro-whatsapp
 StartupWMClass=WhatsApp
