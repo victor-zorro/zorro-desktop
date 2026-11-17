@@ -131,6 +131,7 @@ class PreviewBackend:
             GLib.timeout_add(400, lambda: self.emit({'type': 'complete', 'ok': ok}) and False)
         elif cmd == 'start_session':
             self.quit()
+        # 'ready' / 'power': nothing to do in the preview
 
 
 # ---- windows -----------------------------------------------------------------------
@@ -209,7 +210,14 @@ class Greeter:
         if primary:
             self.view = view
             view.grab_focus()
+            view.connect('load-changed', self.on_load)
         self.windows.append(win)
+
+    def on_load(self, _view, event):
+        """Page loaded: give it a moment to draw, then tell zorro-dm (it holds sleep
+        until then, so a suspend never catches a half-drawn lock screen)."""
+        if event == WebKit2.LoadEvent.FINISHED:
+            GLib.timeout_add(700, lambda: self.backend.handle({'cmd': 'ready'}) and False)
 
     def from_js(self, _ucm, result):
         v = result.get_js_value() if hasattr(result, 'get_js_value') else result

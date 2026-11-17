@@ -357,11 +357,21 @@ class DM:
         threading.Thread(target=self.reader, args=(self.sock, rnd), daemon=True).start()
 
         login, result = None, None
+        started = time.monotonic()
+        told = mode != 'lock'
         while True:
-            kind, r, m = self.events.get()
+            if not told and time.monotonic() - started > 8:
+                told = True                 # never got 'ready': don't hold up sleep forever
+                for c in lock_clients:
+                    self.tell(c, 'locked')
+            try:
+                kind, r, m = self.events.get(timeout=1)
+            except queue.Empty:
+                continue
             if kind == 'lock_req':
                 if mode == 'lock':          # already locked: just wait with the others
-                    self.tell(m, 'locked')
+                    if told:
+                        self.tell(m, 'locked')
                     lock_clients.append(m)
                 else:                       # nobody logged in, nothing to lock
                     self.tell(m, 'unlocked')
@@ -377,7 +387,11 @@ class DM:
                     self.send(type='complete', ok=m.ok)
                 continue
             cmd = m.get('cmd')
-            if cmd == 'authenticate':
+            if cmd == 'ready' and not told:
+                told = True                 # lock screen is fully drawn: safe to sleep now
+                for c in lock_clients:
+                    self.tell(c, 'locked')
+            elif cmd == 'authenticate':
                 if login:
                     login.cancel()
                 if mode == 'login':
@@ -439,8 +453,7 @@ class DM:
                         continue
                     vt_switch(LOCK_VT)
                     vt_lock(True)               # no Ctrl+Alt+F7 back to the session
-                    for c in clients:
-                        self.tell(c, 'locked')
+                # clients hear 'locked' once the greeter says the screen is drawn
                 if self.greeter_round(LOCK_DISPLAY, LOCK_VT, cookie, 'lock', pw, clients):
                     break
                 log('lock screen crashed, restarting it (session stays hidden)')
