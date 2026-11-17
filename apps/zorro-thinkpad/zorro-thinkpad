@@ -903,6 +903,20 @@ def battery_text():
             f'Charges when below {lo}%, stops at {hi}%')
 
 
+def load_script(name):
+    """one of our app scripts (apps/NAME/NAME) as a module, or None"""
+    import importlib.machinery
+    import importlib.util
+    p = Path(os.path.realpath(__file__)).parent.parent / name / name
+    if not p.exists():
+        return None
+    mod_name = name.replace('-', '_')
+    spec = importlib.util.spec_from_loader(mod_name, importlib.machinery.SourceFileLoader(mod_name, str(p)))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def load_orb():
     """the zorro-orb script as a module (its item list and config), or None"""
     import importlib.machinery
@@ -2396,43 +2410,60 @@ def cmd_app(select=None):
         # -- the dial launcher (apps/zorro-dial)
         def dial_page(self):
             box = Pages()
-            conf = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' / 'config.json'
-            defaults = {'slices': [{'name': 'Work', 'categories': ['Development', 'Office', 'WebBrowser',
-                                                                   'Email', 'TextEditor', 'Network']},
-                                   {'name': 'Media', 'categories': ['AudioVideo', 'Graphics', 'Player',
-                                                                    'Photography', '3DGraphics']},
-                                   {'name': 'System', 'categories': ['System', 'Settings', 'Utility',
-                                                                     'FileManager', 'TerminalEmulator']}],
-                        'ring_slots': [3, 4, 6]}
-            try:
-                c = {**defaults, **json.loads(conf.read_text())}
-            except (OSError, ValueError):
-                c = json.loads(json.dumps(defaults))
+            dial = load_script('zorro-dial')
+            if not dial:
+                box.add(note('apps/zorro-dial is missing.'))
+                return box
+            c = dial.load_conf()
 
             def save():
-                write_atomic(conf, json.dumps(c, indent=2) + '\n')
+                write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
-            box.add(heading('Three slices', 'Slices'))
-            g = Gtk.Grid(column_spacing=10, row_spacing=8)
+            box.add(heading('Slices (up to six, clockwise from the top)', 'Slices'))
+            g = Gtk.Grid(column_spacing=10, row_spacing=6)
             g.attach(Gtk.Label(label='Name', xalign=0), 0, 0, 1, 1)
             g.attach(Gtk.Label(label='App categories (comma separated)', xalign=0), 1, 0, 1, 1)
-            for i, s in enumerate(c['slices'][:3]):
-                name = Gtk.Entry(text=s['name'], width_chars=10)
-                cats = Gtk.Entry(text=', '.join(s['categories']), hexpand=True)
+            rows = (c['slices'] + [{'name': '', 'categories': []}] * 6)[:6]
+            entries = []
 
-                def changed(_w, i=i, name=name, cats=cats):
-                    c['slices'][i] = {'name': name.get_text().strip() or f'Slice {i + 1}',
-                                      'categories': [x.strip() for x in cats.get_text().split(',')
-                                                     if x.strip()]}
-                    save()
+            def changed(_w):
+                c['slices'] = [{'name': n.get_text().strip(),
+                                'categories': [x.strip() for x in k.get_text().split(',') if x.strip()]}
+                               for n, k in entries if n.get_text().strip()] or c['slices']
+                save()
+            for i, s in enumerate(rows):
+                name = Gtk.Entry(text=s['name'], width_chars=9, placeholder_text='(unused)')
+                cats = Gtk.Entry(text=', '.join(s['categories']), hexpand=True)
                 name.connect('changed', changed)
                 cats.connect('changed', changed)
+                entries.append((name, cats))
                 g.attach(name, 0, i + 1, 1, 1)
                 g.attach(cats, 1, i + 1, 1, 1)
             box.add(g)
-            box.add(note('Apps go to the first slice whose categories match theirs (as in their '
-                         '.desktop file, e.g. WebBrowser, AudioVideo, Utility); the rest go to '
-                         'the last slice.'))
+            box.add(note('An app goes to the slice you chose for it (Apps), else to the first '
+                         'slice whose categories match its .desktop file, else the last slice.'))
+
+            box.add(heading('Which slice each app is in', 'Apps'))
+            grid = Gtk.Grid(column_spacing=10, row_spacing=4)
+            for i, a in enumerate(sorted(dial.apps(), key=lambda a: a['name'].lower())[:40]):
+                cb = Gtk.ComboBoxText()
+                cb.append('', 'automatic')
+                for s in c['slices']:
+                    cb.append(s['name'], s['name'])
+                cb.set_active_id(c.get('assign', {}).get(a['id'], ''))
+
+                def pick(w, app=a['id']):
+                    v = w.get_active_id()
+                    if v:
+                        c.setdefault('assign', {})[app] = v
+                    else:
+                        c.setdefault('assign', {}).pop(app, None)
+                    save()
+                cb.connect('changed', pick)
+                grid.attach(Gtk.Label(label=a['name'], xalign=0, ellipsize=3, max_width_chars=24),
+                            (i % 2) * 2, i // 2, 1, 1)
+                grid.attach(cb, (i % 2) * 2 + 1, i // 2, 1, 1)
+            box.add(grid)
 
             box.add(heading('Rings', 'Rings'))
             g = Gtk.Grid(column_spacing=10, row_spacing=8)
@@ -2444,11 +2475,10 @@ def cmd_app(select=None):
                 g.attach(sp, 1, k, 1, 1)
             box.add(g)
             forget = Gtk.Button(label='Forget which apps I use', halign=Gtk.Align.START, margin_top=8)
-            forget.connect('clicked', lambda b: (Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state'))
-                                                 .joinpath('zorro-dial', 'usage.json').unlink(missing_ok=True),
+            forget.connect('clicked', lambda b: (dial.USAGE.unlink(missing_ok=True),
                                                  self.dial_msg.set_text('Usage forgotten')))
             box.add(forget)
-            box.add(note('Open the dial with a tap on Super (needs xcape) or Super+Space; '
+            box.add(note('Open the dial with a tap on Super (xcape) or Super+Space; '
                          'rofi stays on Super+Shift+Space.'))
             self.dial_msg = note()
             box.footer(self.dial_msg)

@@ -33,15 +33,21 @@ CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' 
 RED, CYAN, FG = (1.0, 0.16, 0.29), (0.10, 0.90, 1.0), (0.85, 0.85, 0.87)
 
 DEFAULTS = {
-    'slices': [
-        {'name': 'Work', 'categories': ['Development', 'Office', 'WebBrowser', 'Email',
-                                        'TextEditor', 'Network', 'Chat', 'InstantMessaging']},
+    'slices': [                     # 2 to 6 slices, clockwise from the top
+        {'name': 'Work', 'categories': ['Office', 'WebBrowser', 'Email', 'Chat',
+                                        'InstantMessaging', 'Calendar', 'ContactManagement']},
+        {'name': 'Tools', 'categories': ['TerminalEmulator', 'Development', 'TextEditor',
+                                         'IDE', 'Debugger', 'RemoteAccess', 'Network']},
         {'name': 'Media', 'categories': ['AudioVideo', 'Audio', 'Video', 'Graphics', 'Player',
                                          'Photography', '3DGraphics', 'Viewer']},
         {'name': 'System', 'categories': ['System', 'Settings', 'Utility', 'FileManager',
-                                          'TerminalEmulator', 'FileTransfer', 'Monitor']},
+                                          'FileTransfer', 'Monitor', 'HardwareSettings']},
     ],
     'ring_slots': [3, 4, 6],        # apps per slice on the inner, middle and outer ring
+    'assign': {                     # app (.desktop name) -> slice name, beats the categories
+        'mqttx.desktop': 'Tools', 'kitty.desktop': 'Tools', 'winbox.desktop': 'Tools',
+        'localsend_app.desktop': 'Tools', 'org.localsend.localsend_app.desktop': 'Tools',
+    },
 }
 
 sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
@@ -54,7 +60,9 @@ except ImportError:
 def load_conf():
     c = json.loads(json.dumps(DEFAULTS))
     try:
-        c.update({k: v for k, v in json.loads(CONF.read_text()).items() if k in DEFAULTS})
+        user = json.loads(CONF.read_text())
+        c.update({k: v for k, v in user.items() if k in DEFAULTS and k != 'assign'})
+        c['assign'].update(user.get('assign', {}))
     except (OSError, ValueError):
         pass
     return c
@@ -188,11 +196,16 @@ class Dial(Gtk.Window):
     # -- which app goes where
     def layout_apps(self):
         """per slice: its apps by usage; the first ring_slots[0] on the inner ring, …"""
-        slices = self.conf['slices']
+        slices = self.conf['slices'][:6]
+        names = [s['name'] for s in slices]
         groups = [[] for _ in slices]
         for a in self.all:
-            idx = next((i for i, s in enumerate(slices)
-                        if any(c in s['categories'] for c in a['cats'])), len(slices) - 1)
+            pick = self.conf.get('assign', {}).get(a['id'])
+            if pick in names:
+                idx = names.index(pick)
+            else:
+                idx = next((i for i, s in enumerate(slices)
+                            if any(c in s['categories'] for c in a['cats'])), len(slices) - 1)
             groups[idx].append(a)
         self.groups = [sorted(g, key=lambda a: (-score(self.usage, a['id']), a['name'].lower()))
                        for g in groups]
@@ -290,7 +303,7 @@ class Dial(Gtk.Window):
         return False
 
     def draw_slices(self, cr, cx, cy, rings):
-        slices = self.conf['slices']
+        slices = self.conf['slices'][:6]
         n = len(slices)
         span = 360 / n
         for i, s in enumerate(slices):
