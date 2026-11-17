@@ -57,7 +57,9 @@ LOOK_NUM = {   # key: (min, max)
     'snow_size': (0.2, 6), 'snow_alpha': (0, 4), 'grain': (0, 4), 'scratches': (0, 4),
     'dust': (0, 4), 'scanlines': (0, 3), 'vignette': (0, 1.5), 'flicker': (0, 4),
     'chroma': (0, 8), 'glitch_rate': (0, 6), 'glitch_strength': (0, 3),
+    'cblur': (0, 4), 'bloom': (0, 4),
 }
+CBLUR_MODES = ('lens', 'prism', 'glow')
 LOOK_COLOUR = ('line_colour', 'snow_colour')
 LOOK_BOOL = ('bars', 'crt')
 
@@ -74,6 +76,8 @@ def greeter_look(text):
     out = {}
     for k, v in raw.items():
         if k == 'animal' and v in ANIMALS:
+            out[k] = v
+        elif k == 'cblur_mode' and v in CBLUR_MODES:
             out[k] = v
         elif k in LOOK_NUM and isinstance(v, (int, float)) and not isinstance(v, bool):
             lo, hi = LOOK_NUM[k]

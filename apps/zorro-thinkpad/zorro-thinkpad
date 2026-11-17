@@ -1214,8 +1214,10 @@ LOOK_DEFAULTS = {
     'snow_amount': 140, 'snow_speed': 1.0, 'snow_size': 1.0, 'snow_colour': '#9a9aa0',
     'snow_alpha': 1.0, 'grain': 1.0, 'scratches': 1.0, 'dust': 1.0, 'scanlines': 1.0,
     'vignette': 1.0, 'flicker': 1.0, 'chroma': 1.0, 'glitch_rate': 1.0, 'glitch_strength': 1.0,
-    'bars': True, 'crt': True,
+    'bars': False, 'crt': True, 'cblur': 1.0, 'cblur_mode': 'lens', 'bloom': 0.6,
 }
+CBLUR_MODES = {'lens': 'Lens: colours fan out from the centre', 'prism': 'Prism: sideways colour smear',
+               'glow': 'Glow: soft, with a warm halo'}
 
 
 # ---- the app window ------------------------------------------------------------------------
@@ -2101,7 +2103,16 @@ def cmd_app(select=None):
                           ('Scanlines', scale('scanlines', 0, 3, 0.1, x)),
                           ('Dark corners', scale('vignette', 0, 1.5, 0.05, x)),
                           ('Film flicker', scale('flicker', 0, 4, 0.1, x))]))
-            box.add(heading('Chromatic split and glitches', 'Chromatic'))
+            kind = Gtk.ComboBoxText()
+            for k, label in CBLUR_MODES.items():
+                kind.append(k, label)
+            kind.set_active_id(L['cblur_mode'])
+            kind.connect('changed', lambda w: setv('cblur_mode', w.get_active_id()))
+            box.add(heading('Chromatic blur', 'Chromatic blur'))
+            box.add(grid([('Kind', kind), ('Strength', scale('cblur', 0, 4, 0.05, x)),
+                          ('Coloured glow', scale('bloom', 0, 4, 0.05, x))]))
+            box.add(note('The light splits into its colours and smears, like through a lens.'))
+            box.add(heading('Chromatic split and glitches', 'Glitches'))
             box.add(grid([('Colour split', scale('chroma', 0, 8, 0.1, x)),
                           ('Glitches: how often', scale('glitch_rate', 0, 6, 0.1, x)),
                           ('Glitches: how strong', scale('glitch_strength', 0, 3, 0.1, x)),
