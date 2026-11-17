@@ -31,14 +31,14 @@ DEFAULTS = {
     'size': 1.0,                # particle size factor
     'glow': True,               # soft halo around the nearest particles
     'spill': 0,                 # px the particles drift out of the box onto the screen
-    'opacity': 0.94,            # box background, 0 = invisible, 1 = solid black
+    'opacity': 0.0,             # box background: none, only particles (1 = solid black)
     'particle_opacity': 1.0,    # particles
     'bar_opacity': 1.0,         # level bar of the indicator
     'osd_seconds': 1.5,         # how long the indicator stays
 }
 PROFILES = {
     'overlay': DEFAULTS,
-    'orb': dict(DEFAULTS, amount=5.0, speed=1.0, opacity=0.85),
+    'orb': dict(DEFAULTS, amount=5.0, speed=1.0),
     'app': dict(DEFAULTS, enabled=False, amount=2.0, speed=0.8, opacity=1.0,
                 particle_opacity=0.7, glow=False),
 }

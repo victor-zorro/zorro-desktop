@@ -14,8 +14,9 @@
     line_colour: '#e6e6ec', density: 1, size: 1, swim_speed: 1,
     pass_seconds: 70, gap_seconds: 0, far: 0.33,
     snow_amount: 140, snow_speed: 1, snow_size: 1, snow_colour: '#9a9aa0', snow_alpha: 1,
-    grain: 1, scratches: 1, dust: 1, scanlines: 1, vignette: 1, flicker: 1,
-    chroma: 1, glitch_rate: 1, glitch_strength: 1, bars: false, crt: true,
+    // defaults = the "Chromatic sea" preset (theme/presets.json)
+    grain: 0.6, scratches: 0.25, dust: 0.25, scanlines: 0.6, vignette: 1, flicker: 0.3,
+    chroma: 0.6, glitch_rate: 0.15, glitch_strength: 0.5, bars: false, crt: true,
     // chromatic blur: the light splits into its colours and smears like through a lens
     cblur: 1, cblur_mode: 'lens',  // lens (from the centre outward), prism (sideways), glow
     bloom: 0.6,                    // soft coloured glow around the lines
@@ -248,7 +249,7 @@
       gl_FragColor=vec4(col,1.);}`;
   let bgProg = null, bgU = {}, bgTex = null, bgFbo = null, bgW = 0, bgH = 0, bgLast = -1e9;
 
-  let prog, U = {}, tex;
+  let prog, U = {}, tex, quadBuf;
   const UNIFORMS = ['uRes','uTime','uStatic','uBurst','uBars','uPower','uSeed','uWhale',
                     'uGrain','uScratch','uDust','uScan','uVig','uFlick','uChroma','uBarsOn',
                     'uCBlur','uCMode','uBloom','uBgOn','uBgStrength','uBg'];
@@ -266,6 +267,7 @@
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
     gl.useProgram(prog);
     const buf = gl.createBuffer();
+    quadBuf = buf;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
     const loc = gl.getAttribLocation(prog, 'p');
@@ -318,6 +320,7 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER, bgFbo);
       gl.viewport(0, 0, w, h);
       gl.useProgram(bgProg);
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
       const loc = gl.getAttribLocation(bgProg, 'p');
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
@@ -649,6 +652,135 @@
   }
   makeSnow();
 
+  // the animal's lines for this frame, projected and sorted into brightness buckets;
+  // false while the water is empty
+  function buildAnimal(t, now) {
+    if (pass && now - pass.t0 > pass.dur * 1000) {        // the animal has gone
+      pass = null;
+      nextPassAt = now + Math.max(0, +cfg.gap_seconds || 0) * 1000;
+    }
+    if (!pass) {
+      if (now < nextPassAt) return false;                  // empty water for a while
+      newPass(now);
+    }
+    const m = MODELS[pass.animal](t);
+    const savedLen = pass.len;                           // per-animal scale and the size setting
+    pass.len = savedLen * (m.scale || 1) * Math.max(.2, +cfg.size || 1);
+    const rr = .12 * pass.len;
+    const P = makeXform(t, now, m.tilt || 0);
+    pass.len = savedLen;
+    for (const b of buckets) b.length = 0;
+    for (const ln of m.lines) {
+      let prev = null;
+      for (const pt of ln) { const q = P(pt); if (prev) seg(prev, q, rr); prev = q; }
+    }
+    return true;
+  }
+
+  // ---------- GPU scene: lines and snow drawn by WebGL into a texture --------
+  // (the 2D canvas path below drew thousands of lines on the CPU and uploaded the
+  //  whole picture every frame; this sends only the coordinates)
+  const LVS = `attribute vec2 p; attribute vec4 c; attribute float s; varying vec4 vc;
+    void main(){ vc = c; gl_PointSize = s; gl_Position = vec4(p, 0., 1.); }`;
+  const LFS = `precision mediump float; varying vec4 vc;
+    void main(){ gl_FragColor = vec4(vc.rgb * vc.a, vc.a); }`;
+  let lineProg = null, lineBuf = null, lineL = {}, sceneTex = null, sceneFbo = null, sceneW = 0, sceneH = 0;
+  let verts = new Float32Array(7 * 4096);
+  function initScene() {
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+    lineProg = gl.createProgram();
+    gl.attachShader(lineProg, sh(gl.VERTEX_SHADER, LVS));
+    gl.attachShader(lineProg, sh(gl.FRAGMENT_SHADER, LFS));
+    gl.linkProgram(lineProg);
+    if (!gl.getProgramParameter(lineProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(lineProg));
+    for (const n of ['p', 'c', 's']) lineL[n] = gl.getAttribLocation(lineProg, n);
+    lineBuf = gl.createBuffer();
+    sceneTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    sceneFbo = gl.createFramebuffer();
+  }
+  function drawSceneGL(t, now, alpha) {
+    if (!lineProg) initScene();
+    const w = wc.width, h = wc.height;
+    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
+    if (w !== sceneW || h !== sceneH) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex, 0);
+      sceneW = w; sceneH = h;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (alpha > 0) {
+      let n = 0;
+      const need = 7 * (SNOW.length + 2 * 64000);
+      if (verts.length < need) verts = new Float32Array(need);
+      const put = (x, y, r, g, b, a, s) => {           // canvas pixels -> clip space
+        verts[n++] = x / w * 2 - 1; verts[n++] = 1 - y / h * 2;
+        verts[n++] = r; verts[n++] = g; verts[n++] = b; verts[n++] = a; verts[n++] = s;
+      };
+      // marine snow as points
+      const [sr, sg, sb] = hex(cfg.snow_colour).map((v) => v / 255);
+      const sv = cfg.snow_speed, ssz = cfg.snow_size, sa = cfg.snow_alpha;
+      for (const p of SNOW) {
+        const yy = (p.y - t * (.004 + .01 * p.z) * sv) % 1;
+        const xx = ((p.x + Math.sin(t * .1 + p.s * 6) * .01) % 1 + 1) % 1;
+        put(xx * w, (yy < 0 ? yy + 1 : yy) * h, sr, sg, sb,
+            Math.min(1, alpha * (.08 + .25 * p.z) * sa), Math.max(1, (.6 + p.z * 1.4) * ssz));
+      }
+      const nSnow = n / 7;
+      // the animal as lines, nearer = brighter
+      if (buildAnimal(t, now)) {
+        const [cr, cg, cb] = hex(cfg.line_colour).map((v) => v / 255);
+        const fade = pass.far ? .45 : 1;
+        for (let i = 0; i < NB; i++) {
+          const b = buckets[i];
+          const f = (70 + 170 * (i / (NB - 1))) / 240;
+          const a = alpha * fade * (.25 + .75 * (i / (NB - 1)));
+          if (verts.length < n + b.length / 4 * 14 + 14) {
+            const bigger = new Float32Array((n + b.length / 4 * 14) * 2); bigger.set(verts); verts = bigger;
+          }
+          for (let k = 0; k < b.length; k += 4) {
+            put(b[k], b[k + 1], cr * f, cg * f, cb * f, a, 1);
+            put(b[k + 2], b[k + 3], cr * f, cg * f, cb * f, a, 1);
+          }
+        }
+      }
+      gl.useProgram(lineProg);
+      gl.bindBuffer(gl.ARRAY_BUFFER, lineBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, verts.subarray(0, n), gl.STREAM_DRAW);
+      gl.enableVertexAttribArray(lineL.p);
+      gl.enableVertexAttribArray(lineL.c);
+      gl.enableVertexAttribArray(lineL.s);
+      gl.vertexAttribPointer(lineL.p, 2, gl.FLOAT, false, 28, 0);
+      gl.vertexAttribPointer(lineL.c, 4, gl.FLOAT, false, 28, 8);
+      gl.vertexAttribPointer(lineL.s, 1, gl.FLOAT, false, 28, 24);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.POINTS, 0, nSnow);
+      if (n / 7 > nSnow) gl.drawArrays(gl.LINES, nSnow, n / 7 - nSnow);
+      gl.disable(gl.BLEND);
+      gl.disableVertexAttribArray(lineL.c);
+      gl.disableVertexAttribArray(lineL.s);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    // back to the main program and its full-screen quad
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    const l2 = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(l2);
+    gl.vertexAttribPointer(l2, 2, gl.FLOAT, false, 0, 0);
+  }
+
+  // canvas fallback (no WebGL): the same picture, drawn on the CPU
   function drawScene(t, now, alpha) {
     wx.globalAlpha = 1;
     wx.fillStyle = '#000';
@@ -666,25 +798,7 @@
       wx.fillRect(xx * wc.width, (yy < 0 ? yy + 1 : yy) * wc.height, r, r);
     }
 
-    if (pass && now - pass.t0 > pass.dur * 1000) {        // the animal has gone
-      pass = null;
-      nextPassAt = now + Math.max(0, +cfg.gap_seconds || 0) * 1000;
-    }
-    if (!pass) {
-      if (now < nextPassAt) return;                        // empty water for a while
-      newPass(now);
-    }
-    const m = MODELS[pass.animal](t);
-    const savedLen = pass.len;                           // per-animal scale and the size setting
-    pass.len = savedLen * (m.scale || 1) * Math.max(.2, +cfg.size || 1);
-    const rr = .12 * pass.len;
-    const P = makeXform(t, now, m.tilt || 0);
-    pass.len = savedLen;
-    for (const b of buckets) b.length = 0;
-    for (const ln of m.lines) {
-      let prev = null;
-      for (const pt of ln) { const q = P(pt); if (prev) seg(prev, q, rr); prev = q; }
-    }
+    if (!buildAnimal(t, now)) return;
 
     // stroke buckets in the line colour, nearer = brighter
     const [cr, cg, cb] = hex(cfg.line_colour);
@@ -769,9 +883,11 @@
     let b = Math.max(burst, T < 3.6 ? (1 - ss(2.6, 3.6, T)) * .8 : 0);
     if (powerTarget === 0) { b = Math.max(b, .7); stat = Math.max(stat, .4 * (1 - power)); }
 
-    drawScene(t, now, ss(2.9, 5.0, T));
+    if (!glOK) drawScene(t, now, ss(2.9, 5.0, T));
 
     if (glOK) {
+      gl.activeTexture(gl.TEXTURE0);
+      drawSceneGL(t, now, ss(2.9, 5.0, T));             // lines + snow on the GPU
       const bgOn = drawBackground(t, now);
       gl.uniform1f(U.uBgOn, bgOn ? 1 : 0);
       gl.uniform1f(U.uBgStrength, +cfg.bg_strength);
@@ -794,8 +910,7 @@
       gl.uniform1f(U.uCMode, CBLUR_MODES[cfg.cblur_mode] ?? 0);
       gl.uniform1f(U.uBloom, +cfg.bloom);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wc);
+      gl.bindTexture(gl.TEXTURE_2D, sceneTex);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else if (powerTarget === 0 && powerCb) {
       const cb = powerCb; powerCb = null; cb();
