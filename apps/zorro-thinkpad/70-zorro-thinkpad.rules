@@ -1,3 +1,4 @@
+# 70-: must run before 73-seat-late.rules, which turns TAG+="uaccess" into the user ACL
 # zorro-thinkpad: let the logged-in user change brightness and the ThinkPad LEDs,
 # and read only the "ThinkPad Extra Buttons" keys (F4, F9-F11, Fn+PrtSc) - not the keyboard.
 ACTION=="add", SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys%p/brightness", RUN+="/bin/chmod g+w /sys%p/brightness"

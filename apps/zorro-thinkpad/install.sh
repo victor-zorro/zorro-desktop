@@ -7,7 +7,8 @@ set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "run with sudo"; exit 1; }
 here=$(dirname "$(realpath "$0")")
 
-install -Dm644 "$here/90-zorro-thinkpad.rules" /etc/udev/rules.d/90-zorro-thinkpad.rules
+rm -f /etc/udev/rules.d/90-zorro-thinkpad.rules            # old name, ran too late
+install -Dm644 "$here/70-zorro-thinkpad.rules" /etc/udev/rules.d/70-zorro-thinkpad.rules
 udevadm control --reload
 udevadm trigger --action=add --subsystem-match=backlight --subsystem-match=leds
 udevadm trigger --action=change --subsystem-match=input

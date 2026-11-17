@@ -32,7 +32,7 @@ a tiny `zorro-thinkpad key NAME` that sends one message over a unix socket.
 | File | What |
 |---|---|
 | `zorro-thinkpad` | key actions, `keyd`, indicator, (later) the app |
-| `90-zorro-thinkpad.rules` | udev: brightness + ThinkPad LEDs writable for group video, Extra Buttons readable |
+| `70-zorro-thinkpad.rules` | udev: brightness + ThinkPad LEDs writable for group video, Extra Buttons readable |
 | `install.sh` | system part (sudo): the udev rule |
 | `install-user.sh` | user part: links into ~/.local |
 | `keytest` | key code tester |
