@@ -4,8 +4,9 @@ Google Drive for the Openbox desktop: several accounts, pick folders to keep on 
 optional online mount per account. rclone does the work underneath.
 
 - **App** (rofi: *Drive*): accounts on the left (+ Account opens Google sign-in), synced folders
-  on the right with Sync / Open / Resync / Remove per folder; *+ Folder* browses My Drive and
-  Shared drives.
+  on the right with Sync / Open / Resync / Remove per folder. *Choose folders…* shows the folder
+  tree of My Drive and the Shared drives with a checkbox per folder; every ticked folder becomes
+  its own entry with its own Sync button (ticking a folder includes its subfolders).
 - **Two-way sync** per folder with `rclone bisync`; conflicts keep both versions.
 - **Battery friendly**: saved files go up ~30 s after the last change (inotify, no polling);
   Drive → laptop runs every 30 min **only on the charger**; on battery press Sync.
@@ -13,7 +14,7 @@ optional online mount per account. rclone does the work underneath.
 
 | File | What |
 |---|---|
-| `zorro-drive` | app + CLI: `sync --folder ID / --all [--resync]`, `watch`, `status` |
+| `zorro-drive` | app + CLI: `sync --folder ID [--folder ID…] / --all [--resync]`, `watch`, `status` |
 | `systemd/zorro-drive-watch.service` | uploads local saves |
 | `systemd/zorro-drive-sync.{service,timer}` | 30-min sync, `ConditionACPower=true` |
 | `systemd/zorro-drive-mount@.service` | online mount of one account |
