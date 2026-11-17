@@ -2161,7 +2161,7 @@ def cmd_app(select=None):
 
             icon_op = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.3, 1, 0.02)
             icon_op.set_hexpand(True)
-            icon_op.set_value(float(load_conf().get('icon_opacity', 0.82)))
+            icon_op.set_value(float(load_conf().get('icon_opacity', 0.5)))
             icon_op.set_value_pos(Gtk.PositionType.RIGHT)
             icon_op.connect('format-value', lambda w, v: f'{v * 100:.0f}%')
             build = Path(os.path.realpath(__file__)).parent.parent / 'zorro-icons' / 'build-icons'

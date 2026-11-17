@@ -8,7 +8,7 @@ icons the mapping uses are kept here).
   actions, …) and app icons (Firefox → globe, kitty → terminal, VLC → clapperboard, …) →
   Lucide names. Every name also gets a `-symbolic` twin. Anything not mapped falls back to
   Adwaita.
-- `build-icons [--opacity 0.82]` writes `~/.local/share/icons/Zorro-Lucide` (install.sh runs
+- `build-icons [--opacity 0.5]` writes `~/.local/share/icons/Zorro-Lucide` (install.sh runs
   it; the Zorro app → Desktop → Text & colours sets the transparency) and user copies of
   .desktop files that point at an icon file (Blender).
 - GTK uses it through `gtk-icon-theme-name` in `config/gtk`. Google apps and WhatsApp

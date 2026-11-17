@@ -5,7 +5,7 @@ Made from the Lucide icons in lucide/ (ISC, see lucide/LICENSE) with mapping.jso
 standard icon names and app icons become Lucide line icons; anything not mapped falls back
 to Adwaita. Output: ~/.local/share/icons/Zorro-Lucide (GTK picks it up by name).
 
-  build-icons [--opacity 0.82]     (the Zorro app → Desktop → Text & colours runs this)
+  build-icons [--opacity 0.5]     (the Zorro app → Desktop → Text & colours runs this)
 Also writes user overrides for apps that point at an icon file instead of a name (Blender).
 """
 import configparser
@@ -58,7 +58,7 @@ def build(opacity):
 
 
 def main():
-    opacity = 0.82
+    opacity = 0.5
     if '--opacity' in sys.argv:
         opacity = min(1.0, max(0.2, float(sys.argv[sys.argv.index('--opacity') + 1])))
     build(opacity)
