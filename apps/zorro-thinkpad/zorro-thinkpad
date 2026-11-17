@@ -2419,7 +2419,16 @@ def cmd_app(select=None):
             def save():
                 write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
-            box.add(heading('Slices (up to six, clockwise from the top)', 'Slices'))
+            box.add(heading('Where the dial opens', 'Place'))
+            place = Gtk.ComboBoxText(halign=Gtk.Align.START)
+            place.append('orb', 'Fanning out from the clock (info circle)')
+            place.append('centre', 'A full circle in the middle of the screen')
+            place.set_active_id(c.get('anchor', 'orb'))
+            place.connect('changed', lambda w: (c.__setitem__('anchor', w.get_active_id()), save()))
+            box.add(place)
+            box.add(note('From the clock, the rings fan into the screen: the apps you use most '
+                         'sit right next to the clock, the outer rings hold more.'))
+            box.add(heading('Slices (up to six)', 'Slices'))
             g = Gtk.Grid(column_spacing=10, row_spacing=6)
             g.attach(Gtk.Label(label='Name', xalign=0), 0, 0, 1, 1)
             g.attach(Gtk.Label(label='App categories (comma separated)', xalign=0), 1, 0, 1, 1)

@@ -43,7 +43,8 @@ DEFAULTS = {
         {'name': 'System', 'categories': ['System', 'Settings', 'Utility', 'FileManager',
                                           'FileTransfer', 'Monitor', 'HardwareSettings']},
     ],
-    'ring_slots': [3, 4, 6],        # apps per slice on the inner, middle and outer ring
+    'ring_slots': [3, 4, 6],        # at most this many apps per slice on each ring
+    'anchor': 'orb',                # orb: fans out from the info circle's clock; centre
     'assign': {                     # app (.desktop name) -> slice name, beats the categories
         'mqttx.desktop': 'Tools', 'kitty.desktop': 'Tools', 'winbox.desktop': 'Tools',
         'localsend_app.desktop': 'Tools', 'org.localsend.localsend_app.desktop': 'Tools',
@@ -123,6 +124,20 @@ def apps():
     return out
 
 
+ORB_CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-orb' / 'config.json'
+
+
+def orb_conf():
+    """where the info circle is (its size, corner and margin)"""
+    c = {'size': 240, 'corner': 'bottom-right', 'margin': 28}
+    try:
+        user = json.loads(ORB_CONF.read_text())
+        c.update({k: user[k] for k in c if k in user})
+    except (OSError, ValueError):
+        pass
+    return c
+
+
 def toggle_running():
     """already open: close it and stop (Super pressed again)"""
     try:
@@ -145,7 +160,10 @@ class Dial(Gtk.Window):
         self.theme = Gtk.IconTheme.get_default()
         self.icons = {}
         disp = Gdk.Display.get_default()
-        mon = disp.get_monitor_at_point(*self.pointer()) or disp.get_primary_monitor() or disp.get_monitor(0)
+        if self.conf.get('anchor') == 'orb':       # the info circle lives on the primary screen
+            mon = disp.get_primary_monitor() or disp.get_monitor(0)
+        else:
+            mon = disp.get_monitor_at_point(*self.pointer()) or disp.get_primary_monitor() or disp.get_monitor(0)
         g = mon.get_geometry()
         self.geo = g
         scr = self.get_screen()
@@ -278,41 +296,76 @@ class Dial(Gtk.Window):
         cr.restore()
         return False
 
-    def on_draw(self, w, cr):
+    def fan(self):
+        """(cx, cy, hub radius, first angle, last angle, rings) in window coordinates.
+        orb: the hub is the info circle's clock and the rings fan out from its corner into
+        the screen (120 degrees); centre: full circle in the middle of the screen."""
         W, H = self.geo.width, self.geo.height
-        cx, cy = W / 2, H / 2
-        rings = [(92, 168), (168, 240), (240, 312)]
+        if self.conf.get('anchor') == 'orb':
+            orb = orb_conf()
+            d, m, corner = orb['size'], orb['margin'], orb['corner']
+            cx = m + d / 2 if 'left' in corner else W - m - d / 2
+            cy = m + d / 2 if 'top' in corner else H - m - d / 2
+            mid = {'bottom-right': 225, 'bottom-left': 315, 'top-right': 135, 'top-left': 45}.get(corner, 225)
+            hub = d / 2
+            a0, a1 = mid - 60, mid + 60
+        else:
+            cx, cy, hub, a0, a1 = W / 2, H / 2, 86, -90, 270
+        rings = [(hub + 12, hub + 96), (hub + 96, hub + 180), (hub + 180, hub + 270)]
+        return cx, cy, hub, a0, a1, rings
+
+    def on_draw(self, w, cr):
+        cx, cy, hub, a0, a1, rings = self.fan()
         self.slots = []
         if self.filter:
-            self.draw_search(cr, cx, cy, rings)
+            self.draw_search(cr, cx, cy, rings, a0, a1)
         else:
-            self.draw_slices(cr, cx, cy, rings)
-        # centre: clock, or the hovered app's name
+            self.draw_slices(cr, cx, cy, rings, a0, a1)
+        outer = rings[-1][1]
         cr.new_path()
-        cr.arc(cx, cy, 86, 0, 2 * math.pi)
-        cr.set_source_rgba(0, 0, 0, 0.75)
+        cr.arc(cx, cy, outer, math.radians(a0), math.radians(a1))
+        for col, dx in ((RED, -1.5), (CYAN, 1.5)):          # chromatic outer rim
+            cr.save()
+            cr.translate(dx, 0)
+            cr.new_path()
+            cr.arc(cx, cy, outer, math.radians(a0), math.radians(a1))
+            cr.set_source_rgba(*col, 0.6)
+            cr.set_line_width(1.2)
+            cr.stroke()
+            cr.restore()
+        # the hub: the clock (over the info circle), or the hovered app's name
+        cr.new_path()
+        cr.arc(cx, cy, hub - 4, 0, 2 * math.pi)
+        cr.set_source_rgba(0, 0, 0, 0.8)
         cr.fill()
-        self.chroma_circle(cr, cx, cy, 86)
-        self.chroma_circle(cr, cx, cy, 312)
-        self.text(cr, time.strftime('%H:%M'), cx, cy - 10, 26, split=2)
+        self.chroma_circle(cr, cx, cy, hub - 4)
+        k = hub / 120
+        self.text(cr, time.strftime('%H:%M'), cx, cy - 10 * k, max(14, 26 * k), split=2)
         label = self.hover['name'] if self.hover else (f'“{self.filter}”' if self.filter else
                                                        time.strftime('%A %-d %B'))
-        self.text(cr, label[:22], cx, cy + 24, 10, bold=False, alpha=0.9, split=1)
-        self.text(cr, 'type to search · Enter starts · Esc closes', cx, cy + 340, 9,
+        self.text(cr, label[:22], cx, cy + 24 * k, max(8, 10 * k), bold=False, alpha=0.9, split=1)
+        am = math.radians((a0 + a1) / 2)
+        self.text(cr, 'type to search · Enter starts · Esc closes',
+                  cx + math.cos(am) * (outer + 70), cy + math.sin(am) * (outer + 70), 9,
                   bold=False, alpha=0.5, split=0)
         return False
 
-    def draw_slices(self, cr, cx, cy, rings):
+    @staticmethod
+    def fits(rm, span_deg, size):
+        """how many icons of this size fit on an arc"""
+        return max(1, int(rm * math.radians(span_deg) / (size * 1.45)))
+
+    def draw_slices(self, cr, cx, cy, rings, a0, a1):
         slices = self.conf['slices'][:6]
         n = len(slices)
-        span = 360 / n
+        span = (a1 - a0) / n
         for i, s in enumerate(slices):
-            start = -90 - span / 2 + i * span
+            start = a0 + i * span
             for k, (ri, ro) in enumerate(rings):
-                a0, a1 = math.radians(start + 1), math.radians(start + span - 1)
+                b0, b1 = math.radians(start + 0.6), math.radians(start + span - 0.6)
                 cr.new_path()
-                cr.arc(cx, cy, ro - 2, a0, a1)
-                cr.arc_negative(cx, cy, ri + 2, a1, a0)
+                cr.arc(cx, cy, ro - 2, b0, b1)
+                cr.arc_negative(cx, cy, ri + 2, b1, b0)
                 cr.close_path()
                 cr.set_source_rgba(0.03, 0.03, 0.05, 0.55)
                 cr.fill_preserve()
@@ -320,22 +373,27 @@ class Dial(Gtk.Window):
                 cr.set_line_width(1)
                 cr.stroke()
             am = math.radians(start + span / 2)
-            self.text(cr, s['name'].upper(), cx + math.cos(am) * 338, cy + math.sin(am) * 338,
-                      10, split=1.4)
+            r_lab = rings[-1][1] + 20
+            self.text(cr, s['name'].upper(), cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab,
+                      9, split=1.4)
             group = list(self.groups[i])
             for k, (ri, ro) in enumerate(rings):
-                cnt = self.conf['ring_slots'][k]
+                size = (44, 36, 30)[k]
+                rm = (ri + ro) / 2
+                cnt = min(self.conf['ring_slots'][k], self.fits(rm, span, size)) \
+                    if self.conf.get('anchor') != 'orb' else self.fits(rm, span, size)
                 row, group = group[:cnt], group[cnt:]
-                self.place(cr, cx, cy, row, (ri + ro) / 2, start, span, (44, 36, 30)[k])
+                self.place(cr, cx, cy, row, rm, start, span, size)
 
-    def draw_search(self, cr, cx, cy, rings):
+    def draw_search(self, cr, cx, cy, rings, a0, a1):
         found = self.matches()
-        slots = [6, 10, 14]
         for k, (ri, ro) in enumerate(rings):
-            row, found = found[:slots[k]], found[slots[k]:]
+            size = (44, 36, 30)[k]
+            rm = (ri + ro) / 2
+            cnt = self.fits(rm, a1 - a0, size)
+            row, found = found[:cnt], found[cnt:]
             if row:
-                self.place(cr, cx, cy, row, (ri + ro) / 2, -90 - 180 / slots[k], 360, (44, 36, 30)[k],
-                           full=slots[k])
+                self.place(cr, cx, cy, row, rm, a0, a1 - a0, size, full=cnt)
 
     def place(self, cr, cx, cy, row, rm, start, span, size, full=None):
         cnt = full or len(row)
@@ -369,9 +427,12 @@ class Dial(Gtk.Window):
         if a and ev.button == 1:
             self.launch(a)
         elif not a:
-            dx, dy = ev.x - self.geo.width / 2, ev.y - self.geo.height / 2
-            if dx * dx + dy * dy > 320 ** 2:   # outside the dial: close
-                self.close_dial()
+            cx, cy, hub, a0, a1, rings = self.fan()
+            dx, dy = ev.x - cx, ev.y - cy
+            ang = math.degrees(math.atan2(dy, dx)) % 360
+            inside_angle = any(a0 <= ang + k <= a1 for k in (0, 360, -360))
+            if dx * dx + dy * dy > rings[-1][1] ** 2 or not inside_angle:
+                self.close_dial()           # outside the dial: close
 
     def on_key(self, _w, ev):
         k = Gdk.keyval_name(ev.keyval) or ''
