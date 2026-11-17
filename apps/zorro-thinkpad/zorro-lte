@@ -1,0 +1,101 @@
+#!/usr/bin/python3 -I
+"""zorro-lte: wake the built-in Intel XMM7360 LTE modem and show its state (run as root).
+
+The modem stays silent (and the kernel logs "iosm: msg timeout") until it is started over
+its RPC control port /dev/wwan0xmmrpc0 and Lenovo's FCC lock is answered. That part uses
+the RPC code of the xmm7360-pci project (xmm7360/, see NOTICE).
+
+  zorro-lte wake     start the modem's services, FCC unlock, radio on
+  zorro-lte status   wake, then ask over AT: SIM, operator, signal, registration
+Later: up APN / down / sms (needs a SIM).
+"""
+import os
+import select
+import signal
+import sys
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'xmm7360'))
+AT_PORTS = ['/dev/wwan0at0', '/dev/wwan0at1']
+
+
+class Timeout(Exception):
+    pass
+
+
+def step(seconds):
+    def on_alarm(*_):
+        raise Timeout()
+    signal.signal(signal.SIGALRM, on_alarm)
+    signal.alarm(seconds)
+
+
+def wake():
+    import rpc
+    step(30)
+    try:
+        r = rpc.XMMRPC()
+        for call in ('UtaMsSmsInit', 'UtaMsCbsInit', 'UtaMsNetOpen', 'UtaMsCallCsInit',
+                     'UtaMsCallPsInitialize', 'UtaMsSsInit', 'UtaMsSimOpenReq'):
+            step(30)
+            r.execute(call)
+        step(30)
+        rpc.do_fcc_unlock(r)           # challenge-response, nothing stored in the modem
+        step(60)
+        rpc.UtaModeSet(r, 1)           # radio on (leaves the FCC "flight mode")
+        signal.alarm(0)
+        print('\n== modem awake, FCC unlocked, radio on')
+        return r
+    except Timeout:
+        print('\n!! the modem did not answer within the time limit')
+    except Exception as e:             # noqa: BLE001 - report, don't crash
+        print(f'\n!! {type(e).__name__}: {e}')
+    signal.alarm(0)
+    return None
+
+
+def at(fd, cmd, wait=4.0):
+    os.write(fd, (cmd + '\r').encode())
+    out, end = b'', time.time() + wait
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], 0.3)
+        if r:
+            out += os.read(fd, 4096)
+            if out.rstrip().endswith((b'OK', b'ERROR')) or b'CME ERROR' in out:
+                break
+    return out.decode(errors='replace').strip().replace('\r', ' ').replace('\n', ' ')
+
+
+def status():
+    for port in AT_PORTS:
+        try:
+            fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError as e:
+            print(f'{port}: {e.strerror}')
+            continue
+        first = at(fd, 'AT', 6)
+        print(f'== {port}: {"answers" if first else "silent"}')
+        if first:
+            for cmd in ('ATI', 'AT+CGMR', 'AT+CFUN?', 'AT+CPIN?', 'AT+COPS?', 'AT+CSQ',
+                        'AT+CREG?', 'AT+CMGF?'):
+                print(f'   {cmd:12} {at(fd, cmd)}')
+        os.close(fd)
+
+
+def main():
+    if os.geteuid() != 0:
+        sys.exit('run with sudo')
+    a = sys.argv[1:]
+    if a == ['wake']:
+        sys.exit(0 if wake() else 1)
+    elif a == ['status']:
+        wake()
+        time.sleep(2)
+        status()
+    else:
+        print(__doc__.strip())
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
