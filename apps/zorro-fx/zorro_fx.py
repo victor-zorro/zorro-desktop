@@ -18,7 +18,7 @@ CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro
 DEFAULTS = {
     'pattern': 'float',     # see PATTERNS
     'colour': 'snow',       # see COLOURS
-    'amount': 6.0,          # particles per 1000 px² of overlay
+    'amount': 6.0,          # particles per 1000 px² of overlay (0-60)
     'speed': 1.6,           # 1 = calm
     'size': 1.0,            # particle size factor
     'glow': True,           # soft halo around the nearest particles
@@ -182,7 +182,10 @@ class Snow:
                 cr.arc(x, y, rad * 3, 0, 6.283)
                 cr.fill()
             cr.set_source_rgba(*p['c'], alpha)
-            cr.arc(x, y, rad, 0, 6.283)
+            if rad < 1.5:                               # tiny: a square is cheaper
+                cr.rectangle(x - rad, y - rad, 2 * rad, 2 * rad)
+            else:
+                cr.arc(x, y, rad, 0, 6.283)
             cr.fill()
         cr.restore()
         self.outline(cr, W, H)

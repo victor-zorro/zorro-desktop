@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Blink text once as Morse code on the ThinkPad lid dot (no sudo needed).
+# For a text that repeats all the time: ThinkPad app -> Lights -> Morse code.
+exec zorro-thinkpad morse "$@"

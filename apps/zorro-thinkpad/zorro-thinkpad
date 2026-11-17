@@ -8,6 +8,7 @@
                             the indicator window, the keys X cannot see (F4, F9, F10,
                             F11, Fn+PrtSc) and the keyboard light (Fn+Space)
   zorro-thinkpad osd ICON VALUE [TEXT]   show the indicator (testing)
+  zorro-thinkpad morse TEXT  blink TEXT once as Morse code on the red lid dot
 
 Which key arrives where (measured with ./keytest on a T14 Gen 1 AMD):
   X / Openbox : F1-F3 volume, F5-F6 brightness, F7 display, F8 airplane, F12 star
@@ -289,6 +290,7 @@ DOT_MODES = {                       # mode: (label, trigger or None = steady on/
     'charging': ('Blinks while charging, on when full', 'BAT0-charging-blink-full-solid'),
     'ac': ('On only on the charger', 'AC-online'),
     'disk': ('Flickers with disk activity', 'disk-activity'),
+    'morse': ('Morse code: your own word or sentence', None),     # keyd blinks it
 }
 KBD_LEVELS = {0: 'Off', 1: 'Low', 2: 'High'}
 
@@ -326,6 +328,65 @@ def update_conf(section, **kv):
     c.setdefault(section, {}).update(kv) if section else c.update(kv)
     save_conf(c)
     return c
+
+
+
+MORSE = {
+    'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.', 'G': '--.',
+    'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..', 'M': '--', 'N': '-.',
+    'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.', 'S': '...', 'T': '-', 'U': '..-',
+    'V': '...-', 'W': '.--', 'X': '-..-', 'Y': '-.--', 'Z': '--..',
+    '0': '-----', '1': '.----', '2': '..---', '3': '...--', '4': '....-', '5': '.....',
+    '6': '-....', '7': '--...', '8': '---..', '9': '----.',
+    '.': '.-.-.-', ',': '--..--', '?': '..--..', '!': '-.-.--', '/': '-..-.', '-': '-....-',
+    '@': '.--.-.', ':': '---...', "'": '.----.', '=': '-...-', '+': '.-.-.', '&': '.-...',
+}
+MORSE_TEXT, MORSE_UNIT = 'SOS', 0.15
+
+
+def morse_timeline(text):
+    """[(on, units)]: dot 1, dash 3, gap in a letter 1, between letters 3, between words 7"""
+    out = []
+    for word in text.upper().split():
+        for letter in word:
+            code = MORSE.get(letter)
+            if not code:
+                continue
+            for sym in code:
+                out += [(True, 1 if sym == '.' else 3), (False, 1)]
+            out[-1] = (False, 3)
+        if out:
+            out[-1] = (False, 7)
+    return out
+
+
+def play_morse(text, unit, keep_going=lambda: True):
+    """blink text once on the lid dot; stops early when keep_going() turns False"""
+    bright = DOT_LED / 'brightness'
+    mx = (DOT_LED / 'max_brightness').read_text().strip()
+    for on, units in morse_timeline(text):
+        if not keep_going():
+            return False
+        bright.write_text(mx if on else '0')
+        time.sleep(units * unit)
+    return True
+
+
+def morse_loop():
+    """keyd thread: while the lid dot is in Morse mode, repeat the text (3 s pause between)"""
+    while True:
+        li = load_conf().get('lights', {})
+        if li.get('dot') != 'morse':
+            time.sleep(1)
+            continue
+        text = li.get('morse_text') or MORSE_TEXT
+        unit = min(1.0, max(0.05, float(li.get('morse_unit', MORSE_UNIT))))
+        same = lambda: load_conf().get('lights', {}) == li     # setting changed: restart
+        try:
+            if play_morse(text, unit, same):
+                time.sleep(3)
+        except OSError:
+            time.sleep(30)                                   # no permission yet
 
 
 def apply_lights():
@@ -545,6 +606,7 @@ def cmd_keyd():
                     warned = True
                 time.sleep(30)
     threading.Thread(target=evdev_reader, daemon=True).start()
+    threading.Thread(target=morse_loop, daemon=True).start()
 
     # Fn+Space: the firmware changes the keyboard light and pokes brightness_hw_changed
     hw = KBD_LED / 'brightness_hw_changed'
@@ -878,7 +940,7 @@ def cmd_app():
             rows = [
                 ('Pattern', combo('pattern', zorro_fx.PATTERNS)),
                 ('Colour', combo('colour', {k: v[0] for k, v in zorro_fx.COLOURS.items()})),
-                ('Amount', scale('amount', 0, 20, 0.5)),
+                ('Amount', scale('amount', 0, 60, 1)),
                 ('Speed', scale('speed', 0.1, 5, 0.1)),
                 ('Particle size', scale('size', 0.4, 3, 0.1)),
                 ('Glow', None),
@@ -953,6 +1015,28 @@ def cmd_app():
             box.add(radios([(k, v[0]) for k, v in DOT_MODES.items()], li.get('dot', 'on'),
                            pick(DOT_LED, 'dot')))
             box.add(note('In standby the dot still blinks slowly (the firmware does that).'))
+            li_text = li.get('morse_text', MORSE_TEXT)
+            mrow = Gtk.Box(spacing=8)
+            mrow.add(Gtk.Label(label='Morse text'))
+            mtext = Gtk.Entry(text=li_text, hexpand=True,
+                              placeholder_text='a word or sentence, e.g.  ZORRO WAS HERE')
+            mtext.connect('changed', lambda e: update_conf('lights', morse_text=e.get_text()))
+            mrow.add(mtext)
+            box.add(mrow)
+            srow = Gtk.Box(spacing=8)
+            srow.add(Gtk.Label(label='Morse speed'))
+            unit = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.05, 0.5, 0.01)
+            unit.set_hexpand(True)
+            unit.set_inverted(True)                      # right = faster (shorter dot)
+            unit.set_value(float(li.get('morse_unit', MORSE_UNIT)))
+            unit.connect('format-value', lambda w, v: f'dot {v * 1000:.0f} ms')
+            unit.set_value_pos(Gtk.PositionType.RIGHT)
+            unit.connect('value-changed',
+                         lambda w: update_conf('lights', morse_unit=round(w.get_value(), 3)))
+            srow.add(unit)
+            box.add(srow)
+            box.add(note('Letters, digits and . , ? ! / - @ : = + & are blinked; other '
+                         'characters are skipped. The text repeats with a 3 second pause.'))
 
             box.add(heading('Power button light'))
             box.add(radios([('on', 'On'), ('off', 'Off')], li.get('power', 'on'),
@@ -985,6 +1069,14 @@ def main():
         KEYS[a[1]]()
     elif a[:1] == ['keyd']:
         cmd_keyd()
+    elif a[:1] == ['morse'] and len(a) >= 2:                # blink once, e.g. zmorse
+        set_led(DOT_LED, 'off')
+        time.sleep(1)
+        play_morse(' '.join(a[1:]), MORSE_UNIT)
+        if 'dot' in load_conf().get('lights', {}):
+            apply_lights()
+        else:
+            set_led(DOT_LED, 'on')
     elif a[:1] == ['osd'] and len(a) >= 3:
         osd(a[1], None if a[2] == '-' else int(a[2]), ' '.join(a[3:]))
     elif not a:
