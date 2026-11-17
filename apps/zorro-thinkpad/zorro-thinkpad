@@ -422,8 +422,8 @@ except ImportError:                     # zorro-fx missing: a plain dark box
     zorro_fx = None
 
     class Snow:
-        def __init__(self, widget, radius=12, fps=30):
-            self.backdrop = None
+        def __init__(self, widget, radius=12, fps=30, inner=None):
+            self.backdrop, self.backdrop_at = None, (0, 0)
             widget.set_app_paintable(True)
             widget.connect('draw', self.draw)
 
@@ -504,19 +504,23 @@ def cmd_keyd():
     style_osd(Gdk.Screen.get_default())
 
     class Indicator(Gtk.Window):
+        """the box at the bottom centre; the window around it is the 'spill' margin where
+        particles drift out. Clicks go through it. Without a compositor the window shows a
+        still image of the screen behind it (taken just before it appears)."""
         def __init__(self):
             super().__init__(type=Gtk.WindowType.POPUP)
             screen = self.get_screen()
-            if screen.is_composited() and screen.get_rgba_visual():
-                self.set_visual(screen.get_rgba_visual())   # rounded corners
+            self.composited = bool(screen.is_composited() and screen.get_rgba_visual())
+            if self.composited:
+                self.set_visual(screen.get_rgba_visual())
                 self.set_app_paintable(True)
                 self.connect('draw', self.clear_bg)
             self.set_accept_focus(False)
-            box = Gtk.Box(spacing=14)
+            outer = Gtk.Box()
+            box = Gtk.Box(spacing=14, hexpand=True, vexpand=True)
             box.get_style_context().add_class('zosd')
-            # rounded corners only show with a compositor; without one, square
-            self.composited = screen.is_composited()
-            self.snow = Snow(box, radius=14 if self.composited else 0)
+            outer.add(box)
+            self.snow = Snow(outer, radius=14, inner=box)
             self.icon = Gtk.Image()
             self.icon.set_pixel_size(28)
             box.add(self.icon)
@@ -525,12 +529,19 @@ def cmd_keyd():
             box.add(self.bar)
             self.label = Gtk.Label(xalign=0)
             box.add(self.label)
-            self.add(box)
-            box.show_all()
+            self.add(outer)
+            outer.show_all()
             self.hide_id = None
+            self.geom = None
+            self.connect('realize', self.click_through)
+
+        @staticmethod
+        def click_through(w):
+            import cairo
+            w.get_window().input_shape_combine_region(cairo.Region(), 0, 0)
 
         def clear_bg(self, _w, cr):
-            cr.set_operator(0)          # CLEAR: let the rounded box show its own corners
+            cr.set_operator(0)          # CLEAR: transparent around the box
             cr.paint()
             cr.set_operator(2)          # OVER
             return False
@@ -546,27 +557,45 @@ def cmd_keyd():
                 self.bar.set_fraction(max(0, min(100, value)) / 100)
                 self.label.set_text(text or f'{value}%')
                 self.label.set_width_chars(5 if not text else -1)
+            s = zorro_fx.settings() if zorro_fx else {}
+            self.snow.update_spill() if zorro_fx else None
+            spill = int(s.get('spill', 0))
             self.resize(1, 1)
             _, nat = self.get_preferred_size()
             disp = Gdk.Display.get_default()
             mon = disp.get_primary_monitor() or disp.get_monitor(0)
             g = mon.get_geometry()
-            x, y = g.x + (g.width - nat.width) // 2, g.y + g.height - nat.height - 90
+            x = g.x + (g.width - nat.width) // 2
+            y = g.y + g.height - (nat.height - 2 * spill) - 90 - spill
+            geom = (x, y, nat.width, nat.height)
+            if not self.composited and geom != self.geom:
+                if self.get_visible():
+                    self.hide()             # take the picture without ourselves in it
+                    while Gtk.events_pending():
+                        Gtk.main_iteration_do(False)
+                self.snow.backdrop, self.snow.backdrop_at = self.grab_behind(*geom)
+            self.geom = geom
             self.move(x, y)
-            s = zorro_fx.settings() if zorro_fx else {}
-            if not self.composited and not self.get_visible() and s.get('opacity', 1) < 1:
-                # no compositor: see-through = a still image of what is behind the box
-                root = Gdk.get_default_root_window()
-                self.snow.backdrop = Gdk.pixbuf_get_from_window(root, x, y, nat.width + 40,
-                                                                nat.height)
             self.show()
             if self.hide_id:
                 GLib.source_remove(self.hide_id)
             self.hide_id = GLib.timeout_add(int(s.get('osd_seconds', 1.5) * 1000), self.done)
 
+        @staticmethod
+        def grab_behind(x, y, w, h):
+            """the screen under (x, y, w, h), clipped to the screen; (pixbuf, offset)"""
+            root = Gdk.get_default_root_window()
+            rw, rh = root.get_width(), root.get_height()
+            x0, y0 = max(0, x), max(0, y)
+            x1, y1 = min(rw, x + w), min(rh, y + h)
+            if x1 <= x0 or y1 <= y0:
+                return None, (0, 0)
+            return Gdk.pixbuf_get_from_window(root, x0, y0, x1 - x0, y1 - y0), (x0 - x, y0 - y)
+
         def done(self):
             self.hide()
             self.hide_id = None
+            self.geom = None                # next time: a fresh picture of the screen
             return False
 
     ind = Indicator()
@@ -891,7 +920,7 @@ def cmd_app():
             self.fx = s
             self.fx_save_id = None
 
-            prev = Gtk.Box(spacing=14, halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=6)
+            prev = Gtk.Box(spacing=14, hexpand=True, vexpand=True)
             prev.get_style_context().add_class('zosd')
             icon = Gtk.Image.new_from_icon_name('audio-volume-medium-symbolic', Gtk.IconSize.DIALOG)
             icon.set_pixel_size(28)
@@ -900,13 +929,15 @@ def cmd_app():
             prev.add(icon)
             prev.add(pbar)
             prev.add(Gtk.Label(label='60%'))
-            self.fx_snow = Snow(prev, radius=14)
+            outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+            outer.add(prev)
+            self.fx_snow = Snow(outer, radius=14, inner=prev)
             # what the box sits on: a light pattern, so see-through is visible here too
             frame = Gtk.EventBox()
             frame.set_app_paintable(True)
             frame.connect('draw', self.fx_checker)
             inner = Gtk.Box(margin=22)
-            inner.set_center_widget(prev)
+            inner.set_center_widget(outer)
             frame.add(inner)
             box.add(heading('Preview'))
             box.add(frame)
@@ -944,8 +975,10 @@ def cmd_app():
                 ('Speed', scale('speed', 0.1, 5, 0.1)),
                 ('Particle size', scale('size', 0.4, 3, 0.1)),
                 ('Glow', None),
-                ('Background', scale('opacity', 0.2, 1, 0.02, 2, pct)),
-                ('Level bar', scale('bar_opacity', 0.1, 1, 0.05, 2, pct)),
+                ('Spill onto the screen', scale('spill', 0, 300, 5, 0, lambda v: f'{v:.0f} px')),
+                ('Background', scale('opacity', 0, 1, 0.01, 2, pct)),
+                ('Particles', scale('particle_opacity', 0, 1, 0.01, 2, pct)),
+                ('Level bar', scale('bar_opacity', 0, 1, 0.01, 2, pct)),
                 ('Indicator stays', scale('osd_seconds', 0.5, 5, 0.25, 2, lambda v: f'{v:.2g} s')),
             ]
             glow = Gtk.Switch(active=s['glow'], halign=Gtk.Align.START)
@@ -955,9 +988,13 @@ def cmd_app():
                 grid.attach(w or glow, 1, i, 1, 1)
             box.add(heading('Particles and boxes'))
             box.add(grid)
-            box.add(note('Used by the volume / brightness indicator and the screenshot bar. '
-                         'Background below 100% is see-through (a still image of what is '
-                         'behind the box, since this desktop has no compositor).'))
+            box.add(note('Background, Particles and Level bar: how visible each is, '
+                         '0% = invisible, 100% = solid. Flock: move the mouse over the '
+                         'box (or its spill area) and the swarm follows it.'))
+            box.add(note('Used by the volume / brightness indicator and the screenshot bar '
+                         '(spill: indicator only). This desktop has no compositor, so what '
+                         'shows through the box and the spill area is a still image of the '
+                         'screen, taken just before the indicator appears.'))
             reset = Gtk.Button(label='Back to defaults', halign=Gtk.Align.START, margin_top=8)
             reset.connect('clicked', self.fx_reset)
             box.add(reset)

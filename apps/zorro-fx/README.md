@@ -6,8 +6,10 @@ Used by the volume/brightness indicator (`zorro-thinkpad keyd`) and the screensh
 path, so nothing to install) and fall back to a plain dark box without it.
 
 Settings (`~/.config/zorro-fx/config.json`, edited in the ThinkPad app → Overlays):
-pattern (floating, falling, rising, swirling, twinkling), colour, amount, speed, particle
-size, glow, background and level-bar opacity, how long the indicator stays. Running overlays
+pattern (floating, flock that follows the mouse, falling, rising, swirling, twinkling),
+colour, amount (0-60), speed, particle size, glow, spill (particles drift out of the box
+onto the screen, indicator only), separate 0-100% visibility for background, particles and
+level bar, how long the indicator stays. Running overlays
 pick up a change on their next frame.
 
 Particles only move while an overlay is on screen. There is no compositor, so a see-through
