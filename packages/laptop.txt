@@ -4,6 +4,8 @@ brightnessctl
 tlp
 # ThinkPad app: power settings through a small root helper (polkit)
 pkexec
+# printing (ThinkPad app → Hardware → Add printer; driverless IPP printers)
+cups
 # Wi-Fi menu (rofi) + advanced connection editor
 python3-gi
 gir1.2-nm-1.0

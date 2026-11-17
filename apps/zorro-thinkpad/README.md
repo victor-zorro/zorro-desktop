@@ -14,7 +14,12 @@ the bottom centre of the screen. The app (F9, or rofi "ThinkPad") has these page
 - **Overlays**: particles in the indicator and the screenshot bar (`apps/zorro-fx`),
   with a live preview; optionally the app window gets the same background.
 
-Still to come: LTE + SMS and a hardware check (webcam, mic, bluetooth, printer, fingerprint).
+- **Hardware**: every device with ✓ / ⚠, driver and a test: webcam preview (VLC), mic
+  mute + record-and-play-back test, speaker left/right test, Bluetooth on/off, connect /
+  disconnect / forget, scan & pair, Wi-Fi, LTE modem, printer (CUPS), touchscreen,
+  touchpad, fingerprint reader (with the BIOS hint when none is found).
+
+Still to come: LTE + SMS, fingerprint login.
 
 Settings: `~/.config/zorro-thinkpad/config.json` (star key, lights) and
 `/etc/tlp.d/20-zorro-thinkpad.conf` (power; written by the root helper through pkexec).
