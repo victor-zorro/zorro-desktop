@@ -1,10 +1,13 @@
 """zorro_fx: the lock-screen look for small on-screen overlays (volume/brightness indicator,
 screenshot toolbar): a dark box with moving particles, optionally spilling out of the box.
 
-Used by zorro-thinkpad and zorro-shot (they import it from ../zorro-fx next to their own
-folder and fall back to a plain dark box without it). Settings are shared in
-~/.config/zorro-fx/config.json and edited in the ThinkPad app, page "Overlays"; running
-overlays pick up changes on their next frame.
+Used by zorro-thinkpad (indicator + the Zorro app), zorro-shot and zorro-orb (they import
+it from ../zorro-fx next to their own folder and fall back to a plain dark box without
+it). Settings live in ~/.config/zorro-fx/config.json, one set per "profile":
+  overlay  the indicator and the screenshot bar
+  orb      the round info area on the desktop
+  app      the Zorro app window itself
+edited in the Zorro app; running windows pick up changes on their next frame.
 """
 import json
 import math
@@ -27,7 +30,12 @@ DEFAULTS = {
     'particle_opacity': 1.0,    # particles
     'bar_opacity': 1.0,         # level bar of the indicator
     'osd_seconds': 1.5,         # how long the indicator stays
-    'app_bg': False,            # the ThinkPad app window gets the same background
+}
+PROFILES = {
+    'overlay': DEFAULTS,
+    'orb': dict(DEFAULTS, amount=5.0, speed=1.0, opacity=0.85),
+    'app': dict(DEFAULTS, enabled=False, amount=2.0, speed=0.8, opacity=1.0,
+                particle_opacity=0.7, glow=False),
 }
 PATTERNS = {
     'float': 'Floating around',
@@ -47,30 +55,51 @@ COLOURS = {                 # name: (label, colours picked at random per particl
 }
 MAX_PARTICLES = 3000
 
-_cache = {'mtime': -1, 'data': None}
+_cache = {'mtime': -1, 'file': None}
+_preview = {}                   # profile -> settings being edited (the app's live preview)
 
 
-def settings():
-    """current settings; re-read only when the file changed (cheap to call every frame)"""
+def _read_file():
     try:
         mtime = CONF.stat().st_mtime
     except OSError:
         mtime = None
-    if _cache['data'] is None or mtime != _cache['mtime']:
-        s = dict(DEFAULTS)
+    if _cache['file'] is None or mtime != _cache['mtime']:
         try:
-            s.update({k: v for k, v in json.loads(CONF.read_text()).items() if k in DEFAULTS})
+            data = json.loads(CONF.read_text())
         except (OSError, ValueError):
-            pass
-        _cache.update(mtime=mtime, data=s)
-    return _cache['data']
+            data = {}
+        if 'overlay' not in data and any(k in DEFAULTS for k in data):   # old flat file
+            data = {'overlay': {k: v for k, v in data.items() if k in DEFAULTS},
+                    'app': {'enabled': bool(data.get('app_bg'))}}
+        _cache.update(mtime=mtime, file=data)
+    return _cache['file']
 
 
-def save(s):
+def settings(profile='overlay'):
+    """current settings of a profile; re-reads the file only when it changed"""
+    if profile in _preview:
+        return _preview[profile]
+    base = PROFILES.get(profile, DEFAULTS)
+    s = dict(base)
+    s.update({k: v for k, v in _read_file().get(profile, {}).items() if k in base})
+    return s
+
+
+def preview(profile, s):
+    """show unsaved settings in this process right away (the app's sliders)"""
+    _preview[profile] = dict(s)
+
+
+def save(s, profile='overlay'):
+    data = dict(_read_file())
+    base = PROFILES.get(profile, DEFAULTS)
+    data[profile] = {k: s[k] for k in base if k in s}
     CONF.parent.mkdir(parents=True, exist_ok=True)
     tmp = CONF.with_suffix('.tmp')
-    tmp.write_text(json.dumps({k: s[k] for k in DEFAULTS if k in s}, indent=2) + '\n')
+    tmp.write_text(json.dumps(data, indent=2) + '\n')
     tmp.replace(CONF)
+    _cache['file'] = None
 
 
 def pointer_in(widget):
@@ -99,9 +128,10 @@ class Snow:
     see-through and spill also work without a compositor."""
 
     def __init__(self, widget, radius=12, fps=30, inner=None, enabled=None,
-                 max_parts=MAX_PARTICLES, max_spill=None):
+                 max_parts=MAX_PARTICLES, max_spill=None, profile='overlay'):
         self.widget, self.radius, self.fps, self.inner = widget, radius, fps, inner
         self.enabled, self.max_parts, self.max_spill = enabled, max_parts, max_spill
+        self.profile = profile
         self.was_on = None
         self.parts, self.timer = [], None
         self.t0 = self.last = time.monotonic()
@@ -138,7 +168,7 @@ class Snow:
     def update_spill(self):
         if self.inner is None:
             return
-        sp = int(settings()['spill'])
+        sp = int(settings(self.profile)['spill'])
         if self.max_spill is not None:
             sp = min(sp, self.max_spill)
         if sp != self.spill:
@@ -221,7 +251,7 @@ class Snow:
     def draw(self, w, cr):
         if self.enabled is not None and not self.enabled():
             return False                # switched off: the normal theme background
-        s = settings()
+        s = settings(self.profile)
         a = w.get_allocation()
         W, H = max(1, a.width), max(1, a.height)
         bx, by, bw, bh = self.box_rect(W, H)
@@ -296,4 +326,4 @@ class Snow:
 
 def bar_css():
     """CSS for the indicator's level bar, following the bar_opacity setting"""
-    return (f'.zosd progressbar {{ opacity: {settings()["bar_opacity"]:.2f}; }}').encode()
+    return (f'.zosd progressbar {{ opacity: {settings("overlay")["bar_opacity"]:.2f}; }}').encode()

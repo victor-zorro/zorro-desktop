@@ -1057,17 +1057,69 @@ def cmd_app():
         def footer(self, w):
             self.bottom.add(w)
 
+        def parts(self):
+            """[(title, page)] taken out of the builder stack"""
+            out = []
+            for c in self.stack.get_children():
+                out.append((self.stack.child_get_property(c, 'title'), c))
+                self.stack.remove(c)
+            return out
+
+    class Group:
+        """one top tab: a sidebar with section headings and their sub-pages; each section
+        can have a header (above) and footer (below) shared by its sub-pages"""
+        def __init__(self):
+            self.content = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE,
+                                     vexpand=True, hexpand=True)
+            self.tops = Gtk.Stack(vhomogeneous=False, interpolate_size=False)
+            self.bottoms = Gtk.Stack(vhomogeneous=False, interpolate_size=False)
+            self.side = Gtk.ListBox(selection_mode=Gtk.SelectionMode.BROWSE)
+            self.side.get_style_context().add_class('zside')
+            self.side.connect('row-selected', self.on_row)
+            self.ids = {}
+
+        def section(self, name, title, pages):
+            head = Gtk.ListBoxRow(selectable=False, activatable=False)
+            lb = Gtk.Label(xalign=0, margin_start=12, margin_top=12, margin_bottom=2)
+            lb.set_markup(f'<small><b>{GLib.markup_escape_text(title.upper())}</b></small>')
+            lb.get_style_context().add_class('dim-label')
+            head.add(lb)
+            self.side.add(head)
+            self.tops.add_named(pages.top, name)
+            self.bottoms.add_named(pages.bottom, name)
+            for i, (sub, w) in enumerate(pages.parts()):
+                pid = f'{name}:{i}'
+                self.content.add_named(w, pid)
+                row = Gtk.ListBoxRow()
+                row.add(Gtk.Label(label=sub, xalign=0, margin_start=22, margin_end=12,
+                                  margin_top=6, margin_bottom=6))
+                row.zid, row.zsec = pid, name
+                self.ids[pid] = row
+                self.side.add(row)
+
+        def on_row(self, _lb, row):
+            if row is None:
+                return
+            self.content.set_visible_child_name(row.zid)
+            self.tops.set_visible_child_name(row.zsec)
+            self.bottoms.set_visible_child_name(row.zsec)
+
+        def select(self, pid=None):
+            row = self.ids.get(pid) or next(iter(self.ids.values()), None)
+            if row:
+                self.side.select_row(row)
+
         def widget(self):
+            sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+            sw.set_size_request(190, -1)
+            sw.add(self.side)
             main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            main.add(self.top)
-            main.add(self.stack)
-            main.add(self.bottom)
-            if self.n < 2:
-                return main
-            side = Gtk.StackSidebar(stack=self.stack)
-            side.set_size_request(170, -1)
+            main.add(self.tops)
+            main.add(self.content)
+            main.add(self.bottoms)
             h = Gtk.Box()
-            h.add(side)
+            h.add(sw)
+            h.add(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
             h.add(main)
             return h
 
@@ -1084,39 +1136,52 @@ def cmd_app():
         return box
 
     class Win(Gtk.ApplicationWindow):
-        def __init__(self, app):
-            super().__init__(application=app, title='ThinkPad')
-            self.set_default_size(820, 600)
-            self.set_icon_name('computer')
+        def __init__(self, app, select=None):
+            super().__init__(application=app, title='Zorro')
+            self.set_default_size(860, 620)
+            self.set_icon_name('preferences-desktop')
             stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
             self.stack = stack
             hb = Gtk.HeaderBar(show_close_button=True)
             hb.set_custom_title(Gtk.StackSwitcher(stack=stack))
             self.set_titlebar(hb)
-            stack.add_titled(self.keys_page(), 'keys', 'Keys')
-            stack.add_titled(self.power_page(), 'power', 'Power')
-            stack.add_titled(self.lights_page(), 'lights', 'Lights')
-            stack.add_titled(self.hw_page(), 'hw', 'Hardware')
-            stack.add_titled(self.fx_page(), 'fx', 'Overlays')
             style_osd(self.get_screen())
-            # optional: the app gets the overlay background (Overlays page switch)
+            self.groups = {}
+
+            tp = Group()
+            tp.section('keys', 'Keys', self.keys_page())
+            tp.section('power', 'Power', self.power_page())
+            tp.section('lights', 'Lights', self.lights_page())
+            tp.section('hw', 'Hardware', self.hw_page())
+            desk = Group()
+            desk.section('fx', 'Overlays', self.fx_page('overlay'))
+            desk.section('applook', 'This app', self.fx_page('app'))
+            for name, title, g in (('thinkpad', 'ThinkPad', tp), ('desktop', 'Desktop', desk)):
+                stack.add_titled(g.widget(), name, title)
+                self.groups[name] = g
+                g.select(select)
+
+            # the app's own look: particles behind everything (Desktop → This app)
             outer = Gtk.Box()
             stack.set_hexpand(True)
             stack.set_vexpand(True)
             outer.add(stack)
             self.add(outer)
             if zorro_fx:
-                self.bg_snow = Snow(outer, radius=0, fps=24, max_parts=1500,
-                                    enabled=lambda: zorro_fx.settings()['app_bg'])
+                self.bg_snow = Snow(outer, radius=0, fps=24, max_parts=1500, profile='app',
+                                    enabled=lambda: zorro_fx.settings('app')['enabled'])
                 css = Gtk.CssProvider()
                 css.load_from_data(b'''
                     window.zfx-app scrolledwindow, window.zfx-app viewport,
-                    window.zfx-app stack, window.zfx-app stacksidebar,
-                    window.zfx-app stacksidebar list { background: none; }''')
+                    window.zfx-app stack, window.zfx-app list,
+                    window.zfx-app list row:not(:selected) { background: none; }''')
                 Gtk.StyleContext.add_provider_for_screen(
                     self.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
                 GLib.timeout_add(300, self.follow_app_bg)
             self.show_all()
+            if select:
+                stack.set_visible_child_name(next(n for n, g in self.groups.items()
+                                                  if select in g.ids))
             self.custom_box.set_visible(load_conf().get('star') == 'custom')
             GLib.timeout_add_seconds(5, self.refresh)
 
@@ -1152,7 +1217,7 @@ def cmd_app():
             test.show()
             box.add(self.custom_box)
             box.add(note('Takes effect right away.'))
-            return box.widget()
+            return box
 
         def on_star(self, combo):
             act = combo.get_active_id()
@@ -1211,7 +1276,7 @@ def cmd_app():
                 self.power_msg.set_text('Not installed yet: run  sudo apt install pkexec  and  '
                                         'sudo apps/zorro-thinkpad/install.sh')
             self.refresh()
-            return box.widget()
+            return box
 
         def on_power_apply(self, _b):
             _, lo, hi = CHARGE_PRESETS[self.charge]
@@ -1245,45 +1310,46 @@ def cmd_app():
             return True
 
         # -- overlays (shared zorro-fx settings, live preview)
-        def fx_page(self):
+        def fx_page(self, profile):
+            """look settings of one zorro-fx profile (overlay / orb / app)"""
             box = Pages()
             if not zorro_fx:
-                box.add(note('apps/zorro-fx is missing: overlays use a plain dark box.'))
-                return box.widget()
-            s = dict(zorro_fx.settings())
-            self.fx = s
-            self.fx_save_id = None
+                box.add(note('apps/zorro-fx is missing: plain dark backgrounds.'))
+                return box
+            s = dict(zorro_fx.settings(profile))
+            self.fx = getattr(self, 'fx', {})
+            self.fx[profile] = s
+            self.fx_save_ids = getattr(self, 'fx_save_ids', {})
+            set_ = lambda key, value: self.fx_set(profile, key, value)
 
-            prev = Gtk.Box(spacing=14)
-            prev.get_style_context().add_class('zosd')
-            icon = Gtk.Image.new_from_icon_name('audio-volume-medium-symbolic', Gtk.IconSize.DIALOG)
-            icon.set_pixel_size(28)
-            pbar = Gtk.ProgressBar(valign=Gtk.Align.CENTER, fraction=0.6)
-            pbar.set_size_request(200, -1)
-            prev.add(icon)
-            prev.add(pbar)
-            prev.add(Gtk.Label(label='60%'))
-            outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-            outer.add(prev)
-            self.fx_snow = Snow(outer, radius=14, inner=prev, max_spill=12)
-            # what the box sits on: a light pattern, so see-through is visible here too
-            frame = Gtk.Box(vexpand=False)
-            frame.set_app_paintable(True)
-            frame.connect('draw', self.fx_checker)
-            inner = Gtk.Box(margin=8)
-            inner.set_center_widget(outer)
-            frame.add(inner)
-            frame.set_margin_start(18)
-            frame.set_margin_end(18)
-            frame.set_margin_top(14)
-            box.header(frame)               # the preview stays visible on every sub-page
+            if profile == 'overlay':            # preview of the indicator, on every sub-page
+                prev = Gtk.Box(spacing=14)
+                prev.get_style_context().add_class('zosd')
+                icon = Gtk.Image.new_from_icon_name('audio-volume-medium-symbolic',
+                                                    Gtk.IconSize.DIALOG)
+                icon.set_pixel_size(28)
+                pbar = Gtk.ProgressBar(valign=Gtk.Align.CENTER, fraction=0.6)
+                pbar.set_size_request(200, -1)
+                prev.add(icon)
+                prev.add(pbar)
+                prev.add(Gtk.Label(label='60%'))
+                outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+                outer.add(prev)
+                Snow(outer, radius=14, inner=prev, max_spill=12, profile=profile)
+                frame = Gtk.Box(vexpand=False, margin_start=18, margin_end=18, margin_top=14)
+                frame.set_app_paintable(True)
+                frame.connect('draw', self.fx_checker)
+                inner = Gtk.Box(margin=8)
+                inner.set_center_widget(outer)
+                frame.add(inner)
+                box.header(frame)
 
             def combo(key, options):
                 c = Gtk.ComboBoxText()
                 for k, label in options.items():
                     c.append(k, label)
                 c.set_active_id(s[key])
-                c.connect('changed', lambda w: self.fx_set(key, w.get_active_id()))
+                c.connect('changed', lambda w: set_(key, w.get_active_id()))
                 return c
 
             def scale(key, lo, hi, step, digits=1, fmt=None):
@@ -1294,58 +1360,71 @@ def cmd_app():
                 sc.set_value_pos(Gtk.PositionType.RIGHT)
                 if fmt:
                     sc.connect('format-value', lambda w, v: fmt(v))
-                sc.connect('value-changed', lambda w: self.fx_set(key, round(w.get_value(), 2)))
+                sc.connect('value-changed', lambda w: set_(key, round(w.get_value(), 2)))
                 return sc
 
+            def switch(key):
+                sw = Gtk.Switch(active=s[key], halign=Gtk.Align.START)
+                sw.connect('notify::active', lambda w, _p: set_(key, w.get_active()))
+                return sw
+
+            def grid(part):
+                g = Gtk.Grid(column_spacing=12, row_spacing=6)
+                for i, (label, w) in enumerate(part):
+                    g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                    g.attach(w, 1, i, 1, 1)
+                return g
+
             pct = lambda v: f'{v * 100:.0f}%'
-            rows = [
+            particles = [
                 ('Pattern', combo('pattern', zorro_fx.PATTERNS)),
                 ('Colour', combo('colour', {k: v[0] for k, v in zorro_fx.COLOURS.items()})),
                 ('Amount', scale('amount', 0, 60, 1)),
                 ('Speed', scale('speed', 0.1, 5, 0.1)),
                 ('Particle size', scale('size', 0.4, 3, 0.1)),
-                ('Glow', None),
-                ('Spill onto the screen', scale('spill', 0, 300, 5, 0, lambda v: f'{v:.0f} px')),
-                ('Background', scale('opacity', 0, 1, 0.01, 2, pct)),
-                ('Particles', scale('particle_opacity', 0, 1, 0.01, 2, pct)),
-                ('Level bar', scale('bar_opacity', 0, 1, 0.01, 2, pct)),
-                ('Indicator stays', scale('osd_seconds', 0.5, 5, 0.25, 2, lambda v: f'{v:.2g} s')),
+                ('Glow', switch('glow')),
             ]
-            appbg = Gtk.Switch(active=s['app_bg'], halign=Gtk.Align.START)
-            appbg.connect('notify::active', lambda w, _p: self.fx_set('app_bg', w.get_active()))
-            rows.append(('This app too', appbg))
-            glow = Gtk.Switch(active=s['glow'], halign=Gtk.Align.START)
-            glow.connect('notify::active', lambda w, _p: self.fx_set('glow', w.get_active()))
-            def grid(part):
-                g = Gtk.Grid(column_spacing=12, row_spacing=6)
-                for i, (label, w) in enumerate(part):
-                    g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-                    g.attach(w or glow, 1, i, 1, 1)
-                return g
-            box.add(heading('Particles', 'Particles'))
-            box.add(grid(rows[:6]))
-            box.add(note('Flock: move the mouse over the box (or its spill area) and the '
-                         'swarm follows it.'))
-            box.add(heading('Box and transparency', 'Transparency'))
-            box.add(grid(rows[6:10]))
-            box.add(note('How visible each part is: 0% = invisible, 100% = solid. Spill: '
-                         'indicator only. Without a compositor, what shows through is a '
-                         'still image of the screen.'))
-            box.add(heading('Indicator and this app', 'Indicator & app'))
-            box.add(grid(rows[10:]))
+            looks = [('Background', scale('opacity', 0, 1, 0.01, 2, pct)),
+                     ('Particles', scale('particle_opacity', 0, 1, 0.01, 2, pct))]
+            if profile != 'app':
+                looks.insert(0, ('Spill onto the screen',
+                                 scale('spill', 0, 300, 5, 0, lambda v: f'{v:.0f} px')))
+            if profile == 'overlay':
+                looks.append(('Level bar', scale('bar_opacity', 0, 1, 0.01, 2, pct)))
+                looks.append(('Indicator stays',
+                              scale('osd_seconds', 0.5, 5, 0.25, 2, lambda v: f'{v:.2g} s')))
+            if profile == 'app':
+                box.add(heading('Particle background', 'Background'))
+                box.add(grid([('Use it', switch('enabled'))]))
+                box.add(note('Gives this window the same black background with moving '
+                             'particles. Background = how dark, Particles = how visible.'))
+                box.add(grid(looks))
+                box.add(heading('Particles', 'Particles'))
+            else:
+                box.add(heading('Particles', 'Particles'))
+            box.add(grid(particles))
+            if profile != 'app':
+                box.add(note('Flock: move the mouse over it and the swarm follows.'))
+                box.add(heading('Box and transparency', 'Transparency'))
+                box.add(grid(looks))
+                box.add(note('How visible each part is: 0% = invisible, 100% = solid. '
+                             'Without a compositor, what shows through is a still image of '
+                             'the screen.'))
             bottom = Gtk.Box(spacing=8)
-            show = Gtk.Button(label='Show on screen', tooltip_text='The real indicator, bottom centre')
-            show.connect('clicked', lambda b: osd('audio-volume-medium-symbolic', 60))
+            if profile == 'overlay':
+                show = Gtk.Button(label='Show on screen',
+                                  tooltip_text='The real indicator, bottom centre')
+                show.connect('clicked', lambda b: osd('audio-volume-medium-symbolic', 60))
+                bottom.add(show)
             reset = Gtk.Button(label='Back to defaults')
-            reset.connect('clicked', self.fx_reset)
-            bottom.add(show)
+            reset.connect('clicked', lambda b: self.fx_reset(profile))
             bottom.add(reset)
             box.footer(bottom)
-            return box.widget()
+            return box
 
         def follow_app_bg(self):
             ctx = self.get_style_context()
-            on = zorro_fx.settings()['app_bg']
+            on = zorro_fx.settings('app')['enabled']
             if on != ctx.has_class('zfx-app'):
                 (ctx.add_class if on else ctx.remove_class)('zfx-app')
             return True
@@ -1364,28 +1443,25 @@ def cmd_app():
             cr.fill()
             return False
 
-        def fx_set(self, key, value):
-            self.fx[key] = value
-            zorro_fx._cache.update(data=dict(self.fx))       # preview follows at once
-            if self.fx_save_id:
-                GLib.source_remove(self.fx_save_id)
-            self.fx_save_id = GLib.timeout_add(300, self.fx_save)
+        def fx_set(self, profile, key, value):
+            self.fx[profile][key] = value
+            zorro_fx.preview(profile, self.fx[profile])      # this window follows at once
+            if self.fx_save_ids.get(profile):
+                GLib.source_remove(self.fx_save_ids[profile])
+            self.fx_save_ids[profile] = GLib.timeout_add(300, self.fx_save, profile)
 
-        def fx_save(self):
-            self.fx_save_id = None
-            zorro_fx.save(self.fx)
-            zorro_fx._cache['mtime'] = -1                    # re-read our own file next frame
+        def fx_save(self, profile):
+            self.fx_save_ids[profile] = None
+            zorro_fx.save(self.fx[profile], profile)
             return False
 
-        def fx_reset(self, _b):
-            zorro_fx.save(zorro_fx.DEFAULTS)
-            zorro_fx._cache['mtime'] = -1
-            stack = self.stack
-            old = stack.get_child_by_name('fx')
-            stack.remove(old)
-            stack.add_titled(self.fx_page(), 'fx', 'Overlays')
-            stack.show_all()
-            stack.set_visible_child_name('fx')
+        def fx_reset(self, profile):
+            zorro_fx.save(zorro_fx.PROFILES[profile], profile)
+            zorro_fx._preview.pop(profile, None)
+            sec = {'overlay': 'fx', 'app': 'applook', 'orb': 'orb'}[profile]
+            app = self.get_application()
+            self.destroy()                  # rebuild with the default values
+            Win(app, select=f'{sec}:0').present()
 
         # -- hardware
         HW_GROUPS = {'Webcam': 'Camera & sound', 'Microphone': 'Camera & sound',
@@ -1411,7 +1487,7 @@ def cmd_app():
             self.bt_found = []
             self.hw_busy = False
             self.hw_refresh()
-            return box.widget()
+            return box
 
         def hw_refresh(self):
             if self.hw_busy:
@@ -1631,9 +1707,9 @@ def cmd_app():
             box.add(radios(list(KBD_LEVELS.items()), cur, kbd))
             box.add(note('Fn + Space changes it too. The level is kept after standby and restart.'))
             box.footer(self.light_msg)
-            return box.widget()
+            return box
 
-    app = Gtk.Application(application_id='org.zorro.thinkpad')
+    app = Gtk.Application(application_id='org.zorro.settings')
     app.connect('activate', lambda a: (a.get_active_window() or Win(a)).present())
     app.run([])
 

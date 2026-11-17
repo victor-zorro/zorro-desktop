@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zorro
+GenericName=Settings
+Comment=Desktop, ThinkPad and login settings: keys, power, lights, hardware, overlays, info circle
+Exec=zorro-settings
+Icon=preferences-desktop
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=thinkpad;settings;keys;power;battery;led;bluetooth;overlay;
