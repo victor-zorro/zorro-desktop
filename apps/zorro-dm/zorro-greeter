@@ -3,7 +3,7 @@
 
   zorro-greeter            run by zorro-dm (talks over $ZORRO_DM_FD);
                            $ZORRO_MODE=lock + $ZORRO_USER: unlock screen for that user
-  zorro-greeter --preview  in a normal window, password 'test' (theme work)
+  zorro-greeter --preview [--look FILE]  in a normal window, password 'test' (theme work)
 
 The theme (index.html + js/login.js) talks to a 'window.lightdm' object, the same
 API nody-greeter offers, so it runs unchanged here and there.
@@ -26,6 +26,21 @@ from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
 HERE = os.path.dirname(os.path.realpath(__file__))
 THEME = next(d for d in (os.environ.get('ZORRO_THEME', ''), os.path.join(HERE, 'theme'),
                          '/usr/share/zorro-dm/theme') if d and os.path.isdir(d))
+
+LOOK_FILE = os.environ.get('ZORRO_LOOK_FILE', '/etc/zorro-dm/look.json')
+
+
+def look_script():
+    """the background look (Zorro app → Login screen) for the theme's fx.js"""
+    try:
+        with open(LOOK_FILE) as fh:
+            look = json.load(fh)
+        if not isinstance(look, dict):
+            look = {}
+    except (OSError, ValueError):
+        look = {}
+    return 'window.ZORRO_LOOK = ' + json.dumps(look) + ';'
+
 
 SHIM = r"""
 (() => {
@@ -173,6 +188,9 @@ class Greeter:
 
     def add_window(self, page, monitor, primary, index=0):
         ucm = WebKit2.UserContentManager()
+        ucm.add_script(WebKit2.UserScript.new(        # every screen gets the same look
+            look_script(), WebKit2.UserContentInjectedFrames.TOP_FRAME,
+            WebKit2.UserScriptInjectionTime.START, None, None))
         if primary:
             ucm.connect('script-message-received::zorro', self.from_js)
             ucm.register_script_message_handler('zorro')
@@ -236,8 +254,11 @@ class Greeter:
 
 
 def main():
-    if sys.argv[1:] == ['--preview']:
+    if sys.argv[1:2] == ['--preview']:
         mode = 'preview'
+        if sys.argv[2:3] == ['--look'] and len(sys.argv) > 3:   # try a look before saving it
+            global LOOK_FILE
+            LOOK_FILE = sys.argv[3]
     elif 'ZORRO_DM_FD' in os.environ:
         mode = 'lock' if os.environ.get('ZORRO_MODE') == 'lock' else 'greeter'
     else:

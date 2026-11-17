@@ -7,7 +7,11 @@ session may run it without a password). Only these fixed verbs, every value vali
                                             thresholds -> /etc/tlp.d/20-zorro-thinkpad.conf,
                                             then 'tlp start' applies it right away
   fullcharge                                charge to 100% once (until unplugged)
+  greeter-look JSON                         login / lock screen look -> /etc/zorro-dm/look.json
+                                            (only known keys, numbers clamped, colours checked)
 """
+import json
+import re
 import os
 import subprocess
 import sys
@@ -45,14 +49,58 @@ def power(ac, bat, start, stop):
     sys.exit(subprocess.run([TLP, 'start']).returncode)
 
 
+LOOK_FILE = '/etc/zorro-dm/look.json'
+ANIMALS = ('whale', 'vaquita', 'hammerhead', 'turtle', 'manta', 'random')
+LOOK_NUM = {   # key: (min, max)
+    'density': (0.3, 3), 'size': (0.2, 3), 'swim_speed': (0.1, 5), 'pass_seconds': (10, 300),
+    'gap_seconds': (0, 300), 'far': (0, 1), 'snow_amount': (0, 2000), 'snow_speed': (0, 10),
+    'snow_size': (0.2, 6), 'snow_alpha': (0, 4), 'grain': (0, 4), 'scratches': (0, 4),
+    'dust': (0, 4), 'scanlines': (0, 3), 'vignette': (0, 1.5), 'flicker': (0, 4),
+    'chroma': (0, 8), 'glitch_rate': (0, 6), 'glitch_strength': (0, 3),
+}
+LOOK_COLOUR = ('line_colour', 'snow_colour')
+LOOK_BOOL = ('bars', 'crt')
+
+
+def greeter_look(text):
+    if len(text) > 8000:
+        die('look too long')
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        die('look is not JSON')
+    if not isinstance(raw, dict):
+        die('look must be an object')
+    out = {}
+    for k, v in raw.items():
+        if k == 'animal' and v in ANIMALS:
+            out[k] = v
+        elif k in LOOK_NUM and isinstance(v, (int, float)) and not isinstance(v, bool):
+            lo, hi = LOOK_NUM[k]
+            out[k] = min(hi, max(lo, float(v)))
+        elif k in LOOK_COLOUR and isinstance(v, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', v):
+            out[k] = v
+        elif k in LOOK_BOOL and isinstance(v, bool):
+            out[k] = v
+    os.makedirs(os.path.dirname(LOOK_FILE), exist_ok=True)
+    tmp = LOOK_FILE + '.tmp'
+    with open(tmp, 'w') as fh:
+        json.dump(out, fh, indent=2)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, LOOK_FILE)
+    sys.exit(0)
+
+
 def main():
     a = sys.argv[1:]
     if a[:1] == ['power'] and len(a) == 5:
         power(*a[1:])
+    elif a[:1] == ['greeter-look'] and len(a) == 2:
+        greeter_look(a[1])
     elif a == ['fullcharge']:
         sys.exit(subprocess.run([TLP, 'fullcharge', 'BAT0']).returncode)
     else:
-        die('usage: power AC BAT START STOP | fullcharge')
+        die('usage: power AC BAT START STOP | fullcharge | greeter-look JSON')
 
 
 if __name__ == '__main__':
