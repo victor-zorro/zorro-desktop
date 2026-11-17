@@ -1,0 +1,68 @@
+#!/usr/bin/python3
+"""lteprobe: ask the built-in XMM7360 LTE modem a few read-only questions (run with sudo).
+Changes nothing. Output also goes to /tmp/zorro-lteprobe.log so it can be read afterwards.
+If ModemManager is running it may hold the port; then this says so."""
+import os
+import select
+import sys
+import time
+
+PORTS = ['/dev/wwan0at0', '/dev/wwan0at1']
+QUESTIONS = [
+    ('ATE0', 'echo off'),
+    ('ATI', 'model'),
+    ('AT+CGMR', 'firmware'),
+    ('AT+CFUN?', 'radio: 1 = on, 4 = off (flight mode / FCC lock)'),
+    ('AT@nvm:fix_cat_fcclock.fcclock_mode?', 'FCC lock mode: 1 = locked'),
+    ('AT+CPIN?', 'SIM: READY / SIM PIN / not inserted'),
+    ('AT+CIMI', 'SIM identity present (number not shown)'),
+    ('AT+COPS?', 'operator'),
+    ('AT+CSQ', 'signal (0-31, 99 = unknown)'),
+    ('AT+CREG?', 'registered: 1 = home, 5 = roaming'),
+    ('AT+CGDCONT?', 'data profiles (APN)'),
+    ('AT+CMGF?', 'SMS mode'),
+    ('AT+CPMS?', 'SMS storage'),
+]
+
+
+def ask(fd, cmd, wait=3.0):
+    os.write(fd, (cmd + '\r').encode())
+    out, end = b'', time.time() + wait
+    while time.time() < end:
+        r, _, _ = select.select([fd], [], [], 0.3)
+        if r:
+            out += os.read(fd, 4096)
+            if out.rstrip().endswith((b'OK', b'ERROR')) or b'+CME ERROR' in out:
+                break
+    return out.decode(errors='replace').strip()
+
+
+def main():
+    if os.geteuid() != 0:
+        sys.exit('run with sudo')
+    log = open('/tmp/zorro-lteprobe.log', 'w')
+    os.chmod('/tmp/zorro-lteprobe.log', 0o644)
+
+    def say(s):
+        print(s)
+        log.write(s + '\n')
+    for port in PORTS:
+        try:
+            fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError as e:
+            say(f'{port}: {e.strerror}')
+            continue
+        say(f'== {port}')
+        for cmd, what in QUESTIONS:
+            ans = ask(fd, cmd)
+            if cmd == 'AT+CIMI':                # never log the SIM identity itself
+                ans = 'SIM identity: present' if any(c.isdigit() for c in ans) else ans
+            say(f'{cmd:40} {ans.replace(chr(13), " ").replace(chr(10), " ")}   ({what})')
+        os.close(fd)
+        log.close()
+        return
+    say('no modem port could be opened')
+
+
+if __name__ == '__main__':
+    main()
