@@ -48,6 +48,11 @@ LOCK_SOCK = f'{RUN}/lock.sock'
 GREETER_USER = '_zorro-dm'
 GREETER = os.environ.get('ZORRO_GREETER', '/usr/local/bin/zorro-greeter')
 XSESSION = '/etc/X11/Xsession'
+# Like lightdm-session: read /etc/profile and ~/.profile (adds ~/.local/bin to PATH)
+PROFILE_WRAP = ['/bin/sh', '-c',
+                '[ -f /etc/profile ] && . /etc/profile; '
+                '[ -f "$HOME/.profile" ] && . "$HOME/.profile"; exec "$@"',
+                'zorro-session']
 PATH = '/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games'
 POWER = {'suspend', 'hibernate', 'reboot', 'poweroff'}
 VT_ACTIVATE, VT_WAITACTIVE, VT_LOCKSWITCH, VT_UNLOCKSWITCH = 0x5606, 0x5607, 0x560B, 0x560C
@@ -479,7 +484,7 @@ class DM:
         xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(SESSION_VT), 'XDG_SESSION_TYPE': 'x11',
                'XDG_SESSION_CLASS': 'user', 'XDG_SESSION_DESKTOP': key,
                'XDG_CURRENT_DESKTOP': ses['desktop'], 'DESKTOP_SESSION': key}
-        pid = run_session_child(login.pam, pw, [XSESSION, ses['exec']], xdg,
+        pid = run_session_child(login.pam, pw, [*PROFILE_WRAP, XSESSION, ses['exec']], xdg,
                                 {'DISPLAY': SESSION_DISPLAY, 'XAUTHORITY': xauth})
         while not os.waitpid(pid, os.WNOHANG)[0]:
             try:
