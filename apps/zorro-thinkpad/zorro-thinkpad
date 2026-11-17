@@ -1,0 +1,469 @@
+#!/usr/bin/python3
+"""zorro-thinkpad: Fn keys, on-screen indicator and settings for the ThinkPad T14.
+
+  zorro-thinkpad key NAME   act on a key and show the indicator (Openbox calls this):
+                            vol-up vol-down mute mic-mute bright-up bright-down display
+                            airplane lte-on lte-off star settings screenshot-region
+  zorro-thinkpad keyd       background part, started from Openbox autostart:
+                            the indicator window, the keys X cannot see (F4, F9, F10,
+                            F11, Fn+PrtSc) and the keyboard light (Fn+Space)
+  zorro-thinkpad osd ICON VALUE [TEXT]   show the indicator (testing)
+
+Which key arrives where (measured with ./keytest on a T14 Gen 1 AMD):
+  X / Openbox : F1-F3 volume, F5-F6 brightness, F7 display, F8 airplane, F12 star
+  keyd (evdev): F4 mic mute, F9, F10/F11 phone keys, Fn+PrtSc  - their codes are above
+                255, which X11 cannot deliver
+  firmware    : Fn+Space keyboard light (keyd only shows the new level)
+"""
+import json
+import os
+import re
+import shlex
+import socket
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME = Path.home()
+CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-thinkpad' / 'config.json'
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
+SOCK = RUNTIME / 'zorro-thinkpad.sock'
+STATE = RUNTIME / 'zorro-thinkpad.state'
+KBD_LED = Path('/sys/class/leds/tpacpi::kbd_backlight')
+EXTRA_BUTTONS = 'ThinkPad Extra Buttons'
+
+# evdev codes from the ThinkPad Extra Buttons device that X cannot deliver (code + 8 > 255)
+EVDEV_KEYS = {248: 'mic-mute',              # F4  KEY_MICMUTE
+              444: 'settings',              # F9  KEY_NOTIFICATION_CENTER
+              445: 'lte-on',                # F10 KEY_PICKUP_PHONE
+              446: 'lte-off',               # F11 KEY_HANGUP_PHONE
+              0x27a: 'screenshot-region'}   # Fn+PrtSc KEY_SELECTIVE_SCREENSHOT
+
+STAR_ACTIONS = {                            # what the star key (F12) can do
+    'screenshot': ('Screenshot', ['zorro-shot']),
+    'screenshot-region': ('Screenshot of an area', ['zorro-shot', '--region']),
+    'lock': ('Lock the screen', ['zorro-lock']),
+    'drive': ('Drive app', ['zorro-drive']),
+    'terminal': ('Terminal', ['x-terminal-emulator']),
+    'files': ('File manager', ['thunar']),
+    'launcher': ('App launcher (rofi)', ['rofi', '-show', 'drun']),
+    'custom': ('Custom command…', None),
+}
+
+
+def load_conf():
+    try:
+        return json.loads(CONF.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_conf(c):
+    CONF.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONF.with_suffix('.tmp')
+    tmp.write_text(json.dumps(c, indent=2) + '\n')
+    tmp.replace(CONF)
+
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+
+
+def spawn(cmd):
+    try:
+        subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        osd('dialog-warning-symbolic', None, f'Not installed: {cmd[0]}')
+
+
+# ---- indicator (OSD) client -------------------------------------------------------------
+
+def osd(icon, value, text=''):
+    """Show the indicator; value 0-100 draws a level bar, None shows text only."""
+    msg = json.dumps({'icon': icon, 'value': value, 'text': text}).encode()
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.sendto(msg, str(SOCK))
+    except OSError:                      # keyd not running: fall back to a notification
+        body = text or (f'{value}%' if value is not None else '')
+        hints = ['-h', 'string:x-dunst-stack-tag:zorro-osd']
+        if value is not None:
+            hints += ['-h', f'int:value:{value}']
+        run('notify-send', '-a', 'ThinkPad', '-t', '1500', *hints, '-i', icon, body or ' ')
+
+
+# ---- key actions ----------------------------------------------------------------------
+
+def volume():
+    out = run('wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@')
+    m = re.search(r'([\d.]+)', out)
+    return (round(float(m.group(1)) * 100) if m else 0), '[MUTED]' in out
+
+
+def show_volume():
+    vol, muted = volume()
+    if muted:
+        osd('audio-volume-muted-symbolic', vol, 'Muted')
+    else:
+        icon = ('audio-volume-low-symbolic' if vol < 34 else
+                'audio-volume-medium-symbolic' if vol < 67 else 'audio-volume-high-symbolic')
+        osd(icon, vol)
+
+
+def key_volume(step):
+    run('wpctl', 'set-mute', '@DEFAULT_AUDIO_SINK@', '0')   # turning it up means: unmute
+    run('wpctl', 'set-volume', '-l', '1.0', '@DEFAULT_AUDIO_SINK@', f'{abs(step)}%{"+" if step > 0 else "-"}')
+    show_volume()
+
+
+def key_mute():
+    run('wpctl', 'set-mute', '@DEFAULT_AUDIO_SINK@', 'toggle')
+    show_volume()
+
+
+def key_mic_mute():
+    run('wpctl', 'set-mute', '@DEFAULT_AUDIO_SOURCE@', 'toggle')
+    muted = '[MUTED]' in run('wpctl', 'get-volume', '@DEFAULT_AUDIO_SOURCE@')
+    # the F4 LED follows the ALSA capture switch, not PipeWire: keep it in step
+    led = Path('/sys/class/leds/platform::micmute/brightness')
+    try:
+        led.write_text('1' if muted else '0')
+    except OSError:
+        pass
+    osd('microphone-disabled-symbolic' if muted else 'audio-input-microphone-symbolic', None,
+        'Microphone off' if muted else 'Microphone on')
+
+
+def backlight():
+    for d in sorted(Path('/sys/class/backlight').glob('*')):
+        return d
+    return None
+
+
+def key_brightness(up):
+    d = backlight()
+    if not d:
+        return
+    mx = int((d / 'max_brightness').read_text())
+    cur = int((d / 'brightness').read_text())
+    pct = cur * 100 / mx
+    # smaller steps at the dark end, where each step is easy to see
+    step = 2 if pct < 10 or (pct <= 10 and not up) else 5 if pct < 30 else 10
+    new = max(1, min(100, round(pct + (step if up else -step))))
+    try:
+        (d / 'brightness').write_text(str(max(1, round(new * mx / 100))))
+    except PermissionError:
+        if run('brightnessctl', 'set', f'{new}%') == '':
+            osd('dialog-warning-symbolic', None, 'Brightness: run apps/zorro-thinkpad/install.sh')
+            return
+    osd('display-brightness-symbolic', new)
+
+
+def rfkill_all(block, rtype=0):
+    """block/unblock radios through /dev/rfkill (group netdev): rtype 0 = all, 5 = wwan"""
+    RFKILL_OP_CHANGE_ALL = 3
+    with open('/dev/rfkill', 'wb', buffering=0) as fh:
+        fh.write(struct.pack('IBBBB', 0, rtype, RFKILL_OP_CHANGE_ALL, 1 if block else 0, 0))
+
+
+def radios_soft_blocked(types=None):
+    out = []
+    for r in Path('/sys/class/rfkill').glob('rfkill*'):
+        t = (r / 'type').read_text().strip()
+        if types is None or t in types:
+            out.append((r / 'soft').read_text().strip() == '1')
+    return out
+
+
+def key_airplane():
+    states = radios_soft_blocked()
+    turn_off = not all(states)          # any radio still on -> all off
+    try:
+        rfkill_all(turn_off)
+    except OSError as e:
+        osd('dialog-warning-symbolic', None, f'Airplane mode: {e.strerror}')
+        return
+    osd('airplane-mode-symbolic' if turn_off else 'network-wireless-symbolic', None,
+        'Airplane mode on — all radios off' if turn_off else 'Airplane mode off')
+
+
+def key_lte(on):
+    try:
+        rfkill_all(not on, rtype=5)
+    except OSError:
+        pass
+    run('nmcli', 'radio', 'wwan', 'on' if on else 'off')
+    osd('network-cellular-signal-good-symbolic' if on else 'network-cellular-offline-symbolic',
+        None, 'Mobile data (LTE) on' if on else 'Mobile data (LTE) off')
+
+
+def outputs():
+    """connected xrandr outputs: [(name, is_internal, active)]"""
+    out = []
+    for line in run('xrandr', '--query').splitlines():
+        m = re.match(r'(\S+) connected', line)
+        if m:
+            name = m.group(1)
+            out.append((name, name.startswith(('eDP', 'LVDS', 'DSI')),
+                        bool(re.search(r' \d+x\d+\+\d+\+\d+', line))))
+    return out
+
+
+def key_display():
+    outs = outputs()
+    internal = next((o[0] for o in outs if o[1]), None)
+    external = next((o[0] for o in outs if not o[1]), None)
+    if not external or not internal:
+        osd('video-display-symbolic', None, 'No external screen connected')
+        return
+    modes = ['extend', 'mirror', 'external', 'laptop']
+    try:
+        cur = json.loads(STATE.read_text()).get('display')
+    except (OSError, ValueError):
+        cur = None
+    mode = modes[(modes.index(cur) + 1) % len(modes)] if cur in modes else 'extend'
+    if mode == 'extend':
+        cmd = ['--output', internal, '--auto', '--primary',
+               '--output', external, '--auto', '--right-of', internal]
+        text = 'Extend: second screen on the right'
+    elif mode == 'mirror':
+        cmd = ['--output', internal, '--auto', '--primary',
+               '--output', external, '--auto', '--same-as', internal]
+        text = 'Mirror: same picture on both'
+    elif mode == 'external':
+        cmd = ['--output', external, '--auto', '--primary', '--output', internal, '--off']
+        text = 'External screen only'
+    else:
+        cmd = ['--output', internal, '--auto', '--primary', '--output', external, '--off']
+        text = 'Laptop screen only'
+    run('xrandr', *cmd)
+    write_state(display=mode)
+    osd('video-display-symbolic', None, text)
+
+
+def write_state(**kv):
+    try:
+        st = json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        st = {}
+    st.update(kv)
+    STATE.write_text(json.dumps(st))
+
+
+def key_star():
+    c = load_conf()
+    act = c.get('star', 'screenshot')
+    if act == 'custom':
+        cmd = c.get('star_command', '').strip()
+        if not cmd:
+            osd('starred-symbolic', None, 'Star key: choose an action in the ThinkPad app')
+            return
+        spawn(['sh', '-c', cmd])
+    else:
+        spawn(STAR_ACTIONS.get(act, STAR_ACTIONS['screenshot'])[1])
+
+
+def key_settings():
+    spawn([sys.executable, os.path.realpath(__file__)])
+
+
+KEYS = {
+    'vol-up': lambda: key_volume(5), 'vol-down': lambda: key_volume(-5), 'mute': key_mute,
+    'mic-mute': key_mic_mute,
+    'bright-up': lambda: key_brightness(True), 'bright-down': lambda: key_brightness(False),
+    'display': key_display, 'airplane': key_airplane,
+    'lte-on': lambda: key_lte(True), 'lte-off': lambda: key_lte(False),
+    'star': key_star, 'settings': key_settings,
+    'screenshot-region': lambda: spawn(['zorro-shot', '--region']),
+}
+
+
+# ---- keyd: indicator window + evdev keys + keyboard light ---------------------------------
+
+def find_event_device(name):
+    for ev in sorted(Path('/sys/class/input').glob('event*')):
+        try:
+            if (ev / 'device' / 'name').read_text().strip() == name:
+                return Path('/dev/input') / ev.name
+        except OSError:
+            pass
+    return None
+
+
+def cmd_keyd():
+    import threading
+    import gi
+    gi.require_version('Gtk', '3.0')
+    gi.require_version('Gdk', '3.0')
+    from gi.repository import Gdk, GLib, Gtk
+
+    # one keyd per session: a live socket means another one runs
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.connect(str(SOCK))
+        sys.exit('zorro-thinkpad keyd: already running')
+    except (ConnectionRefusedError, FileNotFoundError):
+        pass
+    try:
+        SOCK.unlink()
+    except FileNotFoundError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    srv.bind(str(SOCK))
+    os.chmod(SOCK, 0o600)
+
+    css = Gtk.CssProvider()
+    css.load_from_data(b'''
+        .zosd { background: rgba(28,28,32,0.94); border-radius: 14px; padding: 12px 18px;
+                border: 1px solid rgba(255,255,255,0.08); }
+        .zosd label { color: #f0f0f0; font-size: 12pt; }
+        .zosd image { color: #f0f0f0; }
+        .zosd progressbar trough { min-height: 6px; border-radius: 3px;
+                                   background: rgba(255,255,255,0.18); border: none; }
+        .zosd progressbar progress { min-height: 6px; border-radius: 3px;
+                                     background: #4a9eff; border: none; }
+    ''')
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    class Indicator(Gtk.Window):
+        def __init__(self):
+            super().__init__(type=Gtk.WindowType.POPUP)
+            screen = self.get_screen()
+            if screen.is_composited() and screen.get_rgba_visual():
+                self.set_visual(screen.get_rgba_visual())   # rounded corners
+                self.set_app_paintable(True)
+                self.connect('draw', self.clear_bg)
+            self.set_accept_focus(False)
+            box = Gtk.Box(spacing=14)
+            box.get_style_context().add_class('zosd')
+            self.icon = Gtk.Image()
+            self.icon.set_pixel_size(28)
+            box.add(self.icon)
+            self.bar = Gtk.ProgressBar(valign=Gtk.Align.CENTER, hexpand=True)
+            self.bar.set_size_request(200, -1)
+            box.add(self.bar)
+            self.label = Gtk.Label(xalign=0)
+            box.add(self.label)
+            self.add(box)
+            box.show_all()
+            self.hide_id = None
+
+        def clear_bg(self, _w, cr):
+            cr.set_operator(0)          # CLEAR: let the rounded box show its own corners
+            cr.paint()
+            cr.set_operator(2)          # OVER
+            return False
+
+        def show_level(self, icon, value, text):
+            self.icon.set_from_icon_name(icon or 'dialog-information-symbolic', Gtk.IconSize.DIALOG)
+            self.icon.set_pixel_size(28)
+            if value is None:
+                self.bar.hide()
+                self.label.set_text(text)
+            else:
+                self.bar.show()
+                self.bar.set_fraction(max(0, min(100, value)) / 100)
+                self.label.set_text(text or f'{value}%')
+                self.label.set_width_chars(5 if not text else -1)
+            self.resize(1, 1)
+            _, nat = self.get_preferred_size()
+            disp = Gdk.Display.get_default()
+            mon = disp.get_primary_monitor() or disp.get_monitor(0)
+            g = mon.get_geometry()
+            self.move(g.x + (g.width - nat.width) // 2, g.y + g.height - nat.height - 90)
+            self.show()
+            if self.hide_id:
+                GLib.source_remove(self.hide_id)
+            self.hide_id = GLib.timeout_add(1500, self.done)
+
+        def done(self):
+            self.hide()
+            self.hide_id = None
+            return False
+
+    ind = Indicator()
+
+    def on_msg(fd, _cond):
+        try:
+            data = srv.recv(4096)
+            m = json.loads(data)
+            ind.show_level(m.get('icon'), m.get('value'), m.get('text', ''))
+        except (OSError, ValueError):
+            pass
+        return True
+    GLib.io_add_watch(srv.fileno(), GLib.IO_IN, on_msg)
+
+    # keys that X cannot deliver: read the ThinkPad Extra Buttons device directly
+    def evdev_reader():
+        fmt = 'llHHi'
+        size = struct.calcsize(fmt)
+        warned = False
+        while True:
+            dev = find_event_device(EXTRA_BUTTONS)
+            try:
+                with open(dev, 'rb', buffering=0) as fh:
+                    warned = False
+                    while True:
+                        data = fh.read(size)
+                        if len(data) < size:
+                            break
+                        _, _, typ, code, val = struct.unpack(fmt, data)
+                        if typ == 1 and val == 1 and code in EVDEV_KEYS:
+                            name = EVDEV_KEYS[code]
+                            threading.Thread(target=KEYS[name], daemon=True).start()
+            except (OSError, TypeError) as e:
+                if not warned:
+                    print(f'zorro-thinkpad keyd: cannot read {dev}: {e} '
+                          '(run apps/zorro-thinkpad/install.sh)', file=sys.stderr)
+                    warned = True
+                time.sleep(30)
+    threading.Thread(target=evdev_reader, daemon=True).start()
+
+    # Fn+Space: the firmware changes the keyboard light and pokes brightness_hw_changed
+    hw = KBD_LED / 'brightness_hw_changed'
+    if hw.exists():
+        fh = open(hw)
+        fh.read()
+
+        def on_kbd(_fd, _cond):
+            fh.seek(0)
+            try:
+                lvl = int(fh.read().strip() or 0)
+            except ValueError:
+                return True
+            mx = int((KBD_LED / 'max_brightness').read_text())
+            words = {0: 'Keyboard light off', 1: 'Keyboard light low', 2: 'Keyboard light high'}
+            ind.show_level('keyboard-brightness-symbolic', round(lvl * 100 / mx) if lvl else None,
+                           words.get(lvl, f'Keyboard light {lvl}'))
+            return True
+        GLib.io_add_watch(fh.fileno(), GLib.IO_PRI | GLib.IO_ERR, on_kbd)
+
+    Gtk.main()
+
+
+# ---- main --------------------------------------------------------------------------------
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] == ['key'] and len(a) == 2 and a[1] in KEYS:
+        KEYS[a[1]]()
+    elif a[:1] == ['keyd']:
+        cmd_keyd()
+    elif a[:1] == ['osd'] and len(a) >= 3:
+        osd(a[1], None if a[2] == '-' else int(a[2]), ' '.join(a[3:]))
+    elif not a:
+        osd('preferences-system-symbolic', None, 'ThinkPad settings app: coming next')
+    else:
+        print(__doc__.strip())
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

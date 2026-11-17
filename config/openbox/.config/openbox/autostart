@@ -11,6 +11,10 @@ else
   xss-lock -- dm-tool lock &
 fi
 
+# ThinkPad: volume/brightness indicator + keys X cannot see (apps/zorro-thinkpad)
+[ -d /sys/devices/platform/thinkpad_acpi ] && command -v zorro-thinkpad >/dev/null \
+  && zorro-thinkpad keyd &
+
 command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 (sleep 3 && "$HOME/.local/bin/google-apps") &
 (sleep 4 && "$HOME/.local/bin/whatsapp") &

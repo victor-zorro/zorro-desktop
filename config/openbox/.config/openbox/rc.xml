@@ -256,35 +256,56 @@
         <to>4</to>
       </action>
     </keybind>
-    <!-- Laptop media keys (ignored on machines without them) -->
-    <keybind key="XF86MonBrightnessUp">
-      <action name="Execute">
-        <command>brightnessctl set +10%</command>
-      </action>
-    </keybind>
-    <keybind key="XF86MonBrightnessDown">
-      <action name="Execute">
-        <command>brightnessctl set 10%-</command>
-      </action>
-    </keybind>
+    <!-- Laptop keys -> apps/zorro-thinkpad (indicator bottom centre). F4 mic, F9, F10/F11 and
+         Fn+PrtSc never reach X (codes above 255): "zorro-thinkpad keyd" reads those itself. -->
     <keybind key="XF86AudioRaiseVolume">
       <action name="Execute">
-        <command>wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+</command>
+        <command>zorro-thinkpad key vol-up</command>
       </action>
     </keybind>
     <keybind key="XF86AudioLowerVolume">
       <action name="Execute">
-        <command>wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-</command>
+        <command>zorro-thinkpad key vol-down</command>
       </action>
     </keybind>
     <keybind key="XF86AudioMute">
       <action name="Execute">
-        <command>wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle</command>
+        <command>zorro-thinkpad key mute</command>
       </action>
     </keybind>
     <keybind key="XF86AudioMicMute">
       <action name="Execute">
-        <command>wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle</command>
+        <command>zorro-thinkpad key mic-mute</command>
+      </action>
+    </keybind>
+    <keybind key="XF86MonBrightnessUp">
+      <action name="Execute">
+        <command>zorro-thinkpad key bright-up</command>
+      </action>
+    </keybind>
+    <keybind key="XF86MonBrightnessDown">
+      <action name="Execute">
+        <command>zorro-thinkpad key bright-down</command>
+      </action>
+    </keybind>
+    <keybind key="XF86Display">
+      <action name="Execute">
+        <command>zorro-thinkpad key display</command>
+      </action>
+    </keybind>
+    <keybind key="XF86WLAN">
+      <action name="Execute">
+        <command>zorro-thinkpad key airplane</command>
+      </action>
+    </keybind>
+    <keybind key="XF86RFKill">
+      <action name="Execute">
+        <command>zorro-thinkpad key airplane</command>
+      </action>
+    </keybind>
+    <keybind key="XF86Favorites">
+      <action name="Execute">
+        <command>zorro-thinkpad key star</command>
       </action>
     </keybind>
     <chainQuitKey>C-g</chainQuitKey>

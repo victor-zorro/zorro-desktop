@@ -172,6 +172,11 @@ if has laptop; then
   # Lid: suspend, hibernate after 10 min (swap must be >= RAM, resume= in initramfs)
   sudo install -Dm644 system/systemd/logind-lid.conf /etc/systemd/logind.conf.d/zorro-lid.conf
   sudo install -Dm644 system/systemd/sleep-zorro.conf /etc/systemd/sleep.conf.d/zorro.conf
+  # ThinkPad app (apps/zorro-thinkpad): Fn keys, indicator, LEDs
+  if [[ -d /sys/devices/platform/thinkpad_acpi ]]; then
+    sudo apps/zorro-thinkpad/install.sh
+    apps/zorro-thinkpad/install-user.sh
+  fi
 fi
 
 log "Time zone: Europe/Berlin"

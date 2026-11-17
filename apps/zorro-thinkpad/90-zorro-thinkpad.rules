@@ -1,0 +1,5 @@
+# zorro-thinkpad: let the logged-in user change brightness and the ThinkPad LEDs,
+# and read only the "ThinkPad Extra Buttons" keys (F4, F9-F11, Fn+PrtSc) - not the keyboard.
+ACTION=="add", SUBSYSTEM=="backlight", RUN+="/bin/chgrp video /sys%p/brightness", RUN+="/bin/chmod g+w /sys%p/brightness"
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="tpacpi::kbd_backlight|tpacpi::lid_logo_dot|tpacpi::power|platform::micmute", RUN+="/bin/chgrp video /sys%p/brightness", RUN+="/bin/chmod g+w /sys%p/brightness"
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="ThinkPad Extra Buttons", TAG+="uaccess"

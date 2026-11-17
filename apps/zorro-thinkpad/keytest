@@ -1,0 +1,51 @@
+#!/usr/bin/python3
+"""keytest: show which input device and key code every key press comes from.
+Run with sudo (input devices are root-only), press the keys, Ctrl+C or wait 60 s.
+Also written to /tmp/zorro-keytest.log so it can be read afterwards.
+Only special keys (F-keys, media, PrtSc and above) are shown, never ordinary typing."""
+import os
+import re
+import select
+import struct
+import sys
+import time
+
+NAMES = {}
+for line in open('/usr/include/linux/input-event-codes.h'):
+    m = re.match(r'#define\s+(KEY_\w+)\s+(0x[0-9a-fA-F]+|\d+)', line)
+    if m:
+        NAMES.setdefault(int(m.group(2), 0), m.group(1))
+
+WANT = ('AT Translated Set 2 keyboard', 'ThinkPad Extra Buttons', 'Video Bus')
+devs = {}
+for ev in sorted(os.listdir('/sys/class/input')):
+    if ev.startswith('event'):
+        name = open(f'/sys/class/input/{ev}/device/name').read().strip()
+        if name in WANT:
+            devs[os.open(f'/dev/input/{ev}', os.O_RDONLY | os.O_NONBLOCK)] = name
+
+log = open('/tmp/zorro-keytest.log', 'w')
+os.chmod('/tmp/zorro-keytest.log', 0o644)
+print('Press the Fn keys one by one (F1..F12, Fn+Space, Fn+PrtSc, PrtSc). 60 s or Ctrl+C.')
+FMT = 'llHHi'
+SIZE = struct.calcsize(FMT)
+end = time.time() + 60
+try:
+    while time.time() < end:
+        r, _, _ = select.select(list(devs), [], [], 1)
+        for fd in r:
+            data = os.read(fd, SIZE * 64)
+            for i in range(0, len(data) - SIZE + 1, SIZE):
+                _, _, typ, code, val = struct.unpack(FMT, data[i:i + SIZE])
+                # EV_KEY presses of special keys only: never letters, digits or symbols
+                special = code >= 113 or code == 99 or 59 <= code <= 68 or code in (87, 88)
+                if typ == 1 and val == 1 and special:
+                    xcode = code + 8
+                    line = (f'{devs[fd]:30} {NAMES.get(code, code):28} code {code:4}  '
+                            f'X keycode {xcode}{"  (too high for X)" if xcode > 255 else ""}')
+                    print(line)
+                    log.write(line + '\n')
+                    log.flush()
+except KeyboardInterrupt:
+    pass
+print('done, saved to /tmp/zorro-keytest.log')

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ThinkPad
+GenericName=ThinkPad settings
+Comment=Fn keys, power, lights, LTE and hardware check
+Exec=zorro-thinkpad
+Icon=computer
+Terminal=false
+Categories=Settings;HardwareSettings;
