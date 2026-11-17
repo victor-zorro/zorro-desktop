@@ -25,7 +25,7 @@ QUESTIONS = [
 ]
 
 
-def ask(fd, cmd, wait=3.0):
+def ask(fd, cmd, wait=5.0):
     os.write(fd, (cmd + '\r').encode())
     out, end = b'', time.time() + wait
     while time.time() < end:
@@ -46,6 +46,11 @@ def main():
     def say(s):
         print(s)
         log.write(s + '\n')
+    import subprocess
+    kern = subprocess.run(['dmesg'], capture_output=True, text=True).stdout.splitlines()
+    say('== kernel messages about the modem driver (iosm / wwan)')
+    for line in [l for l in kern if 'iosm' in l.lower() or 'wwan' in l.lower()][-25:]:
+        say('   ' + line)
     for port in PORTS:
         try:
             fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
@@ -53,15 +58,24 @@ def main():
             say(f'{port}: {e.strerror}')
             continue
         say(f'== {port}')
+        first = ask(fd, 'AT', wait=8)
+        say(f'{"AT":40} {first!r}   (raw answer: empty = the port is silent)')
+        if not first:
+            os.close(fd)
+            continue
         for cmd, what in QUESTIONS:
             ans = ask(fd, cmd)
             if cmd == 'AT+CIMI':                # never log the SIM identity itself
                 ans = 'SIM identity: present' if any(c.isdigit() for c in ans) else ans
             say(f'{cmd:40} {ans.replace(chr(13), " ").replace(chr(10), " ")}   ({what})')
         os.close(fd)
-        log.close()
-        return
-    say('no modem port could be opened')
+    for name in ('/sys/class/wwan/wwan0/device/power_state', '/sys/bus/pci/devices/0000:05:00.0/power_state',
+                 '/sys/bus/pci/devices/0000:05:00.0/enable'):
+        try:
+            say(f'{name}: {open(name).read().strip()}')
+        except OSError:
+            pass
+    log.close()
 
 
 if __name__ == '__main__':

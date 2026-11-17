@@ -15,8 +15,12 @@
     pass_seconds: 70, gap_seconds: 0, far: 0.33,
     snow_amount: 140, snow_speed: 1, snow_size: 1, snow_colour: '#9a9aa0', snow_alpha: 1,
     grain: 1, scratches: 1, dust: 1, scanlines: 1, vignette: 1, flicker: 1,
-    chroma: 1, glitch_rate: 1, glitch_strength: 1, bars: true, crt: true,
+    chroma: 1, glitch_rate: 1, glitch_strength: 1, bars: false, crt: true,
+    // chromatic blur: the light splits into its colours and smears like through a lens
+    cblur: 1, cblur_mode: 'lens',  // lens (from the centre outward), prism (sideways), glow
+    bloom: 0.6,                    // soft coloured glow around the lines
   };
+  const CBLUR_MODES = { lens: 0, prism: 1, glow: 2 };
   const cfg = Object.assign({}, DEFAULTS, window.ZORRO_LOOK || {});
   const ANIMALS = ['whale', 'vaquita', 'hammerhead', 'turtle', 'manta'];
   const hex = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); const n = parseInt(m ? m[1] : 'e6e6ec', 16);
@@ -54,6 +58,7 @@
     uniform vec2  uRes;
     uniform float uTime, uStatic, uBurst, uBars, uPower, uSeed;
     uniform float uGrain, uScratch, uDust, uScan, uVig, uFlick, uChroma, uBarsOn;
+    uniform float uCBlur, uCMode, uBloom;
     uniform sampler2D uWhale;
 
     float h11(float p){ p = fract(p*.1031); p *= p+33.33; p *= p+p; return fract(p); }
@@ -94,11 +99,45 @@
       float roll  = uStatic * fract(t*.9) * .35;
       vec2 wuv = vec2(uv.x + shift, fract(uv.y + roll));
 
-      // animal with chromatic split
+      // animal with chromatic split (sharp, grows with glitches)
       float ca = (.0015 + .022*uBurst) * uChroma;
       vec3 col = vec3(texture2D(uWhale, wuv + vec2(ca,0.)).r,
                       texture2D(uWhale, wuv).g,
                       texture2D(uWhale, wuv - vec2(ca,0.)).b);
+
+      // chromatic blur: sample along a line, each tap tinted by its place in the
+      // spectrum (red .. green .. blue), so light fans out into colour and smears
+      if (uCBlur > 0.) {
+        vec2 dir;
+        if (uCMode < .5)      dir = (wuv - .5) * .045;                 // lens: radial
+        else if (uCMode < 1.5) dir = vec2(.012, 0.);                   // prism: sideways
+        else                  dir = (wuv - .5) * .02;                  // glow: softer lens
+        dir *= uCBlur * (1. + 1.5*uBurst);
+        vec3 acc = vec3(0.), wsum = vec3(0.);
+        for (int i = 0; i < 12; i++) {
+          float k = float(i) / 11.;
+          vec3 w = clamp(vec3(1.6 - 2.6*k, 1. - abs(2.*k - 1.)*1.4, 2.6*k - 1.), 0., 1.) + .04;
+          vec3 s = texture2D(uWhale, wuv + dir*(k - .5)).rgb;
+          acc += s * w; wsum += w;
+        }
+        vec3 disp = acc / wsum;
+        float mixk = uCMode > 1.5 ? .55 : .85;
+        col = mix(col, max(col*.55, disp*1.6), clamp(uCBlur, 0., 1.) * mixk);
+      }
+      // bloom: a wide, coloured glow (red outside, cyan inside)
+      if (uBloom > 0.) {
+        vec3 b = vec3(0.);
+        for (int i = 0; i < 8; i++) {
+          float a = float(i) * .785398;
+          vec2 o = vec2(cos(a), sin(a));
+          b.r += texture2D(uWhale, wuv + o * .009).g;
+          b.g += texture2D(uWhale, wuv + o * .006).g;
+          b.b += texture2D(uWhale, wuv + o * .004).g;
+        }
+        // red reaches widest, blue stays tight: a warm halo with a cool core
+        col += b / 8. * vec3(.95, .4, .7) * uBloom * .6
+             + texture2D(uWhale, wuv).g * vec3(.1, .9, 1.) * uBloom * .12;
+      }
 
       // film flicker
       col *= 1. - .1*uFlick*(1. - h11(fr*1.7));
@@ -161,7 +200,8 @@
 
   let prog, U = {}, tex;
   const UNIFORMS = ['uRes','uTime','uStatic','uBurst','uBars','uPower','uSeed','uWhale',
-                    'uGrain','uScratch','uDust','uScan','uVig','uFlick','uChroma','uBarsOn'];
+                    'uGrain','uScratch','uDust','uScan','uVig','uFlick','uChroma','uBarsOn',
+                    'uCBlur','uCMode','uBloom'];
   function initGL() {
     if (!gl) return false;
     const sh = (type, src) => {
@@ -636,6 +676,9 @@
       gl.uniform1f(U.uFlick, +cfg.flicker);
       gl.uniform1f(U.uChroma, +cfg.chroma);
       gl.uniform1f(U.uBarsOn, cfg.bars ? 1 : 0);
+      gl.uniform1f(U.uCBlur, +cfg.cblur);
+      gl.uniform1f(U.uCMode, CBLUR_MODES[cfg.cblur_mode] ?? 0);
+      gl.uniform1f(U.uBloom, +cfg.bloom);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wc);
