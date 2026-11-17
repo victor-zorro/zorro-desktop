@@ -237,6 +237,21 @@ class Snow:
             p['x'] %= W
             p['y'] = (p['y'] + 3) % (H + 6) - 3
 
+    @staticmethod
+    def organic(x, y, W, H, t):
+        """how visible a particle is in the spill area: 1 inside a soft blob around the box,
+        fading to 0 at its edge. The edge is an ellipse with slow waves, so the cloud has
+        an organic, breathing outline instead of a rectangle."""
+        dx, dy = (x - W / 2) / (W / 2), (y - H / 2) / (H / 2)
+        e = math.hypot(dx, dy)                  # 0 centre .. 1 at the ellipse
+        th = math.atan2(dy, dx)
+        edge = 0.92 + 0.07 * math.sin(3 * th + t * 0.35) + 0.05 * math.sin(5 * th - t * 0.6 + 1.3) \
+            + 0.03 * math.sin(8 * th + t * 0.9 + 2.1)
+        f = (edge - e) / 0.45                   # soft fade band
+        if f <= 0:
+            return 0.0
+        return 1.0 if f >= 1 else f * f * (3 - 2 * f)
+
     def outline(self, cr, x, y, w, h):
         r = min(self.radius, h / 2)
         if r:
@@ -294,11 +309,8 @@ class Snow:
         for p in self.parts:
             z, x, y = p['z'], p['x'], p['y']
             alpha = (0.22 + 0.7 * z) * pop
-            if spill:                                         # fade out away from the box
-                dx = max(bx - x, 0, x - bx - bw)
-                dy = max(by - y, 0, y - by - bh)
-                if dx or dy:
-                    alpha *= max(0.0, 1 - math.hypot(dx, dy) / spill)
+            if spill:                                  # one soft cloud, no seam at the box
+                alpha *= self.organic(x, y, W, H, t)
             if twinkle:
                 alpha *= 0.5 + 0.5 * math.sin(t * (1.2 + 2.5 * z) + p['ph'])
             if alpha <= 0.01:

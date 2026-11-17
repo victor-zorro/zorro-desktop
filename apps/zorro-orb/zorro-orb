@@ -1,0 +1,459 @@
+#!/usr/bin/python3
+"""zorro-orb: the round info area on the desktop (replaces conky).
+
+A circle in a corner of the screen with moving particles (zorro-fx profile "orb"). It
+shows a resting display (default: the clock). The circle is an invisible touch area: its
+four quarters are hidden zones; move the mouse over one and the circle shows that zone's
+information. Click a zone to open the matching app.
+
+  zorro-orb            run (Openbox autostart starts it)
+  zorro-orb --once     print every info item once (testing)
+
+Settings: ~/.config/zorro-orb/config.json, edited in the Zorro app → Desktop → Info circle.
+"""
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+HOME = Path.home()
+CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-orb' / 'config.json'
+DRIVE_STATE = Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state')) / 'zorro-drive'
+BAT = Path('/sys/class/power_supply/BAT0')
+
+DEFAULTS = {
+    'size': 240,                # diameter in px
+    'corner': 'bottom-right',   # bottom-right, bottom-left, top-right, top-left
+    'margin': 28,               # px from the screen edges
+    'rest': 'clock',            # shown when the mouse is not on a zone
+    'zones': {'tl': 'battery', 'tr': 'network', 'bl': 'drive', 'br': 'messages'},
+    'text_colour': '#d8d8de',
+}
+ZONE_NAMES = {'tl': 'Top left', 'tr': 'Top right', 'bl': 'Bottom left', 'br': 'Bottom right'}
+
+sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+try:
+    import zorro_fx
+except ImportError:
+    zorro_fx = None
+
+
+def load_conf():
+    c = json.loads(json.dumps(DEFAULTS))
+    try:
+        user = json.loads(CONF.read_text())
+        c.update({k: v for k, v in user.items() if k in DEFAULTS and k != 'zones'})
+        c['zones'].update(user.get('zones', {}))
+    except (OSError, ValueError):
+        pass
+    return c
+
+
+def run(*cmd, timeout=5):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+
+
+def sysread(p, default=''):
+    try:
+        return Path(p).read_text().strip()
+    except OSError:
+        return default
+
+
+# ---- info items: each returns (title, big text, [small lines]) -----------------------------
+
+def info_clock():
+    return '', time.strftime('%H:%M'), [time.strftime('%A %-d %B')]
+
+
+def info_calendar():
+    return 'Calendar', time.strftime('%-d'), [time.strftime('%A'), time.strftime('%B %Y'),
+                                              f'week {time.strftime("%V")}']
+
+
+def info_battery():
+    if not BAT.exists():
+        return 'Battery', '—', ['no battery']
+    cap, status = sysread(BAT / 'capacity', '?'), sysread(BAT / 'status', '?').lower()
+    lines = [status]
+    try:
+        now = int(sysread(BAT / 'energy_now') or 0)
+        full = int(sysread(BAT / 'energy_full') or 0)
+        power = int(sysread(BAT / 'power_now') or 0)
+        if power > 0 and status == 'discharging':
+            h = now / power
+            lines = [f'{int(h)}:{int(h * 60 % 60):02d} left']
+        elif power > 0 and status == 'charging':
+            h = (full - now) / power
+            lines = [f'full in {int(h)}:{int(h * 60 % 60):02d}']
+        design = int(sysread(BAT / 'energy_full_design') or 0)
+        if design:
+            lines.append(f'health {full * 100 // design}%  ·  {sysread(BAT / "cycle_count", "?")} cycles')
+    except ValueError:
+        pass
+    return 'Battery', f'{cap}%', lines
+
+
+def info_network():
+    wifi = next((l.split(':') for l in run('nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL', 'dev',
+                                           'wifi').splitlines() if l.startswith('yes:')), None)
+    lines = []
+    big = wifi[1] if wifi else 'offline'
+    if wifi:
+        lines.append(f'Wi-Fi {wifi[2]}%')
+    elif 'ethernet:connected' in run('nmcli', '-t', '-f', 'TYPE,STATE', 'dev'):
+        big = 'wired'
+    ip = run('hostname', '-I').split()
+    if ip:
+        lines.append(ip[0])
+    nb = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', run('ip', '-4', 'addr', 'show', 'wt0'))
+    if nb:
+        lines.append(f'NetBird {nb.group(1)}')
+    return 'Network', big, lines
+
+
+_cpu = {'prev': None}
+
+
+def info_system():
+    f = sysread('/proc/stat').splitlines()[0].split()[1:]
+    vals = list(map(int, f))
+    idle, total = vals[3] + vals[4], sum(vals)
+    cpu = 0
+    if _cpu['prev']:
+        di, dt = idle - _cpu['prev'][0], total - _cpu['prev'][1]
+        cpu = round(100 * (1 - di / dt)) if dt else 0
+    _cpu['prev'] = (idle, total)
+    mem = dict(re.findall(r'(\w+):\s+(\d+)', sysread('/proc/meminfo')))
+    used = (int(mem['MemTotal']) - int(mem['MemAvailable'])) / 1048576
+    st = os.statvfs('/')
+    free = st.f_bavail * st.f_frsize / 1e9
+    temp = ''
+    for z in Path('/sys/class/thermal').glob('thermal_zone*'):
+        if sysread(z / 'type') in ('acpitz', 'k10temp', 'x86_pkg_temp'):
+            temp = f'{int(sysread(z / "temp", "0")) // 1000}°C'
+            break
+    return 'System', f'{cpu}%', [f'memory {used:.1f} / {int(mem["MemTotal"]) / 1048576:.0f} GB',
+                                 f'disk {free:.0f} GB free' + (f'  ·  {temp}' if temp else '')]
+
+
+def drive_busy(d):
+    """a sync really runs only while its process holds the folder lock (as zorro-drive)"""
+    import fcntl
+    try:
+        with open(d / 'lock', 'a') as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        return False
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+
+
+def info_drive():
+    states = []
+    for st in DRIVE_STATE.glob('*/status.json'):
+        try:
+            s = json.loads(st.read_text())
+        except (OSError, ValueError):
+            continue
+        if s.get('state') in ('syncing', 'queued') and not drive_busy(st.parent):
+            s['state'] = 'error'            # the sync process died: interrupted
+        states.append(s)
+    if not states:
+        return 'Drive', '—', ['no synced folders']
+    busy = sum(s.get('state') in ('syncing', 'queued') for s in states)
+    bad = sum(s.get('state') in ('error', 'needs_resync', 'rate_limited') for s in states)
+    last = max((s.get('last_ok') or 0) for s in states)
+    ago = ''
+    if last:
+        m = int((time.time() - last) / 60)
+        ago = 'last sync ' + ('just now' if m < 1 else f'{m} min ago' if m < 120 else f'{m // 60} h ago')
+    if busy:
+        big = f'↻ {busy}'
+        lines = ['syncing']
+    elif bad:
+        big = f'⚠ {bad}'
+        lines = ['needs attention']
+    else:
+        big = '✓'
+        lines = ['all in sync']
+    return 'Drive', big, lines + ([ago] if ago else []) + [f'{len(states)} folders']
+
+
+def info_messages():
+    try:
+        data = json.loads(run('dunstctl', 'history') or '{}')['data'][0]
+    except (ValueError, KeyError, IndexError):
+        data = []
+    if not data:
+        return 'Messages', '0', ['no notifications']
+    first = data[0]
+    app = first.get('appname', {}).get('data', '')
+    summ = first.get('summary', {}).get('data', '')
+    return 'Messages', str(len(data)), [f'{app}:' if app else '', summ[:28]]
+
+
+def info_sound():
+    def vol(which):
+        out = run('wpctl', 'get-volume', f'@DEFAULT_AUDIO_{which}@')
+        m = re.search(r'([\d.]+)', out)
+        return (round(float(m.group(1)) * 100) if m else 0), '[MUTED]' in out
+    v, muted = vol('SINK')
+    _, mic_muted = vol('SOURCE')
+    bl = next(iter(sorted(Path('/sys/class/backlight').glob('*'))), None)
+    lines = [f'mic {"off" if mic_muted else "on"}']
+    if bl:
+        try:
+            lines.append(f'screen {int(sysread(bl / "brightness")) * 100 // int(sysread(bl / "max_brightness"))}%')
+        except ValueError:
+            pass
+    return 'Sound', 'muted' if muted else f'{v}%', lines
+
+
+ITEMS = {
+    'clock': ('Clock', info_clock),
+    'calendar': ('Calendar', info_calendar),
+    'battery': ('Battery', info_battery),
+    'network': ('Network', info_network),
+    'system': ('System (CPU, memory, disk)', info_system),
+    'drive': ('Drive sync', info_drive),
+    'messages': ('Messages (notifications)', info_messages),
+    'sound': ('Sound and screen', info_sound),
+    'none': ('Nothing (zone off)', None),
+}
+CLICK = {                       # what a click on a zone opens
+    'battery': ['zorro-settings', '--page', 'power:0'],
+    'network': ['nm-connection-editor'],
+    'drive': ['zorro-drive'],
+    'messages': ['dunstctl', 'history-pop'],
+    'sound': ['zorro-settings', '--page', 'hw:0'],
+    'system': ['x-terminal-emulator', '-e', 'htop'],
+    'calendar': ['zorro-settings', '--page', 'orb:0'],
+    'clock': ['zorro-settings', '--page', 'orb:0'],
+}
+
+
+# ---- the window --------------------------------------------------------------------------
+
+def main():
+    if '--once' in sys.argv:
+        info_system()
+        time.sleep(0.3)
+        for k, (label, fn) in ITEMS.items():
+            if fn:
+                print(f'{k:9}', fn())
+        return
+
+    import cairo
+    import gi
+    gi.require_version('Gtk', '3.0')
+    gi.require_version('Gdk', '3.0')
+    gi.require_version('PangoCairo', '1.0')
+    from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
+
+    class Orb(Gtk.Window):
+        def __init__(self):
+            super().__init__(title='zorro-orb')
+            self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
+            self.set_decorated(False)
+            self.set_skip_taskbar_hint(True)
+            self.set_skip_pager_hint(True)
+            self.set_accept_focus(False)
+            self.stick()
+            self.set_keep_below(True)
+            self.set_app_paintable(True)
+            self.connect('draw', self.paint_bg)
+            self.conf, self.conf_mtime = load_conf(), None
+            self.data, self.lock = {}, threading.Lock()
+            self.zone, self.shown, self.fade = None, None, 1.0
+            self.prev_text = None
+
+            outer = Gtk.Box()
+            self.area = Gtk.DrawingArea()
+            self.area.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK
+                                 | Gdk.EventMask.BUTTON_PRESS_MASK)
+            self.area.connect('draw', self.paint_info)
+            self.area.connect('motion-notify-event', self.on_motion)
+            self.area.connect('leave-notify-event', lambda w, e: self.set_zone(None))
+            self.area.connect('button-press-event', self.on_click)
+            outer.add(self.area)
+            self.add(outer)
+            if zorro_fx:
+                self.snow = zorro_fx.Snow(outer, radius=10000, inner=self.area, profile='orb')
+            self.layout()
+            self.show_all()
+            GLib.timeout_add(1000, self.every_second)
+            GLib.timeout_add(40, self.animate)
+            threading.Thread(target=self.collect, daemon=True).start()
+
+        # -- size, place, round shape
+        def layout(self):
+            d = int(self.conf['size'])
+            spill = int(zorro_fx.settings('orb')['spill']) if zorro_fx else 0
+            self.area.set_size_request(d, d)
+            if zorro_fx:
+                self.snow.update_spill()
+            full = d + 2 * spill
+            self.resize(full, full)
+            disp = Gdk.Display.get_default()
+            g = (disp.get_primary_monitor() or disp.get_monitor(0)).get_geometry()
+            m, corner = int(self.conf['margin']), self.conf['corner']
+            x = g.x + m - spill if 'left' in corner else g.x + g.width - m - d - spill
+            y = g.y + m - spill if 'top' in corner else g.y + g.height - m - d - spill
+            self.move(x, y)
+            self.geom = (d, spill)
+            GLib.idle_add(self.reshape, full, d, spill)
+
+        def reshape(self, full, d, spill):
+            """the window itself is round (X shape): the desktop shows around it"""
+            gw = self.get_window()
+            if not gw:
+                return False
+            reg = cairo.Region()
+            r = full / 2
+            for y in range(full):
+                dy = y + 0.5 - r
+                half = math.sqrt(max(0.0, r * r - dy * dy))
+                if half >= 0.5:
+                    reg.union(cairo.RectangleInt(int(r - half), y, max(1, int(2 * half)), 1))
+            gw.shape_combine_region(reg, 0, 0)
+            return False
+
+        def paint_bg(self, _w, cr):
+            cr.set_source_rgb(0, 0, 0)          # the spill area: same black as the desktop
+            cr.paint()
+            return False
+
+        # -- zones
+        def on_motion(self, w, ev):
+            d = self.geom[0]
+            dx, dy = ev.x - d / 2, ev.y - d / 2
+            if dx * dx + dy * dy > (d / 2) ** 2:
+                self.set_zone(None)
+                return
+            self.set_zone(('t' if dy < 0 else 'b') + ('l' if dx < 0 else 'r'))
+
+        def set_zone(self, z):
+            if z and self.conf['zones'].get(z, 'none') == 'none':
+                z = None
+            if z != self.zone:
+                self.zone = z
+                self.fade = 0.0                 # crossfade to the new info
+
+        def on_click(self, _w, ev):
+            item = self.current_item()
+            cmd = CLICK.get(item)
+            if cmd and ev.button == 1:
+                try:
+                    subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except OSError:
+                    pass
+
+        def current_item(self):
+            return self.conf['zones'].get(self.zone) if self.zone else self.conf['rest']
+
+        # -- data: gathered in a thread, so slow commands never stop the animation
+        def collect(self):
+            while True:
+                wanted = {self.conf['rest'], *self.conf['zones'].values()} - {'none'}
+                for k in wanted:
+                    fn = ITEMS.get(k, (None, None))[1]
+                    if fn:
+                        try:
+                            val = fn()
+                        except Exception as e:      # noqa: BLE001 - shown in the circle
+                            val = (ITEMS[k][0], '?', [str(e)[:30]])
+                        with self.lock:
+                            self.data[k] = val
+                time.sleep(3)
+
+        def every_second(self):
+            try:
+                mt = CONF.stat().st_mtime
+            except OSError:
+                mt = None
+            if mt != self.conf_mtime:
+                self.conf_mtime, self.conf = mt, load_conf()
+            spill = int(zorro_fx.settings('orb')['spill']) if zorro_fx else 0
+            if (int(self.conf['size']), spill) != self.geom:
+                self.layout()
+            with self.lock:
+                self.data['clock'] = info_clock()
+            self.area.queue_draw()
+            return True
+
+        def animate(self):
+            if self.fade < 1:
+                self.fade = min(1.0, self.fade + 0.12)
+                self.area.queue_draw()
+            return True
+
+        # -- text
+        def paint_info(self, w, cr):
+            d = self.geom[0]
+            item = self.current_item()
+            with self.lock:
+                title, big, lines = self.data.get(item) or (ITEMS.get(item, ('',))[0], '…', [])
+            col = Gdk.RGBA()
+            col.parse(self.conf.get('text_colour', '#d8d8de'))
+            alpha = 0.25 + 0.75 * self.fade
+
+            def text(s, size, y, weight=Pango.Weight.NORMAL, a=1.0, mono=False):
+                lay = PangoCairo.create_layout(cr)
+                fd = Pango.FontDescription.from_string(
+                    ('DejaVu Sans Mono' if mono else 'DejaVu Sans') + f' {size}')
+                fd.set_weight(weight)
+                lay.set_font_description(fd)
+                lay.set_width(int(d * 0.78 * Pango.SCALE))
+                lay.set_alignment(Pango.Alignment.CENTER)
+                lay.set_ellipsize(Pango.EllipsizeMode.END)
+                lay.set_text(s, -1)
+                _, ext = lay.get_pixel_extents()
+                cr.move_to(d * 0.11, y)
+                cr.set_source_rgba(col.red, col.green, col.blue, col.alpha * alpha * a)
+                PangoCairo.show_layout(cr, lay)
+                return ext.height
+
+            k = d / 240                          # sizes scale with the circle
+            big_size = 30 if len(big) <= 5 else 20 if len(big) <= 9 else 15
+            heights = 0
+            parts = []
+            if title:
+                parts.append((title.upper(), 8 * k, Pango.Weight.BOLD, 0.55, False))
+            parts.append((big, big_size * k, Pango.Weight.BOLD, 1.0, False))
+            for ln in lines:
+                if ln:
+                    parts.append((ln, 9.5 * k, Pango.Weight.NORMAL, 0.8, False))
+            # measure, then centre the block vertically
+            sizes = []
+            for s, size, wt, a, mono in parts:
+                lay = PangoCairo.create_layout(cr)
+                fd = Pango.FontDescription.from_string(f'DejaVu Sans {size}')
+                fd.set_weight(wt)
+                lay.set_font_description(fd)
+                lay.set_text(s, -1)
+                sizes.append(lay.get_pixel_extents()[1].height)
+            heights = sum(sizes) + 4 * (len(parts) - 1)
+            y = (d - heights) / 2
+            for (s, size, wt, a, mono), h in zip(parts, sizes):
+                text(s, size, y, wt, a, mono)
+                y += h + 4
+            return False
+
+    Orb()
+    Gtk.main()
+
+
+if __name__ == '__main__':
+    main()

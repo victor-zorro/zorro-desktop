@@ -13,8 +13,9 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 - `apps/<name>/` — our own apps, one folder each with its own install.sh + README (kept separable):
   - `apps/zorro-dm/` — display manager, login + lock screen (zorro-greeter, theme); LightDM stays as fallback
   - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
-  - `apps/zorro-thinkpad/` — ThinkPad app: Fn keys + indicator (keyd), power, LEDs, LTE, hardware check
+  - `apps/zorro-thinkpad/` — the Zorro settings app (zorro-settings, F9) + ThinkPad keys/indicator (keyd), power, LEDs, LTE, hardware
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
+  - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones
   - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
@@ -22,7 +23,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 ## Rules
 - Every change must also land in the repo so a fresh machine gets it: package → packages/*.txt, config → config/, system file → system/ + an install line in install.sh.
 - Keep install.sh safe to rerun: no blind appends; check before adding lines.
-- Desktop is windows-only Openbox: no panel, no tray. Launcher = rofi, overlay = conky, notifications = dunst.
+- Desktop is windows-only Openbox: no panel, no tray. Launcher = rofi, info circle = zorro-orb (conky as fallback), notifications = dunst.
 - Keybinds live in config/openbox/.config/openbox/rc.xml (Super = W-). Reload with `openbox --reconfigure`.
 - Scripts go in config/bin/.local/bin (on PATH). New apps go in apps/<name>/, not in config/.
 - sudo needs a password: put sudo commands in a code block for Vincent to run, don't run them yourself.

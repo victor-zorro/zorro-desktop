@@ -152,6 +152,8 @@ apps/zorro-drive/install.sh
 
 log "Screenshot overlay (apps/zorro-shot)"
 apps/zorro-shot/install.sh
+log "Info circle on the desktop (apps/zorro-orb)"
+apps/zorro-orb/install.sh
 
 # Scripts in ~/.local/bin on PATH for every shell
 grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \
