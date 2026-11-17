@@ -213,8 +213,14 @@
     <keybind key="W-Up">
       <action name="ToggleMaximize"/>
     </keybind>
-    <!-- Super+Space: apps, Super+Tab: open windows, Super+Enter: terminal -->
+    <!-- Super (tap, via xcape) or Super+Space: the dial launcher; Super+Shift+Space: rofi;
+         Super+Tab: open windows, Super+Enter: terminal -->
     <keybind key="W-space">
+      <action name="Execute">
+        <command>sh -c 'command -v zorro-dial >/dev/null &amp;&amp; exec zorro-dial || exec rofi -show drun'</command>
+      </action>
+    </keybind>
+    <keybind key="W-S-space">
       <action name="Execute">
         <command>rofi -show drun</command>
       </action>

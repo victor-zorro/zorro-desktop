@@ -1488,6 +1488,7 @@ def cmd_app(select=None):
             tp.section('hw', 'Hardware', self.hw_page())
             desk = Group()
             desk.section('wall', 'Wallpaper', self.wall_page())
+            desk.section('dial', 'Launcher', self.dial_page())
             desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
             desk.section('fx', 'Overlays', self.fx_page('overlay'))
             desk.section('windows', 'Windows', self.windows_page())
@@ -2271,6 +2272,67 @@ def cmd_app(select=None):
             app = self.get_application()
             self.destroy()
             Win(app, select='theme:1').present()
+
+        # -- the dial launcher (apps/zorro-dial)
+        def dial_page(self):
+            box = Pages()
+            conf = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' / 'config.json'
+            defaults = {'slices': [{'name': 'Work', 'categories': ['Development', 'Office', 'WebBrowser',
+                                                                   'Email', 'TextEditor', 'Network']},
+                                   {'name': 'Media', 'categories': ['AudioVideo', 'Graphics', 'Player',
+                                                                    'Photography', '3DGraphics']},
+                                   {'name': 'System', 'categories': ['System', 'Settings', 'Utility',
+                                                                     'FileManager', 'TerminalEmulator']}],
+                        'ring_slots': [3, 4, 6]}
+            try:
+                c = {**defaults, **json.loads(conf.read_text())}
+            except (OSError, ValueError):
+                c = json.loads(json.dumps(defaults))
+
+            def save():
+                write_atomic(conf, json.dumps(c, indent=2) + '\n')
+
+            box.add(heading('Three slices', 'Slices'))
+            g = Gtk.Grid(column_spacing=10, row_spacing=8)
+            g.attach(Gtk.Label(label='Name', xalign=0), 0, 0, 1, 1)
+            g.attach(Gtk.Label(label='App categories (comma separated)', xalign=0), 1, 0, 1, 1)
+            for i, s in enumerate(c['slices'][:3]):
+                name = Gtk.Entry(text=s['name'], width_chars=10)
+                cats = Gtk.Entry(text=', '.join(s['categories']), hexpand=True)
+
+                def changed(_w, i=i, name=name, cats=cats):
+                    c['slices'][i] = {'name': name.get_text().strip() or f'Slice {i + 1}',
+                                      'categories': [x.strip() for x in cats.get_text().split(',')
+                                                     if x.strip()]}
+                    save()
+                name.connect('changed', changed)
+                cats.connect('changed', changed)
+                g.attach(name, 0, i + 1, 1, 1)
+                g.attach(cats, 1, i + 1, 1, 1)
+            box.add(g)
+            box.add(note('Apps go to the first slice whose categories match theirs (as in their '
+                         '.desktop file, e.g. WebBrowser, AudioVideo, Utility); the rest go to '
+                         'the last slice.'))
+
+            box.add(heading('Rings', 'Rings'))
+            g = Gtk.Grid(column_spacing=10, row_spacing=8)
+            for k, label in enumerate(('Inner ring (most used)', 'Middle ring', 'Outer ring')):
+                sp = Gtk.SpinButton.new_with_range(1, 10, 1)
+                sp.set_value(c['ring_slots'][k])
+                sp.connect('value-changed', lambda w, k=k: (c['ring_slots'].__setitem__(k, int(w.get_value())), save()))
+                g.attach(Gtk.Label(label=f'{label}: apps per slice', xalign=0), 0, k, 1, 1)
+                g.attach(sp, 1, k, 1, 1)
+            box.add(g)
+            forget = Gtk.Button(label='Forget which apps I use', halign=Gtk.Align.START, margin_top=8)
+            forget.connect('clicked', lambda b: (Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state'))
+                                                 .joinpath('zorro-dial', 'usage.json').unlink(missing_ok=True),
+                                                 self.dial_msg.set_text('Usage forgotten')))
+            box.add(forget)
+            box.add(note('Open the dial with a tap on Super (needs xcape) or Super+Space; '
+                         'rofi stays on Super+Shift+Space.'))
+            self.dial_msg = note()
+            box.footer(self.dial_msg)
+            return box
 
         # -- living wallpaper (apps/zorro-wall)
         def wall_page(self):

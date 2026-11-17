@@ -1,0 +1,419 @@
+#!/usr/bin/python3
+"""zorro-dial: the app launcher, a dial around a clock (Super / Super+Space).
+
+Three rings around the clock: the apps you start most sit on the inner ring, less used
+ones further out. Three slices, each an app category you choose (Zorro app → Desktop →
+Launcher). Type to search all apps, Enter starts the first match, Esc or a click outside
+closes. Started again while open: closes (so Super toggles it).
+
+Usage counts: ~/.local/state/zorro-dial/usage.json (the more and the more recently an app
+is started, the closer to the clock).
+"""
+import configparser
+import json
+import math
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+import cairo
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('PangoCairo', '1.0')
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+
+HOME = Path.home()
+STATE = Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state')) / 'zorro-dial'
+USAGE = STATE / 'usage.json'
+PIDFILE = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-dial.pid'
+CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' / 'config.json'
+RED, CYAN, FG = (1.0, 0.16, 0.29), (0.10, 0.90, 1.0), (0.85, 0.85, 0.87)
+
+DEFAULTS = {
+    'slices': [
+        {'name': 'Work', 'categories': ['Development', 'Office', 'WebBrowser', 'Email',
+                                        'TextEditor', 'Network', 'Chat', 'InstantMessaging']},
+        {'name': 'Media', 'categories': ['AudioVideo', 'Audio', 'Video', 'Graphics', 'Player',
+                                         'Photography', '3DGraphics', 'Viewer']},
+        {'name': 'System', 'categories': ['System', 'Settings', 'Utility', 'FileManager',
+                                          'TerminalEmulator', 'FileTransfer', 'Monitor']},
+    ],
+    'ring_slots': [3, 4, 6],        # apps per slice on the inner, middle and outer ring
+}
+
+sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+try:
+    import zorro_fx
+except ImportError:
+    zorro_fx = None
+
+
+def load_conf():
+    c = json.loads(json.dumps(DEFAULTS))
+    try:
+        c.update({k: v for k, v in json.loads(CONF.read_text()).items() if k in DEFAULTS})
+    except (OSError, ValueError):
+        pass
+    return c
+
+
+def load_usage():
+    try:
+        u = json.loads(USAGE.read_text())
+        return u if isinstance(u, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def record(app_id):
+    u = load_usage()
+    e = u.get(app_id, {'n': 0, 'last': 0})
+    e['n'] = e.get('n', 0) + 1
+    e['last'] = time.time()
+    u[app_id] = e
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = USAGE.with_suffix('.tmp')
+    tmp.write_text(json.dumps(u))
+    tmp.replace(USAGE)
+
+
+def score(u, app_id):
+    """starts, with recent ones counting more (half-life two weeks)"""
+    e = u.get(app_id)
+    if not e:
+        return 0.0
+    age_days = (time.time() - e.get('last', 0)) / 86400
+    return e.get('n', 0) * 0.5 ** (age_days / 14)
+
+
+def apps():
+    """installed apps: [{id, name, icon, cats, path}] from the .desktop files"""
+    dirs = [HOME / '.local/share/applications'] + [
+        Path(d) / 'applications' for d in
+        os.environ.get('XDG_DATA_DIRS', '/usr/local/share:/usr/share').split(':')]
+    seen, out = set(), []
+    for d in dirs:
+        for f in sorted(d.glob('*.desktop')) if d.is_dir() else []:
+            if f.name in seen:
+                continue
+            seen.add(f.name)
+            cp = configparser.ConfigParser(interpolation=None, strict=False)
+            try:
+                cp.read(f, encoding='utf-8')
+                e = cp['Desktop Entry']
+            except (configparser.Error, KeyError, UnicodeDecodeError):
+                continue
+            if e.get('Type') != 'Application' or e.get('NoDisplay', 'false') == 'true' \
+                    or e.get('Hidden', 'false') == 'true' or not e.get('Exec'):
+                continue
+            out.append({'id': f.name, 'name': e.get('Name', f.stem), 'icon': e.get('Icon', ''),
+                        'cats': [c for c in e.get('Categories', '').split(';') if c],
+                        'path': str(f), 'keywords': e.get('Keywords', '')})
+    return out
+
+
+def toggle_running():
+    """already open: close it and stop (Super pressed again)"""
+    try:
+        pid = int(PIDFILE.read_text())
+        os.kill(pid, signal.SIGTERM)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+class Dial(Gtk.Window):
+    def __init__(self):
+        super().__init__(type=Gtk.WindowType.POPUP)
+        self.conf = load_conf()
+        self.usage = load_usage()
+        self.all = apps()
+        self.filter = ''
+        self.hover = None
+        self.slots = []                 # (x, y, r, app) placed this frame
+        self.theme = Gtk.IconTheme.get_default()
+        self.icons = {}
+        disp = Gdk.Display.get_default()
+        mon = disp.get_monitor_at_point(*self.pointer()) or disp.get_primary_monitor() or disp.get_monitor(0)
+        g = mon.get_geometry()
+        self.geo = g
+        scr = self.get_screen()
+        self.composited = bool(scr.is_composited() and scr.get_rgba_visual())
+        if self.composited:
+            self.set_visual(scr.get_rgba_visual())
+            self.backdrop = None
+        else:                           # no compositor: a still image of the screen behind
+            root = Gdk.get_default_root_window()
+            self.backdrop = Gdk.pixbuf_get_from_window(root, g.x, g.y, g.width, g.height)
+        self.set_app_paintable(True)
+        self.move(g.x, g.y)
+        self.resize(g.width, g.height)
+        self.connect('draw', self.paint_back)     # 1. the screen behind, dimmed
+        self.area = Gtk.DrawingArea()
+        self.area.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_PRESS_MASK)
+        if zorro_fx:                    # 2. particles from the overlay look, around the dial
+            self.snow = zorro_fx.Snow(self.area, radius=0, profile='overlay', fps=20, max_parts=900)
+            self.snow.paint_edge = lambda *a: None
+            self.snow.paint_box = lambda *a: None
+        self.area.connect('draw', self.on_draw)   # 3. the dial
+        self.area.connect('motion-notify-event', self.on_motion)
+        self.area.connect('button-press-event', self.on_click)
+        self.add(self.area)
+        self.connect('key-press-event', self.on_key)
+        self.layout_apps()
+        self.show_all()
+        GLib.idle_add(self.grab)
+        GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True)
+
+    @staticmethod
+    def pointer():
+        try:
+            _, x, y = Gdk.Display.get_default().get_default_seat().get_pointer().get_position()[0:3]
+            return x, y
+        except (AttributeError, TypeError):
+            return 0, 0
+
+    def grab(self):
+        seat = Gdk.Display.get_default().get_default_seat()
+        for _ in range(20):             # Openbox may still hold the key that started us
+            if seat.grab(self.get_window(), Gdk.SeatCapabilities.ALL, True,
+                         None, None, None) == Gdk.GrabStatus.SUCCESS:
+                break
+            time.sleep(0.05)
+        return False
+
+    # -- which app goes where
+    def layout_apps(self):
+        """per slice: its apps by usage; the first ring_slots[0] on the inner ring, …"""
+        slices = self.conf['slices']
+        groups = [[] for _ in slices]
+        for a in self.all:
+            idx = next((i for i, s in enumerate(slices)
+                        if any(c in s['categories'] for c in a['cats'])), len(slices) - 1)
+            groups[idx].append(a)
+        self.groups = [sorted(g, key=lambda a: (-score(self.usage, a['id']), a['name'].lower()))
+                       for g in groups]
+
+    def matches(self):
+        f = self.filter.lower()
+        found = [a for a in self.all if f in a['name'].lower() or f in a['keywords'].lower()
+                 or f in a['id'].lower()]
+        return sorted(found, key=lambda a: (not a['name'].lower().startswith(f),
+                                            -score(self.usage, a['id']), a['name'].lower()))
+
+    def icon(self, a, size):
+        key = (a['icon'], size)
+        if key not in self.icons:
+            pb = None
+            try:
+                if os.path.isabs(a['icon']):
+                    pb = GdkPixbuf.Pixbuf.new_from_file_at_size(a['icon'], size, size)
+                elif a['icon']:
+                    pb = self.theme.load_icon(a['icon'], size, Gtk.IconLookupFlags.FORCE_SIZE)
+            except GLib.Error:
+                pb = None
+            if pb is None:
+                try:
+                    pb = self.theme.load_icon('application-x-executable', size,
+                                              Gtk.IconLookupFlags.FORCE_SIZE)
+                except GLib.Error:
+                    pb = None
+            self.icons[key] = pb
+        return self.icons[key]
+
+    # -- drawing
+    def text(self, cr, s, x, y, size, bold=True, alpha=1.0, split=1.4):
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription.from_string(
+            f'DejaVu Sans {"Bold" if bold else ""} {size}'))
+        lay.set_text(s, -1)
+        _, ext = lay.get_pixel_extents()
+        x0, y0 = x - ext.width / 2, y - ext.height / 2
+        for col, dx in ((RED, -split), (CYAN, split)):
+            cr.move_to(x0 + dx, y0)
+            cr.set_source_rgba(*col, 0.5 * alpha)
+            PangoCairo.show_layout(cr, lay)
+        cr.move_to(x0, y0)
+        cr.set_source_rgba(*FG, alpha)
+        PangoCairo.show_layout(cr, lay)
+
+    def chroma_circle(self, cr, cx, cy, r, alpha=0.9, split=1.5):
+        for col, dx in ((RED, -split), (CYAN, split)):
+            cr.new_path()
+            cr.arc(cx + dx, cy, r, 0, 2 * math.pi)
+            cr.set_source_rgba(*col, 0.7 * alpha)
+            cr.set_line_width(1.2)
+            cr.stroke()
+        cr.new_path()
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.set_source_rgba(1, 1, 1, 0.2 * alpha)
+        cr.set_line_width(1)
+        cr.stroke()
+
+    def paint_back(self, _w, cr):
+        cr.save()
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        if self.backdrop is not None:
+            Gdk.cairo_set_source_pixbuf(cr, self.backdrop, 0, 0)
+            cr.paint()
+            cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_rgba(0, 0, 0, 0.55)
+        cr.paint()
+        cr.restore()
+        return False
+
+    def on_draw(self, w, cr):
+        W, H = self.geo.width, self.geo.height
+        cx, cy = W / 2, H / 2
+        rings = [(92, 168), (168, 240), (240, 312)]
+        self.slots = []
+        if self.filter:
+            self.draw_search(cr, cx, cy, rings)
+        else:
+            self.draw_slices(cr, cx, cy, rings)
+        # centre: clock, or the hovered app's name
+        cr.new_path()
+        cr.arc(cx, cy, 86, 0, 2 * math.pi)
+        cr.set_source_rgba(0, 0, 0, 0.75)
+        cr.fill()
+        self.chroma_circle(cr, cx, cy, 86)
+        self.chroma_circle(cr, cx, cy, 312)
+        self.text(cr, time.strftime('%H:%M'), cx, cy - 10, 26, split=2)
+        label = self.hover['name'] if self.hover else (f'“{self.filter}”' if self.filter else
+                                                       time.strftime('%A %-d %B'))
+        self.text(cr, label[:22], cx, cy + 24, 10, bold=False, alpha=0.9, split=1)
+        self.text(cr, 'type to search · Enter starts · Esc closes', cx, cy + 340, 9,
+                  bold=False, alpha=0.5, split=0)
+        return False
+
+    def draw_slices(self, cr, cx, cy, rings):
+        slices = self.conf['slices']
+        n = len(slices)
+        span = 360 / n
+        for i, s in enumerate(slices):
+            start = -90 - span / 2 + i * span
+            for k, (ri, ro) in enumerate(rings):
+                a0, a1 = math.radians(start + 1), math.radians(start + span - 1)
+                cr.new_path()
+                cr.arc(cx, cy, ro - 2, a0, a1)
+                cr.arc_negative(cx, cy, ri + 2, a1, a0)
+                cr.close_path()
+                cr.set_source_rgba(0.03, 0.03, 0.05, 0.55)
+                cr.fill_preserve()
+                cr.set_source_rgba(1, 1, 1, 0.07)
+                cr.set_line_width(1)
+                cr.stroke()
+            am = math.radians(start + span / 2)
+            self.text(cr, s['name'].upper(), cx + math.cos(am) * 338, cy + math.sin(am) * 338,
+                      10, split=1.4)
+            group = list(self.groups[i])
+            for k, (ri, ro) in enumerate(rings):
+                cnt = self.conf['ring_slots'][k]
+                row, group = group[:cnt], group[cnt:]
+                self.place(cr, cx, cy, row, (ri + ro) / 2, start, span, (44, 36, 30)[k])
+
+    def draw_search(self, cr, cx, cy, rings):
+        found = self.matches()
+        slots = [6, 10, 14]
+        for k, (ri, ro) in enumerate(rings):
+            row, found = found[:slots[k]], found[slots[k]:]
+            if row:
+                self.place(cr, cx, cy, row, (ri + ro) / 2, -90 - 180 / slots[k], 360, (44, 36, 30)[k],
+                           full=slots[k])
+
+    def place(self, cr, cx, cy, row, rm, start, span, size, full=None):
+        cnt = full or len(row)
+        for j, a in enumerate(row):
+            am = math.radians(start + span * ((j + 0.5) / cnt if full else (j + 1) / (len(row) + 1)))
+            x, y = cx + math.cos(am) * rm, cy + math.sin(am) * rm
+            if self.hover is a:
+                cr.new_path()
+                cr.arc(x, y, size * 0.9, 0, 2 * math.pi)
+                cr.set_source_rgba(*CYAN, 0.16)
+                cr.fill()
+                self.chroma_circle(cr, x, y, size * 0.9)
+            pb = self.icon(a, size)
+            if pb:
+                Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
+                cr.paint()
+            self.slots.append((x, y, size * 0.75, a))
+
+    # -- input
+    def hit(self, x, y):
+        return next((a for sx, sy, r, a in self.slots if (x - sx) ** 2 + (y - sy) ** 2 <= r * r), None)
+
+    def on_motion(self, _w, ev):
+        h = self.hit(ev.x, ev.y)
+        if h is not self.hover:
+            self.hover = h
+            self.area.queue_draw()
+
+    def on_click(self, _w, ev):
+        a = self.hit(ev.x, ev.y)
+        if a and ev.button == 1:
+            self.launch(a)
+        elif not a:
+            dx, dy = ev.x - self.geo.width / 2, ev.y - self.geo.height / 2
+            if dx * dx + dy * dy > 320 ** 2:   # outside the dial: close
+                self.close_dial()
+
+    def on_key(self, _w, ev):
+        k = Gdk.keyval_name(ev.keyval) or ''
+        if k == 'Escape':
+            if self.filter:
+                self.filter = ''
+                self.area.queue_draw()
+            else:
+                self.close_dial()
+        elif k in ('Return', 'KP_Enter'):
+            a = self.hover or (self.matches()[0] if self.filter and self.matches() else None)
+            if a:
+                self.launch(a)
+        elif k == 'BackSpace':
+            self.filter = self.filter[:-1]
+            self.hover = None
+            self.area.queue_draw()
+        else:
+            ch = chr(Gdk.keyval_to_unicode(ev.keyval)) if Gdk.keyval_to_unicode(ev.keyval) else ''
+            if ch.isprintable() and ch and not (ev.state & Gdk.ModifierType.CONTROL_MASK):
+                self.filter += ch
+                self.hover = None
+                self.area.queue_draw()
+        return True
+
+    def launch(self, a):
+        record(a['id'])
+        try:
+            info = Gio.DesktopAppInfo.new_from_filename(a['path'])
+            if info:
+                info.launch([], None)
+        except GLib.Error as e:
+            print(f'zorro-dial: {a["name"]}: {e.message}', file=sys.stderr)
+        self.close_dial()
+
+    def close_dial(self):
+        Gdk.Display.get_default().get_default_seat().ungrab()
+        Gtk.main_quit()
+
+
+def main():
+    if toggle_running():
+        return
+    PIDFILE.write_text(str(os.getpid()))
+    signal.signal(signal.SIGTERM, lambda *a: GLib.idle_add(Gtk.main_quit))
+    try:
+        Dial()
+        Gtk.main()
+    finally:
+        try:
+            if PIDFILE.read_text() == str(os.getpid()):
+                PIDFILE.unlink()
+        except OSError:
+            pass
+
+
+if __name__ == '__main__':
+    main()

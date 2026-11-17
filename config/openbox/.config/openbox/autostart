@@ -21,6 +21,8 @@ fi
 command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 (sleep 3 && "$HOME/.local/bin/google-apps") &
 (sleep 4 && "$HOME/.local/bin/whatsapp") &
+# Super tapped alone = Super+Space (the dial launcher); Super with other keys stays Super
+command -v xcape >/dev/null && xcape -e 'Super_L=Super_L|space' &
 # Living wallpaper first, so the info circle lands on top of it
 command -v zorro-wall >/dev/null && zorro-wall &
 # Info circle (apps/zorro-orb) replaces conky; conky stays as fallback

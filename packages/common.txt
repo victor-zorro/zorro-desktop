@@ -79,3 +79,5 @@ ristretto
 vlc
 # Drive app (zorro-drive): notices saved files in synced folders without polling
 inotify-tools
+# Super tap opens the dial launcher (apps/zorro-dial)
+xcape
