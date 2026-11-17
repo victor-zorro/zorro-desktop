@@ -1,16 +1,23 @@
 #!/usr/bin/python3
 """zorro-dm: a minimal display manager for one seat.
 
-Starts Xorg on vt7, shows zorro-greeter (as the unprivileged user _zorro-dm),
-logs the user in with PAM (service 'zorro-dm') and runs the chosen X session
-through /etc/X11/Xsession. When the session ends, everything starts over.
+Login:  Xorg :0 on vt7, zorro-greeter (as the unprivileged user _zorro-dm), PAM
+        service 'zorro-dm', then the X session via /etc/X11/Xsession.
+Lock:   the session runs `zorro-lock` (xss-lock) -> /run/zorro-dm/lock.sock.
+        zorro-dm starts a second Xorg :1 on vt8 with the greeter in lock mode,
+        switches to it and blocks VT switching (VT_LOCKSWITCH) until the session
+        user's password is right (PAM 'zorro-lock'). The session itself is never
+        on screen while locked, so a crashing lock screen can't expose it: the
+        greeter (and X :1) are simply restarted.
 
 Greeter <-> daemon: JSON lines over a socketpair (fd in $ZORRO_DM_FD).
   greeter -> dm: authenticate{user}, respond{text}, cancel, start_session{session},
                  power{action}
   dm -> greeter: prompt{text,secret}, message{text,error}, complete{ok}, quit
+Lock socket: client sends 'lock', gets 'locked' (screen is safe) and 'unlocked'.
 """
 import configparser
+import fcntl
 import glob
 import json
 import os
@@ -20,41 +27,72 @@ import secrets
 import select
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import threading
 import time
 import traceback
+import warnings
 
 import PAM
 
-DISPLAY = ':0'
-VT = 7
+# run_session_child() forks while helper threads exist. They only sit in accept()/recv()
+# and hold no locks the child uses (it calls PAM and execs), so this is safe here.
+warnings.filterwarnings('ignore', 'This process .* is multi-threaded', DeprecationWarning)
+
+SESSION_DISPLAY, SESSION_VT = ':0', 7
+LOCK_DISPLAY, LOCK_VT = ':1', 8
 RUN = '/run/zorro-dm'
+LOCK_SOCK = f'{RUN}/lock.sock'
 GREETER_USER = '_zorro-dm'
 GREETER = os.environ.get('ZORRO_GREETER', '/usr/local/bin/zorro-greeter')
 XSESSION = '/etc/X11/Xsession'
 PATH = '/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games'
 POWER = {'suspend', 'hibernate', 'reboot', 'poweroff'}
+VT_ACTIVATE, VT_WAITACTIVE, VT_LOCKSWITCH, VT_UNLOCKSWITCH = 0x5606, 0x5607, 0x560B, 0x560C
 
 
 def log(*a):
     print('zorro-dm:', *a, file=sys.stderr, flush=True)
 
 
-# ---- X server ----------------------------------------------------------------
+# ---- VTs -------------------------------------------------------------------------
 
-def start_x():
+def vt_ioctl(req, arg=0):
+    fd = os.open('/dev/tty0', os.O_RDWR | os.O_NOCTTY)
+    try:
+        fcntl.ioctl(fd, req, arg)
+    finally:
+        os.close(fd)
+
+
+def vt_lock(on):
+    try:
+        vt_ioctl(VT_LOCKSWITCH if on else VT_UNLOCKSWITCH)
+    except OSError as e:
+        log('VT lock/unlock failed:', e)
+
+
+def vt_switch(n):
+    vt_ioctl(VT_ACTIVATE, n)
+    vt_ioctl(VT_WAITACTIVE, n)
+
+
+# ---- X server ----------------------------------------------------------------------
+
+def start_x(display, vt):
     os.makedirs(RUN, mode=0o711, exist_ok=True)
-    auth = f'{RUN}/xauth'
+    auth = f'{RUN}/xauth{display[1:]}'
     if os.path.exists(auth):
         os.unlink(auth)
     cookie = secrets.token_hex(16)
-    subprocess.run(['xauth', '-q', '-f', auth, 'add', DISPLAY, '.', cookie], check=True)
+    subprocess.run(['xauth', '-q', '-f', auth, 'add', display, '.', cookie], check=True,
+                   stderr=subprocess.DEVNULL)
     r, w = os.pipe()
     x = subprocess.Popen(
-        ['/usr/bin/Xorg', DISPLAY, '-seat', 'seat0', '-auth', auth, '-nolisten', 'tcp',
-         f'vt{VT}', '-novtswitch', '-displayfd', str(w)],
+        ['/usr/bin/Xorg', display, '-seat', 'seat0', '-auth', auth, '-nolisten', 'tcp',
+         f'vt{vt}', '-novtswitch', '-displayfd', str(w)],
         pass_fds=(w,), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, start_new_session=True)
     os.close(w)
@@ -63,8 +101,8 @@ def start_x():
     os.close(r)
     if not ok:
         x.kill()
-        raise RuntimeError('X server did not start (see /var/log/Xorg.0.log)')
-    log('X server ready on', DISPLAY)
+        raise RuntimeError(f'X server {display} did not start (see /var/log/Xorg.{display[1:]}.log)')
+    log('X server ready on', display)
     return x, cookie
 
 
@@ -78,16 +116,16 @@ def stop_x(x):
             x.wait()
 
 
-def write_xauth(pw, cookie):
-    """Write ~/.Xauthority as the user itself (never as root: symlink attacks)."""
+def write_xauth(pw, display, cookie):
+    """Add the cookie to ~/.Xauthority as the user itself (never as root: symlink attacks)."""
     path = os.path.join(pw.pw_dir, '.Xauthority')
-    subprocess.run(['xauth', '-q', '-f', path, 'add', DISPLAY, '.', cookie],
+    subprocess.run(['xauth', '-q', '-f', path, 'add', display, '.', cookie],
                    user=pw.pw_uid, group=pw.pw_gid, extra_groups=[], check=True,
-                   cwd='/', env={'PATH': PATH, 'HOME': pw.pw_dir})
+                   cwd='/', env={'PATH': PATH, 'HOME': pw.pw_dir}, stderr=subprocess.DEVNULL)
     return path
 
 
-# ---- sessions (/usr/share/xsessions) --------------------------------------------
+# ---- sessions (/usr/share/xsessions) ---------------------------------------------
 
 def xsessions():
     out = {}
@@ -105,7 +143,7 @@ def xsessions():
     return out
 
 
-# ---- PAM -------------------------------------------------------------------------
+# ---- PAM -----------------------------------------------------------------------------
 
 def pam_env(pam):
     env = pam.getenvlist() or {}
@@ -116,8 +154,7 @@ def pam_env(pam):
 
 def run_session_child(pam, pw, argv, xdg, extra_env, pass_fds=(), log_to_journal=False):
     """Fork a root child that owns the PAM session (it becomes the logind session leader,
-    not the daemon), runs argv as the user, and closes the session when argv exits.
-    Must be called while the daemon has no other threads."""
+    not the daemon), runs argv as the user, and closes the session when argv exits."""
     pid = os.fork()
     if pid:
         return pid
@@ -134,7 +171,7 @@ def run_session_child(pam, pw, argv, xdg, extra_env, pass_fds=(), log_to_journal
         except PAM.error:
             pass
         env = {'HOME': pw.pw_dir, 'USER': pw.pw_name, 'LOGNAME': pw.pw_name,
-               'SHELL': pw.pw_shell, 'PATH': PATH, 'DISPLAY': DISPLAY, **xdg, **extra_env}
+               'SHELL': pw.pw_shell, 'PATH': PATH, **xdg, **extra_env}
         env.update(pam_env(pam))
         out = None if log_to_journal else subprocess.DEVNULL
         proc = subprocess.Popen(
@@ -180,17 +217,16 @@ def reap(pid):
 
 
 class Login:
-    """One PAM conversation for the 'zorro-dm' service, run in a thread."""
+    """One PAM conversation, run in a thread; result goes to the daemon's event queue."""
 
-    def __init__(self, dm, username):
-        self.dm, self.ok, self.done = dm, False, False
-        self.events = dm.events          # the queue of the greeter round that started us
+    def __init__(self, dm, rnd, service, username, tty):
+        self.dm, self.rnd, self.ok, self.done, self.cancelled = dm, rnd, False, False, False
         self.answers = queue.Queue()
         self.pam = PAM.pam()
-        self.pam.start('zorro-dm')
+        self.pam.start(service)
         if username:
             self.pam.set_item(PAM.PAM_USER, username)
-        self.pam.set_item(PAM.PAM_TTY, DISPLAY)
+        self.pam.set_item(PAM.PAM_TTY, tty)
         self.pam.set_item(PAM.PAM_CONV, self.conv)
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
@@ -215,12 +251,14 @@ class Login:
             self.pam.acct_mgmt()
             self.ok = True
         except Exception as e:
-            log('authentication failed:', e)
+            if not self.cancelled:
+                log('authentication failed:', e)
         self.done = True
-        self.events.put(('auth_done', self))
+        self.dm.events.put(('auth_done', self.rnd, self))
 
     def cancel(self):
         if not self.done:
+            self.cancelled = True
             self.answers.put(None)
 
     @property
@@ -228,22 +266,26 @@ class Login:
         return self.pam.get_item(PAM.PAM_USER)
 
 
-# ---- the display manager ---------------------------------------------------------
+# ---- the display manager ---------------------------------------------------------------
 
 class DM:
     def __init__(self):
+        # One queue for everything; events from an old greeter round carry its number
+        # and are dropped, so nothing stale leaks into the next round.
         self.events = queue.Queue()
+        self.round = 0
         self.sock = None
         self.lock = threading.Lock()
 
+    # -- plumbing
     def send(self, **msg):
         try:
             with self.lock:
                 self.sock.sendall((json.dumps(msg) + '\n').encode())
-        except OSError:
+        except (OSError, AttributeError):
             pass
 
-    def reader(self, sock):
+    def reader(self, sock, rnd):
         buf = b''
         while True:
             try:
@@ -251,42 +293,84 @@ class DM:
             except OSError:
                 data = b''
             if not data:
-                self.events.put(('eof', None))
+                self.events.put(('eof', rnd, None))
                 return
             buf += data
             while b'\n' in buf:
                 line, buf = buf.split(b'\n', 1)
                 try:
-                    self.events.put(('msg', json.loads(line)))
+                    self.events.put(('msg', rnd, json.loads(line)))
                 except ValueError:
                     log('bad message from greeter')
 
-    def greeter_phase(self, cookie):
-        """Show the greeter until someone logs in. Returns (Login, session) or None."""
+    def lock_listener(self):
+        if os.path.exists(LOCK_SOCK):
+            os.unlink(LOCK_SOCK)
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(LOCK_SOCK)
+        os.chmod(LOCK_SOCK, 0o666)          # anyone may ask; we check who in lock_request()
+        srv.listen(8)
+        while True:
+            conn, _ = srv.accept()
+            self.events.put(('lock_req', None, conn))
+
+    @staticmethod
+    def peer_uid(conn):
+        creds = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize('3i'))
+        return struct.unpack('3i', creds)[1]
+
+    @staticmethod
+    def tell(conn, word):
+        try:
+            conn.sendall(word.encode() + b'\n')
+        except OSError:
+            pass
+
+    # -- greeter rounds
+    def greeter_round(self, display, vt, cookie, mode, session_pw=None, lock_clients=None):
+        """Run one greeter until it is done.
+        mode 'login': returns (Login, key, session) or None if the greeter went away.
+        mode 'lock':  returns True when the session user typed the right password,
+                      False if the greeter went away (caller restarts it)."""
+        self.round += 1
+        rnd = self.round
         gpw = pwd.getpwnam(GREETER_USER)
-        self.events = queue.Queue()      # fresh per round: no stale 'eof' from the last greeter
-        gauth = write_xauth(gpw, cookie)
+        gauth = write_xauth(gpw, display, cookie)
         self.sock, child = socket.socketpair()
         gpam = PAM.pam()
         gpam.start('zorro-dm-greeter')
         gpam.set_item(PAM.PAM_USER, GREETER_USER)
-        gpam.set_item(PAM.PAM_TTY, DISPLAY)
+        gpam.set_item(PAM.PAM_TTY, display)
         gpam.set_item(PAM.PAM_CONV, lambda *a: [])
         gpam.authenticate()
         gpam.acct_mgmt()
-        xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(VT), 'XDG_SESSION_TYPE': 'x11',
+        xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(vt), 'XDG_SESSION_TYPE': 'x11',
                'XDG_SESSION_CLASS': 'greeter'}
-        gpid = run_session_child(gpam, gpw, [GREETER], xdg,
-                                 {'XAUTHORITY': gauth, 'ZORRO_DM_FD': str(child.fileno())},
+        env = {'DISPLAY': display, 'XAUTHORITY': gauth, 'ZORRO_DM_FD': str(child.fileno()),
+               'ZORRO_MODE': mode}
+        if session_pw:
+            env['ZORRO_USER'] = session_pw.pw_name
+            env['ZORRO_USER_NAME'] = session_pw.pw_gecos.split(',')[0] or session_pw.pw_name
+        gpid = run_session_child(gpam, gpw, [GREETER], xdg, env,
                                  pass_fds=(child.fileno(),), log_to_journal=True)
         child.close()
-        rd = threading.Thread(target=self.reader, args=(self.sock,), daemon=True)
-        rd.start()
+        threading.Thread(target=self.reader, args=(self.sock, rnd), daemon=True).start()
 
-        login, chosen, result = None, None, None
+        login, result = None, None
         while True:
-            kind, m = self.events.get()
+            kind, r, m = self.events.get()
+            if kind == 'lock_req':
+                if mode == 'lock':          # already locked: just wait with the others
+                    self.tell(m, 'locked')
+                    lock_clients.append(m)
+                else:                       # nobody logged in, nothing to lock
+                    self.tell(m, 'unlocked')
+                    m.close()
+                continue
+            if r != rnd:
+                continue
             if kind == 'eof':
+                result = None if mode == 'login' else False
                 break
             if kind == 'auth_done':
                 if m is login:
@@ -296,62 +380,114 @@ class DM:
             if cmd == 'authenticate':
                 if login:
                     login.cancel()
-                login = Login(self, m.get('user'))
+                if mode == 'login':
+                    login = Login(self, rnd, 'zorro-dm', m.get('user'), display)
+                else:                       # lock: always the session user, whatever is asked
+                    login = Login(self, rnd, 'zorro-lock', session_pw.pw_name, display)
             elif cmd == 'respond' and login and not login.done:
                 login.answers.put(str(m.get('text', '')))
             elif cmd == 'cancel' and login:
                 login.cancel()
                 login = None
             elif cmd == 'start_session' and login and login.done and login.ok:
+                if mode == 'lock':
+                    if login.user == session_pw.pw_name:
+                        result = True
+                        break
+                    continue
                 sessions = xsessions()
                 key = m.get('session') if m.get('session') in sessions else 'openbox'
                 if key not in sessions:
                     key = next(iter(sessions), None)
                 if key:
-                    chosen = (login, key, sessions[key])
-                    self.send(type='quit')
-                    if wait_child(gpid, 5):
-                        gpid = None
+                    result = (login, key, sessions[key])
                     break
             elif cmd == 'power' and m.get('action') in POWER:
+                if mode == 'lock' and m['action'] not in ('suspend', 'hibernate'):
+                    continue
                 log('power:', m['action'])
                 subprocess.Popen(['systemctl', m['action']])
 
-        if login and chosen is None:
+        if result:
+            self.send(type='quit')
+        elif login:
             login.cancel()
-        if gpid:
-            reap(gpid)
+        reap(gpid)
         try:
             self.sock.shutdown(socket.SHUT_RDWR)   # wakes the reader thread
         except OSError:
             pass
         self.sock.close()
-        rd.join(5)
-        if login and not chosen:
-            login.thread.join(5)
-        if chosen:
-            result = chosen
-        else:
+        self.sock = None
+        if result is None or result is False:
             log('greeter exited')
         return result
+
+    def lock_session(self, pw, first_client):
+        log(f'locking session of {pw.pw_name}')
+        clients = [first_client]
+        x = None
+        try:
+            while True:
+                if x is None or x.poll() is not None:
+                    vt_lock(False)              # a new Xorg must be able to take its VT
+                    try:
+                        x, cookie = start_x(LOCK_DISPLAY, LOCK_VT)
+                    except Exception as e:
+                        log('lock screen X failed, retrying:', e)
+                        time.sleep(2)
+                        continue
+                    vt_switch(LOCK_VT)
+                    vt_lock(True)               # no Ctrl+Alt+F7 back to the session
+                    for c in clients:
+                        self.tell(c, 'locked')
+                if self.greeter_round(LOCK_DISPLAY, LOCK_VT, cookie, 'lock', pw, clients):
+                    break
+                log('lock screen crashed, restarting it (session stays hidden)')
+                time.sleep(0.5)
+            # Stop the lock X first: it must give up the GPU (DRM master) before the
+            # session's X takes its VT back, or that X can't set a mode (black screen).
+            stop_x(x)
+            x = None
+            vt_lock(False)
+            vt_switch(SESSION_VT)
+        finally:
+            if x is not None:
+                stop_x(x)
+            for c in clients:
+                self.tell(c, 'unlocked')
+                c.close()
+        log(f'unlocked session of {pw.pw_name}')
 
     def session_phase(self, login, key, ses, cookie):
         pw = pwd.getpwnam(login.user)
         log(f'starting session {key} for {pw.pw_name}')
-        xauth = write_xauth(pw, cookie)
-        xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(VT), 'XDG_SESSION_TYPE': 'x11',
+        xauth = write_xauth(pw, SESSION_DISPLAY, cookie)
+        xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(SESSION_VT), 'XDG_SESSION_TYPE': 'x11',
                'XDG_SESSION_CLASS': 'user', 'XDG_SESSION_DESKTOP': key,
                'XDG_CURRENT_DESKTOP': ses['desktop'], 'DESKTOP_SESSION': key}
         pid = run_session_child(login.pam, pw, [XSESSION, ses['exec']], xdg,
-                                {'XAUTHORITY': xauth})
-        os.waitpid(pid, 0)
+                                {'DISPLAY': SESSION_DISPLAY, 'XAUTHORITY': xauth})
+        while not os.waitpid(pid, os.WNOHANG)[0]:
+            try:
+                kind, _, m = self.events.get(timeout=1)
+            except queue.Empty:
+                continue
+            if kind != 'lock_req':
+                continue
+            uid = self.peer_uid(m)
+            if uid in (0, pw.pw_uid):
+                self.lock_session(pw, m)
+            else:
+                m.close()
         log(f'session of {pw.pw_name} ended')
 
     def run(self):
+        threading.Thread(target=self.lock_listener, daemon=True).start()
         while True:
-            x, cookie = start_x()
+            x, cookie = start_x(SESSION_DISPLAY, SESSION_VT)
             try:
-                chosen = self.greeter_phase(cookie)
+                chosen = self.greeter_round(SESSION_DISPLAY, SESSION_VT, cookie, 'login')
                 if chosen:
                     self.session_phase(*chosen, cookie)
             finally:
@@ -368,10 +504,11 @@ def main():
     signal.signal(signal.SIGTERM, bye)
     signal.signal(signal.SIGINT, bye)
     signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    vt_lock(False)                      # left over from a crash while locked?
     try:
         DM().run()
     finally:
-        # take the process group down with us (greeter / session children, X)
+        vt_lock(False)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:
             os.killpg(0, signal.SIGTERM)

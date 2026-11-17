@@ -1,4 +1,5 @@
 #%PAM-1.0
-# zorro-greeter --lock: unlock the screen with the user's password
+# zorro-dm lock screen: the session user's password unlocks (checked by zorro-dm)
+auth      requisite pam_nologin.so
 @include common-auth
--auth     optional  pam_gnome_keyring.so
+@include common-account

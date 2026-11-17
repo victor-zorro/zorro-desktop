@@ -5,8 +5,8 @@ gnome-keyring-daemon --start --components=secrets &
 lxpolkit &
 dunst &
 # Lock before sleep and when the screen blanks: zorro lock screen, else LightDM's
-if command -v zorro-greeter >/dev/null; then
-  xss-lock -l -- zorro-greeter --lock &
+if command -v zorro-lock >/dev/null; then
+  xss-lock -l -- zorro-lock &
 else
   xss-lock -- dm-tool lock &
 fi

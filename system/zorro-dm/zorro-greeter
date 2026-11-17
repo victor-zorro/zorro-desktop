@@ -1,9 +1,8 @@
 #!/usr/bin/python3
-"""zorro-greeter: the zorro login screen (GTK3 + WebKitGTK), three modes.
+"""zorro-greeter: the zorro login and lock screen (GTK3 + WebKitGTK).
 
-  zorro-greeter            login screen for zorro-dm (talks over $ZORRO_DM_FD)
-  zorro-greeter --lock     lock screen inside a session (PAM service 'zorro-lock');
-                           for xss-lock -l: closes $XSS_SLEEP_LOCK_FD once locked
+  zorro-greeter            run by zorro-dm (talks over $ZORRO_DM_FD);
+                           $ZORRO_MODE=lock + $ZORRO_USER: unlock screen for that user
   zorro-greeter --preview  in a normal window, password 'test' (theme work)
 
 The theme (index.html + js/login.js) talks to a 'window.lightdm' object, the same
@@ -16,7 +15,6 @@ import pwd
 import socket
 import subprocess
 import sys
-import threading
 import configparser
 
 import gi
@@ -117,73 +115,22 @@ class DaemonBackend:
         self.sock.sendall((json.dumps(m) + '\n').encode())
 
 
-class LocalBackend:
-    """Lock screen / preview: check the password ourselves (as the logged-in user)."""
+class PreviewBackend:
+    """--preview: fake login, password 'test'."""
 
-    def __init__(self, emit, quit_, preview=False):
-        self.emit, self.quit, self.preview = emit, quit_, preview
-        self.answers, self.gen = None, 0
-
-    def send(self, gen, **m):
-        GLib.idle_add(lambda: (gen == self.gen and self.emit(m)) and False)
+    def __init__(self, emit, quit_):
+        self.emit, self.quit = emit, quit_
 
     def handle(self, m):
         cmd = m.get('cmd')
         if cmd == 'authenticate':
-            self.cancel()
-            self.gen += 1
-            import queue
-            self.answers = queue.Queue()
-            threading.Thread(target=self.run, args=(self.gen, self.answers, m.get('user')),
-                             daemon=True).start()
-        elif cmd == 'respond' and self.answers:
-            self.answers.put(m.get('text', ''))
-        elif cmd == 'cancel':
-            self.cancel()
+            GLib.timeout_add(50, lambda: self.emit({'type': 'prompt', 'text': 'Password:',
+                                                    'secret': True}) and False)
+        elif cmd == 'respond':
+            ok = m.get('text') == 'test'
+            GLib.timeout_add(400, lambda: self.emit({'type': 'complete', 'ok': ok}) and False)
         elif cmd == 'start_session':
             self.quit()
-        elif cmd == 'power' and m.get('action') == 'suspend':
-            subprocess.Popen(['systemctl', 'suspend'])
-
-    def cancel(self):
-        if self.answers:
-            self.answers.put(None)
-            self.answers = None
-
-    def run(self, gen, answers, user):
-        user = user or pwd.getpwuid(os.getuid()).pw_name
-        if self.preview:
-            self.send(gen, type='prompt', text='Password:', secret=True)
-            ok = answers.get() == 'test'
-            self.send(gen, type='complete', ok=ok)
-            return
-        import PAM
-
-        def conv(_p, queries, _d):
-            out = []
-            for text, kind in queries:
-                if kind in (PAM.PAM_PROMPT_ECHO_ON, PAM.PAM_PROMPT_ECHO_OFF):
-                    self.send(gen, type='prompt', text=text,
-                              secret=kind == PAM.PAM_PROMPT_ECHO_OFF)
-                    a = answers.get()
-                    if a is None:
-                        raise RuntimeError('cancelled')
-                    out.append((a, 0))
-                else:
-                    self.send(gen, type='message', text=text, error=kind == PAM.PAM_ERROR_MSG)
-                    out.append(('', 0))
-            return out
-        ok = False
-        try:
-            p = PAM.pam()
-            p.start('zorro-lock')
-            p.set_item(PAM.PAM_USER, user)
-            p.set_item(PAM.PAM_CONV, conv)
-            p.authenticate()
-            ok = True
-        except Exception as e:
-            print('zorro-lock:', e, file=sys.stderr)
-        self.send(gen, type='complete', ok=ok)
 
 
 # ---- windows -----------------------------------------------------------------------
@@ -192,21 +139,24 @@ class Greeter:
     def __init__(self, mode):
         self.mode = mode
         self.windows, self.view = [], None
-        me = pwd.getpwuid(os.getuid())
-        local = mode != 'greeter'
+        lock = mode == 'lock'
+        if lock:
+            users = [{'username': os.environ['ZORRO_USER'],
+                      'display_name': os.environ.get('ZORRO_USER_NAME', os.environ['ZORRO_USER'])}]
+        elif mode == 'preview':
+            me = pwd.getpwuid(os.getuid())
+            users = [{'username': me.pw_name, 'display_name': me.pw_gecos.split(',')[0] or me.pw_name}]
+        else:
+            users = login_users()
         info = {
-            'hostname': socket.gethostname(),
-            'users': ([{'username': me.pw_name,
-                        'display_name': me.pw_gecos.split(',')[0] or me.pw_name}]
-                      if local else login_users()),
+            'hostname': socket.gethostname(), 'users': users,
             'sessions': xsessions(), 'default_session': 'openbox',
-            'can_suspend': True, 'can_hibernate': not local,
-            'can_restart': not local, 'can_shutdown': not local,
-            'lock_hint': mode == 'lock',
+            'can_suspend': True, 'can_hibernate': True,
+            'can_restart': not lock, 'can_shutdown': not lock, 'lock_hint': lock,
         }
         self.shim = SHIM.replace('__INFO__', json.dumps(info))
-        if local:
-            self.backend = LocalBackend(self.to_js, self.quit, preview=mode == 'preview')
+        if mode == 'preview':
+            self.backend = PreviewBackend(self.to_js, self.quit)
         else:
             self.backend = DaemonBackend(self.to_js, self.quit)
 
@@ -219,8 +169,6 @@ class Greeter:
             for i in range(n):
                 self.add_window('index.html' if i == primary else 'secondary.html',
                                 display.get_monitor(i), primary=i == primary, index=i)
-        if mode == 'lock':
-            GLib.timeout_add(100, self.grab)
 
     def add_window(self, page, monitor, primary, index=0):
         ucm = WebKit2.UserContentManager()
@@ -239,6 +187,9 @@ class Greeter:
         black.parse('black')
         view.set_background_color(black)
         view.connect('context-menu', lambda *a: True)
+        # WebKit's render process died: load the page again instead of a dead screen
+        view.connect('web-process-terminated', lambda v, reason: GLib.timeout_add(
+            500, lambda: v.load_uri('file://' + os.path.join(THEME, page)) and False))
         view.load_uri('file://' + os.path.join(THEME, page))
 
         win = Gtk.Window(title='zorro')
@@ -260,25 +211,6 @@ class Greeter:
             view.grab_focus()
         self.windows.append(win)
 
-    def grab(self):
-        """Lock: take keyboard + pointer (retry until we have them), then release sleep."""
-        gw = self.windows[0].get_window() if self.windows else None
-        if gw is None or not gw.is_viewable():
-            return True
-        for w in self.windows:
-            w.present()
-        seat = Gdk.Display.get_default().get_default_seat()
-        if seat.grab(gw, Gdk.SeatCapabilities.ALL, False, None, None, None, None) \
-                != Gdk.GrabStatus.SUCCESS:
-            return True
-        fd = os.environ.pop('XSS_SLEEP_LOCK_FD', None)
-        if fd:
-            try:
-                os.close(int(fd))
-            except OSError:
-                pass
-        return False
-
     def from_js(self, _ucm, result):
         v = result.get_js_value() if hasattr(result, 'get_js_value') else result
         try:
@@ -292,17 +224,17 @@ class Greeter:
                                           None, None, None, None, None)
 
     def quit(self):
-        if self.mode == 'lock':
-            Gdk.Display.get_default().get_default_seat().ungrab()
         Gtk.main_quit()
 
 
 def main():
-    mode = {'--lock': 'lock', '--preview': 'preview'}.get(sys.argv[1] if len(sys.argv) > 1 else '',
-                                                           'greeter')
-    if mode == 'greeter' and 'ZORRO_DM_FD' not in os.environ:
-        sys.exit('zorro-greeter: run by zorro-dm (or use --lock / --preview)')
-    if mode == 'greeter':
+    if sys.argv[1:] == ['--preview']:
+        mode = 'preview'
+    elif 'ZORRO_DM_FD' in os.environ:
+        mode = 'lock' if os.environ.get('ZORRO_MODE') == 'lock' else 'greeter'
+    else:
+        sys.exit('zorro-greeter: run by zorro-dm (or use --preview); to lock: zorro-lock')
+    if mode != 'preview':
         subprocess.run(['xsetroot', '-cursor_name', 'left_ptr'], check=False)
     Greeter(mode)
     Gtk.main()

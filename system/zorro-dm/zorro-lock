@@ -1,0 +1,56 @@
+#!/usr/bin/python3
+"""zorro-lock: lock the screen via zorro-dm (for xss-lock -l, or by hand).
+
+zorro-dm switches to a separate lock screen on vt8; the session is not on screen
+until the password is right. We pause dunst meanwhile, so notifications wait.
+Exits when unlocked. Without zorro-dm (LightDM fallback) it runs `dm-tool lock`.
+"""
+import os
+import socket
+import subprocess
+import sys
+
+SOCK = '/run/zorro-dm/lock.sock'
+
+
+def dunst(paused):
+    try:
+        subprocess.run(['dunstctl', 'set-paused', 'true' if paused else 'false'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def release_sleep():
+    """xss-lock -l: the screen is safe, let the suspend go ahead."""
+    fd = os.environ.pop('XSS_SLEEP_LOCK_FD', None)
+    if fd:
+        try:
+            os.close(int(fd))
+        except (OSError, ValueError):
+            pass
+
+
+def main():
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.connect(SOCK)
+    except OSError:
+        release_sleep()
+        os.execvp('dm-tool', ['dm-tool', 'lock'])
+    dunst(True)
+    try:
+        s.sendall(b'lock\n')
+        for line in s.makefile():
+            word = line.strip()
+            if word == 'locked':
+                release_sleep()
+            elif word == 'unlocked':
+                break
+    finally:
+        release_sleep()
+        dunst(False)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

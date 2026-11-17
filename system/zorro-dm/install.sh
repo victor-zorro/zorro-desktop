@@ -11,6 +11,7 @@ usermod -aG video,render _zorro-dm          # GPU for the WebGL animation
 
 install -Dm755 zorro-dm /usr/local/sbin/zorro-dm
 install -Dm755 zorro-greeter /usr/local/bin/zorro-greeter
+install -Dm755 zorro-lock /usr/local/bin/zorro-lock
 for f in pam/*; do install -Dm644 "$f" "/etc/pam.d/$(basename "$f")"; done
 install -Dm644 zorro-dm.service /etc/systemd/system/zorro-dm.service
 rm -rf /usr/share/zorro-dm/theme
