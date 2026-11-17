@@ -1270,6 +1270,25 @@ def apply_windows(login=False):
 # ---- login / lock screen look ---------------------------------------------------------------
 
 DM_DIR = Path(os.path.realpath(__file__)).parent.parent / 'zorro-dm'
+CUSTOM_PRESETS = CONF.parent / 'presets.json'
+
+
+def theme_presets():
+    """the built-in looks (apps/zorro-dm/theme/presets.json)"""
+    try:
+        return json.loads((DM_DIR / 'theme' / 'presets.json').read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def custom_presets():
+    try:
+        data = json.loads(CUSTOM_PRESETS.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 WALL_DEFAULTS = {'enabled': True, 'follow_login': True, 'fps_ac': 12, 'fps_battery': 6,
                  'render_scale': 0.5, 'look': {}}
 LOOK_FILE = '/etc/zorro-dm/look.json'
@@ -1471,8 +1490,10 @@ def cmd_app(select=None):
             desk.section('applook', 'This app', self.fx_page('app'))
             login = Group()
             login.section('look', 'Login & lock screen', self.look_page())
-            for name, title, g in (('thinkpad', 'ThinkPad', tp), ('desktop', 'Desktop', desk),
-                                   ('login', 'Login screen', login)):
+            theme = Group()
+            theme.section('theme', 'Theme', self.theme_page())
+            for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),
+                                   ('login', 'Login screen', login), ('thinkpad', 'ThinkPad', tp)):
                 stack.add_titled(g.widget(), name, title)
                 self.groups[name] = g
                 g.select(select)
@@ -2118,6 +2139,134 @@ def cmd_app(select=None):
                               'Title bars applied; transparency needs: sudo apt install picom')
             threading.Thread(target=work, daemon=True).start()
             return False
+
+        # -- theme presets: one look for login, lock screen and wallpaper
+        def theme_page(self):
+            box = Pages()
+            self.theme_msg = note()
+            self.theme_msg.set_hexpand(True)
+            current = load_conf().get('theme', 'chromatic-sea')
+
+            def card(pid, p, custom=False):
+                v = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                thumb = DM_DIR / 'theme' / 'presets' / f'{pid}.jpg'
+                if thumb.exists():
+                    from gi.repository import GdkPixbuf
+                    pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(thumb), 200, 113, True)
+                    v.add(Gtk.Image.new_from_pixbuf(pb))
+                else:
+                    ph = Gtk.Label(label='your own look', width_request=200, height_request=113)
+                    ph.get_style_context().add_class('dim-label')
+                    v.add(ph)
+                name = Gtk.Label(xalign=0)
+                mark = '  ✓' if pid == current else ''
+                name.set_markup(f'<b>{GLib.markup_escape_text(p["name"])}</b>{mark}')
+                v.add(name)
+                about = note(p.get('about', ''))
+                about.set_max_width_chars(26)
+                about.set_lines(2)
+                about.set_ellipsize(3)
+                v.add(about)
+                row = Gtk.Box(spacing=6)
+                use = Gtk.Button(label='Use this theme')
+                use.connect('clicked', lambda b: self.theme_apply(pid, p))
+                row.add(use)
+                if custom:
+                    rm = Gtk.Button(label='Delete')
+                    rm.connect('clicked', lambda b: self.theme_delete(pid))
+                    row.add(rm)
+                v.add(row)
+                return v
+
+            def flow(items, custom=False):
+                fb = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=3,
+                                 min_children_per_line=3, column_spacing=14, row_spacing=10,
+                                 homogeneous=True)
+                for pid, p in items:
+                    fb.add(card(pid, p, custom))
+                return fb
+
+            box.add(heading('Chromatic sea and other looks', 'Presets'))
+            box.add(flow(theme_presets().items()))
+            box.add(note('A theme sets the login screen, the lock screen and the wallpaper '
+                         'together. Fine-tune it in the Login screen tab.'))
+
+            box.add(heading('Your own presets', 'Your presets'))
+            mine = custom_presets()
+            if mine:
+                box.add(flow(mine.items(), custom=True))
+            else:
+                box.add(note('None yet.'))
+            row = Gtk.Box(spacing=8, margin_top=8)
+            self.theme_name = Gtk.Entry(placeholder_text='name, e.g. Night dive', hexpand=True)
+            save = Gtk.Button(label='Save the current look as a preset')
+            save.connect('clicked', lambda b: self.theme_save())
+            row.add(self.theme_name)
+            row.add(save)
+            box.add(row)
+            box.add(note('Saves what the Login screen tab shows now (also unsaved changes).'))
+            box.footer(self.theme_msg)
+            return box
+
+        def theme_apply(self, pid, p):
+            look = {**LOOK_DEFAULTS, **p['look']}
+            self.theme_msg.set_text(f'Applying {p["name"]}… (your password, once)')
+
+            def work():
+                try:
+                    r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(look)],
+                                       capture_output=True, text=True, timeout=120)
+                    ok = r.returncode == 0
+                    msg = (f'{p["name"]} is on: login, lock screen and wallpaper' if ok else
+                           (r.stderr.strip().splitlines() or ['not applied'])[-1])
+                except (OSError, subprocess.TimeoutExpired) as e:
+                    ok, msg = False, f'Could not apply: {e}'
+                if ok:
+                    update_conf(None, theme=pid)
+                    wall = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-wall' / 'config.json'
+                    try:
+                        wc = json.loads(wall.read_text())
+                    except (OSError, ValueError):
+                        wc = {}
+                    wc['follow_login'] = True       # the wallpaper shows the same look
+                    write_atomic(wall, json.dumps(wc, indent=2) + '\n')
+                GLib.idle_add(self.theme_done, msg, ok)
+            threading.Thread(target=work, daemon=True).start()
+
+        def theme_done(self, msg, ok):
+            if ok:                                  # rebuild: Login screen tab shows the new look
+                app = self.get_application()
+                self.destroy()
+                win = Win(app, select='theme:0')
+                win.theme_msg.set_text(msg)
+                win.present()
+            else:
+                self.theme_msg.set_text(msg)
+            return False
+
+        def theme_save(self):
+            name = self.theme_name.get_text().strip()
+            if not name:
+                self.theme_msg.set_text('Give the preset a name first')
+                return
+            pid = 'my-' + re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+            mine = custom_presets()
+            mine[pid] = {'name': name, 'about': 'Saved from the Login screen tab',
+                         'look': dict(getattr(self, 'look', LOOK_DEFAULTS))}
+            write_atomic(CUSTOM_PRESETS, json.dumps(mine, indent=2) + '\n')
+            app = self.get_application()
+            self.destroy()
+            win = Win(app, select='theme:1')
+            win.theme_msg.set_text(f'Saved "{name}"')
+            win.present()
+
+        def theme_delete(self, pid):
+            mine = custom_presets()
+            mine.pop(pid, None)
+            write_atomic(CUSTOM_PRESETS, json.dumps(mine, indent=2) + '\n')
+            app = self.get_application()
+            self.destroy()
+            Win(app, select='theme:1').present()
 
         # -- living wallpaper (apps/zorro-wall)
         def wall_page(self):

@@ -1,7 +1,10 @@
 # ThinkPad (zorro-thinkpad)
 
 ThinkPad T14 (Gen 1 AMD) under Openbox: every Fn key works and shows a small indicator at
-the bottom centre of the screen. The app (F9, or rofi "ThinkPad") has these pages:
+the bottom centre of the screen. The app is called **Zorro** (F9, rofi "Zorro", `zorro-settings`). Tabs: **Theme** (presets like
+Chromatic sea for login, lock screen and wallpaper together, plus your own), **Desktop**
+(wallpaper, info circle, overlays, windows, this app), **Login screen** (every effect),
+**ThinkPad** with these pages:
 
 - **Keys**: what each Fn key does, and what the star key (F12 ★) does.
 - **Power**: power mode on charger / battery (TLP platform profile), charge limit
