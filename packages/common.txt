@@ -22,6 +22,8 @@ gir1.2-gtk-3.0
 librsvg2-common
 # compositor: real transparency (kitty, overlays); switch in Zorro → Desktop → Windows
 picom
+# user folders (Downloads etc.) that browsers and file dialogs use
+xdg-user-dirs
 gir1.2-webkit2-4.1
 python3-pam
 xauth

@@ -152,6 +152,11 @@ apps/zorro-drive/install.sh
 
 log "Screenshot overlay (apps/zorro-shot)"
 apps/zorro-shot/install.sh
+log "User folders (Downloads, Pictures, Documents) for browsers and file dialogs"
+for kv in DOWNLOAD:Downloads PICTURES:Pictures DOCUMENTS:Documents; do
+  mkdir -p "$HOME/${kv#*:}"
+  xdg-user-dirs-update --set "${kv%%:*}" "$HOME/${kv#*:}"
+done
 log "Info circle on the desktop (apps/zorro-orb)"
 apps/zorro-orb/install.sh
 
