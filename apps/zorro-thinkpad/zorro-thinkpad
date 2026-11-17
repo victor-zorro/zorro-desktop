@@ -284,6 +284,80 @@ KEYS = {
 }
 
 
+# ---- overlay background (same look as the lock screen) ---------------------------------
+
+class Snow:
+    """Lock-screen style background for a small overlay widget: black with slowly
+    sinking "marine snow". Draws under the widget's children; animates only while the
+    widget is on screen."""
+    FLAKE = (0.60, 0.60, 0.63)          # #9a9aa0, as in the lock screen
+
+    def __init__(self, widget, radius=12, fps=30):
+        import random
+        self.rnd = random.random
+        self.widget, self.radius, self.fps = widget, radius, fps
+        self.parts, self.timer, self.t0 = [], None, time.monotonic()
+        widget.set_app_paintable(True)
+        widget.connect('draw', self.draw)
+        widget.connect('map', lambda w: self.start())
+        widget.connect('unmap', lambda w: self.stop())
+
+    def start(self):
+        from gi.repository import GLib
+        if not self.timer:
+            self.timer = GLib.timeout_add(1000 // self.fps, self.tick)
+
+    def stop(self):
+        from gi.repository import GLib
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = None
+
+    def tick(self):
+        self.widget.queue_draw()
+        return True
+
+    def flakes(self, W, H):
+        n = max(12, W * H // 450)       # same density whatever the box size
+        while len(self.parts) < n:
+            z = self.rnd() ** 1.5       # most flakes far away: small, dim, slow
+            self.parts.append((self.rnd(), self.rnd(), z, self.rnd() * 6.28))
+        return self.parts[:n]
+
+    def draw(self, w, cr):
+        import math
+        a = w.get_allocation()
+        W, H, r = a.width, a.height, min(self.radius, a.height / 2)
+        t = time.monotonic() - self.t0
+        cr.save()
+        if r:
+            cr.new_sub_path()
+            for cx, cy, a0 in ((W - r, r, -math.pi / 2), (W - r, H - r, 0),
+                               (r, H - r, math.pi / 2), (r, r, math.pi)):
+                cr.arc(cx, cy, r, a0, a0 + math.pi / 2)
+            cr.close_path()
+        else:
+            cr.rectangle(0, 0, W, H)
+        path = cr.copy_path()
+        cr.clip()
+        cr.set_source_rgba(0, 0, 0, 0.94)
+        cr.paint()
+        for x0, y0, z, s in self.flakes(W, H):
+            y = (y0 * H + t * (3 + 11 * z)) % (H + 4) - 2          # sink 3-14 px/s
+            x = (x0 * W + math.sin(t * 0.4 + s) * (3 + 5 * z)) % W  # gentle sway
+            size = 1 + 1.6 * z
+            cr.set_source_rgba(*self.FLAKE, 0.18 + 0.6 * z)
+            cr.rectangle(x, y, size, size)
+            cr.fill()
+        cr.restore()
+        cr.new_path()
+        cr.append_path(path)
+        cr.set_source_rgba(1, 1, 1, 0.10)                          # thin edge
+        cr.set_line_width(1)
+        cr.stroke()
+        return False                    # GTK draws the children on top
+
+
 # ---- keyd: indicator window + evdev keys + keyboard light ---------------------------------
 
 def find_event_device(name):
@@ -320,14 +394,13 @@ def cmd_keyd():
 
     css = Gtk.CssProvider()
     css.load_from_data(b'''
-        .zosd { background: rgba(28,28,32,0.94); border-radius: 14px; padding: 12px 18px;
-                border: 1px solid rgba(255,255,255,0.08); }
-        .zosd label { color: #f0f0f0; font-size: 12pt; }
-        .zosd image { color: #f0f0f0; }
+        .zosd { background: none; padding: 12px 18px; }      /* Snow paints the black */
+        .zosd label { color: #d8d8de; font-size: 12pt; }
+        .zosd image { color: #d8d8de; }
         .zosd progressbar trough { min-height: 6px; border-radius: 3px;
                                    background: rgba(255,255,255,0.18); border: none; }
         .zosd progressbar progress { min-height: 6px; border-radius: 3px;
-                                     background: #4a9eff; border: none; }
+                                     background: #d8d8de; border: none; }
     ''')
     Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -343,6 +416,8 @@ def cmd_keyd():
             self.set_accept_focus(False)
             box = Gtk.Box(spacing=14)
             box.get_style_context().add_class('zosd')
+            # rounded corners only show with a compositor; without one, square
+            Snow(box, radius=14 if screen.is_composited() else 0)
             self.icon = Gtk.Image()
             self.icon.set_pixel_size(28)
             box.add(self.icon)
