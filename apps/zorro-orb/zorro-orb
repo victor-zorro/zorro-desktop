@@ -275,8 +275,10 @@ def main():
             self.connect('draw', self.paint_bg)
             self.conf, self.conf_mtime = load_conf(), None
             self.data, self.lock = {}, threading.Lock()
-            self.zone, self.shown, self.fade = None, None, 1.0
-            self.prev_text = None
+            self.zone, self.fade = None, 1.0
+            self.anim_id = None
+            self.wake = threading.Event()       # hover: fetch the zone's data right away
+            self.layouts = {}                   # text layouts, rebuilt only when text changes
 
             outer = Gtk.Box()
             self.area = Gtk.DrawingArea()
@@ -289,11 +291,14 @@ def main():
             outer.add(self.area)
             self.add(outer)
             if zorro_fx:
-                self.snow = zorro_fx.Snow(outer, radius=10000, inner=self.area, profile='orb')
+                self.snow = zorro_fx.Snow(outer, radius=10000, inner=self.area, profile='orb',
+                                          fps=24)
             self.layout()
             self.show_all()
+            scr = self.get_screen()             # screens added / removed / resized (F7)
+            scr.connect('monitors-changed', lambda s: self.layout())
+            scr.connect('size-changed', lambda s: self.layout())
             GLib.timeout_add(1000, self.every_second)
-            GLib.timeout_add(40, self.animate)
             threading.Thread(target=self.collect, daemon=True).start()
 
         # -- size, place, round shape
@@ -349,6 +354,9 @@ def main():
             if z != self.zone:
                 self.zone = z
                 self.fade = 0.0                 # crossfade to the new info
+                self.wake.set()
+                if not self.anim_id:
+                    self.anim_id = GLib.timeout_add(40, self.animate)
 
         def on_click(self, _w, ev):
             item = self.current_item()
@@ -365,8 +373,13 @@ def main():
 
         # -- data: gathered in a thread, so slow commands never stop the animation
         def collect(self):
+            """only what can be seen: the resting item, plus the hovered zone's item.
+            Every 3 s while a zone is hovered, every 15 s otherwise."""
             while True:
-                wanted = {self.conf['rest'], *self.conf['zones'].values()} - {'none'}
+                wanted = {self.conf['rest']}
+                if self.zone:
+                    wanted.add(self.conf['zones'].get(self.zone, 'none'))
+                wanted -= {'none', 'clock'}             # the clock is made every second
                 for k in wanted:
                     fn = ITEMS.get(k, (None, None))[1]
                     if fn:
@@ -376,7 +389,9 @@ def main():
                             val = (ITEMS[k][0], '?', [str(e)[:30]])
                         with self.lock:
                             self.data[k] = val
-                time.sleep(3)
+                    GLib.idle_add(self.area.queue_draw)
+                self.wake.wait(3 if self.zone else 15)
+                self.wake.clear()
 
         def every_second(self):
             try:
@@ -394,60 +409,51 @@ def main():
             return True
 
         def animate(self):
-            if self.fade < 1:
-                self.fade = min(1.0, self.fade + 0.12)
-                self.area.queue_draw()
+            """runs only during a crossfade"""
+            self.fade = min(1.0, self.fade + 0.12)
+            self.area.queue_draw()
+            if self.fade >= 1:
+                self.anim_id = None
+                return False
             return True
 
-        # -- text
-        def paint_info(self, w, cr):
-            d = self.geom[0]
-            item = self.current_item()
-            with self.lock:
-                title, big, lines = self.data.get(item) or (ITEMS.get(item, ('',))[0], '…', [])
-            col = Gdk.RGBA()
-            col.parse(self.conf.get('text_colour', '#d8d8de'))
-            alpha = 0.25 + 0.75 * self.fade
-
-            def text(s, size, y, weight=Pango.Weight.NORMAL, a=1.0, mono=False):
-                lay = PangoCairo.create_layout(cr)
-                fd = Pango.FontDescription.from_string(
-                    ('DejaVu Sans Mono' if mono else 'DejaVu Sans') + f' {size}')
+        # -- text: layouts are made once per text change, not every frame
+        def build_layouts(self, key, d, title, big, lines):
+            k = d / 240                          # sizes scale with the circle
+            big_size = 30 if len(big) <= 5 else 20 if len(big) <= 9 else 15
+            parts = []
+            if title:
+                parts.append((title.upper(), 8 * k, Pango.Weight.BOLD, 0.55))
+            parts.append((big, big_size * k, Pango.Weight.BOLD, 1.0))
+            parts += [(ln, 9.5 * k, Pango.Weight.NORMAL, 0.8) for ln in lines if ln]
+            out = []
+            for s, size, weight, a in parts:
+                lay = self.area.create_pango_layout(s)
+                fd = Pango.FontDescription.from_string(f'DejaVu Sans {size}')
                 fd.set_weight(weight)
                 lay.set_font_description(fd)
                 lay.set_width(int(d * 0.78 * Pango.SCALE))
                 lay.set_alignment(Pango.Alignment.CENTER)
                 lay.set_ellipsize(Pango.EllipsizeMode.END)
-                lay.set_text(s, -1)
-                _, ext = lay.get_pixel_extents()
+                out.append((lay, lay.get_pixel_extents()[1].height, a))
+            self.layouts = {key: out}
+            return out
+
+        def paint_info(self, w, cr):
+            d = self.geom[0]
+            item = self.current_item()
+            with self.lock:
+                title, big, lines = self.data.get(item) or (ITEMS.get(item, ('',))[0], '…', [])
+            key = (d, title, big, tuple(lines))
+            lays = self.layouts.get(key) or self.build_layouts(key, d, title, big, lines)
+            col = Gdk.RGBA()
+            col.parse(self.conf.get('text_colour', '#d8d8de'))
+            alpha = 0.25 + 0.75 * self.fade
+            y = (d - (sum(h for _, h, _ in lays) + 4 * (len(lays) - 1))) / 2
+            for lay, h, a in lays:
                 cr.move_to(d * 0.11, y)
                 cr.set_source_rgba(col.red, col.green, col.blue, col.alpha * alpha * a)
                 PangoCairo.show_layout(cr, lay)
-                return ext.height
-
-            k = d / 240                          # sizes scale with the circle
-            big_size = 30 if len(big) <= 5 else 20 if len(big) <= 9 else 15
-            heights = 0
-            parts = []
-            if title:
-                parts.append((title.upper(), 8 * k, Pango.Weight.BOLD, 0.55, False))
-            parts.append((big, big_size * k, Pango.Weight.BOLD, 1.0, False))
-            for ln in lines:
-                if ln:
-                    parts.append((ln, 9.5 * k, Pango.Weight.NORMAL, 0.8, False))
-            # measure, then centre the block vertically
-            sizes = []
-            for s, size, wt, a, mono in parts:
-                lay = PangoCairo.create_layout(cr)
-                fd = Pango.FontDescription.from_string(f'DejaVu Sans {size}')
-                fd.set_weight(wt)
-                lay.set_font_description(fd)
-                lay.set_text(s, -1)
-                sizes.append(lay.get_pixel_extents()[1].height)
-            heights = sum(sizes) + 4 * (len(parts) - 1)
-            y = (d - heights) / 2
-            for (s, size, wt, a, mono), h in zip(parts, sizes):
-                text(s, size, y, wt, a, mono)
                 y += h + 4
             return False
 

@@ -16,6 +16,11 @@ import random
 import time
 from pathlib import Path
 
+try:                    # fast path: all particles at once (python3-numpy)
+    import numpy as np
+except ImportError:     # plain Python: fine for a few hundred particles
+    np = None
+
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-fx' / 'config.json'
 
 DEFAULTS = {
@@ -53,7 +58,7 @@ COLOURS = {                 # name: (label, colours picked at random per particl
     'red': ('Red', [RED]),
     'mixed': ('Grey with a few cyan and red', [GREY] * 6 + [CYAN, RED]),
 }
-MAX_PARTICLES = 3000
+MAX_PARTICLES = 3000 if np is not None else 1200
 
 _cache = {'mtime': -1, 'file': None}
 _preview = {}                   # profile -> settings being edited (the app's live preview)
@@ -118,6 +123,125 @@ def pointer_in(widget):
         py - oy - (a.y if not widget.get_has_window() else 0)
 
 
+class Swarm:
+    """all particles as numpy arrays: moving and fading thousands of them costs a few
+    milliseconds per frame instead of tens"""
+    FIELDS = ('x', 'y', 'z', 'a', 'r', 'ph', 'vx', 'vy', 'ox', 'oy')
+
+    def __init__(self):
+        self.n = 0
+        for f in self.FIELDS:
+            setattr(self, f, np.zeros(0))
+        self.ci = np.zeros(0, dtype=np.int64)
+        self.rng = np.random.default_rng()
+
+    def resize(self, n, ncol, W, H):
+        if n < self.n:
+            for f in self.FIELDS + ('ci',):
+                setattr(self, f, getattr(self, f)[:n])
+        elif n > self.n:
+            k, rnd = n - self.n, self.rng.random
+            new = {'x': rnd(k) * W, 'y': rnd(k) * H, 'z': rnd(k) ** 1.4, 'a': rnd(k) * 6.283,
+                   'r': 0.25 + 0.75 * rnd(k) ** 0.7, 'ph': rnd(k) * 6.283, 'vx': np.zeros(k),
+                   'vy': np.zeros(k), 'ox': rnd(k) * 2 - 1, 'oy': rnd(k) * 2 - 1}
+            for f in self.FIELDS:
+                setattr(self, f, np.concatenate([getattr(self, f), new[f]]))
+            self.ci = np.concatenate([self.ci, self.rng.integers(0, ncol, k)])
+        self.n = n
+
+    def recolour(self, ncol):
+        self.ci = self.rng.integers(0, ncol, self.n)
+
+    def move(self, s, W, H, dt, t, pointer):
+        pat, sp = s['pattern'], s['speed']
+        v = (5 + 16 * self.z) * sp
+        if pat == 'flock':
+            if pointer and -40 <= pointer[0] <= W + 40 and -40 <= pointer[1] <= H + 40:
+                tx, ty = pointer
+            else:
+                tx = W / 2 + math.cos(t * 0.45 * sp) * W * 0.38
+                ty = H / 2 + math.sin(t * 0.7 * sp) * H * 0.35
+            gx = tx + self.ox * (12 + W * 0.08) + np.sin(t * 1.3 + self.ph) * 6
+            gy = ty + self.oy * (6 + H * 0.18) + np.cos(t * 1.1 + self.ph) * 4
+            damp = math.exp(-2.2 * dt)
+            self.vx = (self.vx + (gx - self.x) * 3.0 * sp * dt) * damp
+            self.vy = (self.vy + (gy - self.y) * 3.0 * sp * dt) * damp
+            vmax = 90 * sp * (0.5 + self.z)
+            vv = np.hypot(self.vx, self.vy)
+            k = np.where(vv > vmax, vmax / np.maximum(vv, 1e-9), 1.0)
+            self.vx *= k
+            self.vy *= k
+            self.x += self.vx * dt
+            self.y += self.vy * dt
+            return
+        if pat == 'swirl':
+            rad = self.r * min(W, H) * 0.5 + 4
+            self.a += v * dt / rad * np.where(self.ph < 3.14, 1.0, 0.7)
+            wob = 1 + 0.08 * np.sin(t * 0.5 + self.ph)
+            self.x = W / 2 + np.cos(self.a) * self.r * W * 0.5 * wob
+            self.y = H / 2 + np.sin(self.a) * self.r * H * 0.5 * wob
+            return
+        if pat in ('fall', 'rise'):
+            self.y += (v if pat == 'fall' else -v) * dt
+            self.x += np.sin(t * 0.8 + self.ph) * 0.35 * v * dt
+        else:                                                  # float / twinkle: wander
+            if pat == 'twinkle':
+                v = v * 0.25
+            self.a += (self.rng.random(self.n) - 0.5) * 4 * dt
+            self.x += np.cos(self.a) * v * dt
+            self.y += np.sin(self.a) * v * dt
+        self.x %= W
+        self.y = (self.y + 3) % (H + 6) - 3
+
+    def alphas(self, s, W, H, t, spill):
+        alpha = (0.22 + 0.7 * self.z) * s['particle_opacity']
+        if spill:                                              # the soft, waving cloud
+            dx, dy = (self.x - W / 2) / (W / 2), (self.y - H / 2) / (H / 2)
+            e, th = np.hypot(dx, dy), np.arctan2(dy, dx)
+            edge = (0.92 + 0.07 * np.sin(3 * th + t * 0.35) + 0.05 * np.sin(5 * th - t * 0.6 + 1.3)
+                    + 0.03 * np.sin(8 * th + t * 0.9 + 2.1))
+            f = np.clip((edge - e) / 0.45, 0, 1)
+            alpha = alpha * f * f * (3 - 2 * f)
+        if s['pattern'] == 'twinkle':
+            alpha = alpha * (0.5 + 0.5 * np.sin(t * (1.2 + 2.5 * self.z) + self.ph))
+        return alpha
+
+    def paint(self, cr, s, W, H, t, spill, colours):
+        alpha = self.alphas(s, W, H, t, spill)
+        keep = alpha > 0.01
+        if not keep.any():
+            return
+        x, y, z, ci = self.x[keep], self.y[keep], self.z[keep], self.ci[keep]
+        q = np.minimum(11, (alpha[keep] * 12).astype(np.int64))
+        rad = (0.6 + 1.3 * z) * s['size']
+        key = ci * 12 + q
+        order = np.argsort(key, kind='stable')
+        key, x, y, rad, z = key[order], x[order], y[order], rad[order], z[order]
+        starts = np.flatnonzero(np.r_[True, key[1:] != key[:-1]])
+        ends = np.r_[starts[1:], len(key)]
+        glow = s['glow']
+        for a0, a1 in zip(starts.tolist(), ends.tolist()):
+            k = int(key[a0])
+            col, qa = colours[(k // 12) % len(colours)], ((k % 12) + 0.5) / 12
+            xs, ys, rs = x[a0:a1].tolist(), y[a0:a1].tolist(), rad[a0:a1].tolist()
+            if glow:
+                zs = z[a0:a1].tolist()
+                cr.set_source_rgba(*col, qa * 0.18)
+                for xx, yy, rr, zz in zip(xs, ys, rs, zs):
+                    if zz > 0.65:
+                        cr.new_sub_path()
+                        cr.arc(xx, yy, rr * 3, 0, 6.283)
+                cr.fill()
+            cr.set_source_rgba(*col, qa)
+            for xx, yy, rr in zip(xs, ys, rs):
+                if rr < 1.5:
+                    cr.rectangle(xx - rr, yy - rr, 2 * rr, 2 * rr)
+                else:
+                    cr.new_sub_path()
+                    cr.arc(xx, yy, rr, 0, 6.283)
+            cr.fill()
+
+
 class Snow:
     """Paints the overlay background under a widget's children and animates it while the
     widget is on screen.
@@ -134,6 +258,7 @@ class Snow:
         self.profile = profile
         self.was_on = None
         self.parts, self.timer = [], None
+        self.swarm = Swarm() if np is not None else None
         self.t0 = self.last = time.monotonic()
         self.backdrop = None
         self.backdrop_at = (0, 0)       # where the backdrop image goes in the widget
@@ -149,7 +274,10 @@ class Snow:
         from gi.repository import GLib
         if not self.timer:
             self.last = time.monotonic()
-            self.timer = GLib.timeout_add(1000 // self.fps, self.tick)
+            on = self.enabled is None or self.enabled()
+            self.was_on = on
+            # switched off: only look twice a second whether it got switched on again
+            self.timer = GLib.timeout_add(1000 // self.fps if on else 500, self.tick)
 
     def stop(self):
         from gi.repository import GLib
@@ -158,11 +286,16 @@ class Snow:
             self.timer = None
 
     def tick(self):
+        from gi.repository import GLib
         on = self.enabled is None or self.enabled()
-        if on or on != self.was_on:                 # off: one last redraw, then idle
+        if on != self.was_on:                       # switched: redraw, change the pace
+            self.widget.queue_draw()
+            self.timer = None
+            GLib.idle_add(lambda: self.start() and False)
+            return False
+        if on:
             self.update_spill()
             self.widget.queue_draw()
-        self.was_on = on
         return True
 
     def update_spill(self):
@@ -281,6 +414,23 @@ class Snow:
         if spill:
             n *= 1 + 0.5 * ((W * H) / max(1, bw * bh) - 1)
         n = min(self.max_parts, int(n))
+        if self.swarm is not None:                            # numpy: the fast way
+            sw = self.swarm
+            sw.resize(n, len(colours), W, H)
+            if self.colour != s['colour']:
+                self.colour = s['colour']
+                sw.recolour(len(colours))
+            sw.move(s, W, H, dt, t, pointer_in(self.widget) if s['pattern'] == 'flock' else None)
+            self.paint_box(cr, s, bx, by, bw, bh)
+            if not spill:
+                cr.save()
+                self.outline(cr, bx, by, bw, bh)
+                cr.clip()
+            sw.paint(cr, s, W, H, t, spill, colours)
+            if not spill:
+                cr.restore()
+            self.paint_edge(cr, s, bx, by, bw, bh)
+            return False
         if len(self.parts) > n:
             del self.parts[n:]
         while len(self.parts) < n:
@@ -290,7 +440,53 @@ class Snow:
             for p in self.parts:
                 p['c'] = random.choice(colours)
         self.move(s, W, H, dt, t)
+        self.paint_box(cr, s, bx, by, bw, bh)
+        if not spill:                                         # particles stay in the box
+            cr.save()
+            self.outline(cr, bx, by, bw, bh)
+            cr.clip()
+        size, glow, twinkle = s['size'], s['glow'], s['pattern'] == 'twinkle'
+        pop = s['particle_opacity']
+        # group by colour and brightness (12 steps), then fill each group in one go:
+        # a dozen cairo fills per frame instead of one per particle
+        groups, halos = {}, {}
+        organic, hypot, sin = self.organic, math.hypot, math.sin
+        for p in self.parts:
+            z, x, y = p['z'], p['x'], p['y']
+            alpha = (0.22 + 0.7 * z) * pop
+            if spill:                                  # one soft cloud, no seam at the box
+                alpha *= organic(x, y, W, H, t)
+            if twinkle:
+                alpha *= 0.5 + 0.5 * sin(t * (1.2 + 2.5 * z) + p['ph'])
+            if alpha <= 0.01:
+                continue
+            q = min(11, int(alpha * 12))
+            rad = (0.6 + 1.3 * z) * size
+            groups.setdefault((p['c'], q), []).append((x, y, rad))
+            if glow and z > 0.65:
+                halos.setdefault((p['c'], q), []).append((x, y, rad * 3))
+        for (c, q), pts in halos.items():
+            cr.set_source_rgba(*c, (q + 0.5) / 12 * 0.18)
+            for x, y, r in pts:
+                cr.new_sub_path()
+                cr.arc(x, y, r, 0, 6.283)
+            cr.fill()
+        for (c, q), pts in groups.items():
+            cr.set_source_rgba(*c, (q + 0.5) / 12)
+            for x, y, r in pts:
+                if r < 1.5:                            # tiny: a square is cheaper
+                    cr.rectangle(x - r, y - r, 2 * r, 2 * r)
+                else:
+                    cr.new_sub_path()
+                    cr.arc(x, y, r, 0, 6.283)
+            cr.fill()
+        if not spill:
+            cr.restore()
+        self.paint_edge(cr, s, bx, by, bw, bh)
+        return False                    # GTK draws the children on top
 
+    def paint_box(self, cr, s, bx, by, bw, bh):
+        """what is behind (still image without compositor) and the dark box"""
         if self.backdrop is not None:
             from gi.repository import Gdk
             Gdk.cairo_set_source_pixbuf(cr, self.backdrop, *self.backdrop_at)
@@ -300,40 +496,13 @@ class Snow:
         cr.set_source_rgba(0, 0, 0, s['opacity'])
         cr.fill()
         cr.restore()
-        if not spill:                                         # particles stay in the box
-            cr.save()
-            self.outline(cr, bx, by, bw, bh)
-            cr.clip()
-        size, glow, twinkle = s['size'], s['glow'], s['pattern'] == 'twinkle'
-        pop = s['particle_opacity']
-        for p in self.parts:
-            z, x, y = p['z'], p['x'], p['y']
-            alpha = (0.22 + 0.7 * z) * pop
-            if spill:                                  # one soft cloud, no seam at the box
-                alpha *= self.organic(x, y, W, H, t)
-            if twinkle:
-                alpha *= 0.5 + 0.5 * math.sin(t * (1.2 + 2.5 * z) + p['ph'])
-            if alpha <= 0.01:
-                continue
-            rad = (0.6 + 1.3 * z) * size
-            if glow and z > 0.65:
-                cr.set_source_rgba(*p['c'], alpha * 0.18)
-                cr.arc(x, y, rad * 3, 0, 6.283)
-                cr.fill()
-            cr.set_source_rgba(*p['c'], alpha)
-            if rad < 1.5:                               # tiny: a square is cheaper
-                cr.rectangle(x - rad, y - rad, 2 * rad, 2 * rad)
-            else:
-                cr.arc(x, y, rad, 0, 6.283)
-            cr.fill()
-        if not spill:
-            cr.restore()
+
+    def paint_edge(self, cr, s, bx, by, bw, bh):
         if s['opacity'] > 0.05:
             self.outline(cr, bx + 0.5, by + 0.5, bw - 1, bh - 1)
             cr.set_source_rgba(1, 1, 1, 0.10 * s['opacity'])  # thin edge
             cr.set_line_width(1)
             cr.stroke()
-        return False                    # GTK draws the children on top
 
 
 def bar_css():

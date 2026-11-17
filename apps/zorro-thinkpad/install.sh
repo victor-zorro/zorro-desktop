@@ -18,6 +18,8 @@ modprobe -a ledtrig-heartbeat ledtrig-timer || true
 # a copy, not a link: polkit runs it as root, so the user must not be able to change it
 install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
     /usr/local/libexec/zorro-thinkpad-helper
+install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
+    /usr/local/libexec/zorro-look-helper           # same code, only the login look
 install -Dm644 "$here/org.zorro.thinkpad.policy" \
     /usr/share/polkit-1/actions/org.zorro.thinkpad.policy
 

@@ -19,7 +19,6 @@ Which key arrives where (measured with ./keytest on a T14 Gen 1 AMD):
 import json
 import os
 import re
-import shlex
 import shutil
 import socket
 import struct
@@ -55,18 +54,42 @@ STAR_ACTIONS = {                            # what the star key (F12) can do
 }
 
 
+_conf_cache = {'key': None, 'text': '{}'}
+
+
 def load_conf():
+    """the settings (a fresh dict each call); the file is only re-read when it changed"""
     try:
-        return json.loads(CONF.read_text())
+        st = CONF.stat()
+        key = (st.st_mtime_ns, st.st_size)
+        if key != _conf_cache['key']:
+            _conf_cache.update(key=key, text=CONF.read_text())
+        data = json.loads(_conf_cache['text'])
+        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
+def write_atomic(path, text):
+    """write via a unique temp file + rename: readers never see half a file"""
+    import tempfile
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.')
+    try:
+        with os.fdopen(fd, 'w') as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def save_conf(c):
-    CONF.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CONF.with_suffix('.tmp')
-    tmp.write_text(json.dumps(c, indent=2) + '\n')
-    tmp.replace(CONF)
+    write_atomic(CONF, json.dumps(c, indent=2) + '\n')
 
 
 def run(*cmd, timeout=10):
@@ -255,7 +278,7 @@ def write_state(**kv):
     except (OSError, ValueError):
         st = {}
     st.update(kv)
-    STATE.write_text(json.dumps(st))
+    write_atomic(STATE, json.dumps(st))
 
 
 def key_star():
@@ -338,9 +361,19 @@ def set_kbd(level):
 
 
 def update_conf(section, **kv):
-    c = load_conf()                     # re-read: keyd and the app both write it
-    c.setdefault(section, {}).update(kv) if section else c.update(kv)
-    save_conf(c)
+    """change some settings; locked, because keyd and the app both write the file"""
+    import fcntl
+    CONF.parent.mkdir(parents=True, exist_ok=True)
+    with open(CONF.parent / '.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        c = load_conf()
+        if section:
+            if not isinstance(c.get(section), dict):
+                c[section] = {}
+            c[section].update(kv)
+        else:
+            c.update(kv)
+        save_conf(c)
     return c
 
 
@@ -425,13 +458,20 @@ _dot = {'refresh': False, 'checked': 0.0, 'mode': None, 'conf': None}
 
 def dot_mode():
     """the pattern the red dot should show now: the first active override, else the
-    normal one. Conditions are checked at most every 2 seconds."""
+    normal one. Conditions are checked at most every 5 seconds (or on a settings change)."""
     li = load_conf().get('lights', {})
-    if li != _dot['conf'] or time.monotonic() - _dot['checked'] > 2:
+    if not isinstance(li, dict):
+        li = {}
+    if li != _dot['conf'] or time.monotonic() - _dot['checked'] > 5:
         mode = li.get('dot', 'on')
+        ov = li.get('overrides', {}) if isinstance(li.get('overrides'), dict) else {}
         for key, _ in OVERRIDES:
-            m = li.get('overrides', {}).get(key, 'none')
-            if m != 'none' and condition(key, li):
+            m = ov.get(key, 'none')
+            try:
+                active = m != 'none' and condition(key, li)
+            except (ValueError, TypeError, OSError):
+                active = False
+            if active:
                 mode = m
                 break
         _dot.update(conf=li, mode=mode, checked=time.monotonic())
@@ -451,8 +491,11 @@ def dot_loop():
                 else:
                     set_led(DOT_LED, mode)
                     current = mode
-            same = lambda: dot_mode()[0] == mode and dot_mode()[1] == li
-            unit = min(1.0, max(0.05, float(li.get('morse_unit', MORSE_UNIT))))
+            same = lambda: dot_mode() == (mode, li)
+            try:
+                unit = min(1.0, max(0.05, float(li.get('morse_unit', MORSE_UNIT))))
+            except (TypeError, ValueError):
+                unit = MORSE_UNIT
             if mode == 'morse':
                 if play_morse(li.get('morse_text') or MORSE_TEXT, unit, same):
                     time.sleep(3)
@@ -464,6 +507,9 @@ def dot_loop():
                 time.sleep(1)
         except OSError:
             time.sleep(30)                          # no permission yet
+        except Exception as e:                      # noqa: BLE001 - never let the dot die
+            print(f'zorro-thinkpad dot: {type(e).__name__}: {e}', file=sys.stderr)
+            time.sleep(5)
 
 
 def play_pattern(steps, keep_going):
@@ -535,9 +581,16 @@ OSD_CSS = b'''
 '''
 
 
+_styled = set()
+
+
 def style_osd(screen):
-    """indicator look; the level bar's opacity follows the zorro-fx setting (live)"""
+    """indicator look; the level bar's opacity follows the zorro-fx setting (live).
+    Once per screen: a rebuilt app window must not add providers and timers again."""
     from gi.repository import GLib, Gtk
+    if hash(screen) in _styled:
+        return
+    _styled.add(hash(screen))
     css = Gtk.CssProvider()
     css.load_from_data(OSD_CSS)
     Gtk.StyleContext.add_provider_for_screen(screen, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -686,16 +739,31 @@ def cmd_keyd():
             self.geom = None                # next time: a fresh picture of the screen
             return False
 
-    ind = Indicator()
+    # the window's drawing mode (real or faked transparency) is fixed when it is made:
+    # make a new one whenever a compositor (picom) starts or stops
+    ind = {'w': Indicator()}
+
+    def on_composited(_screen):
+        old, ind['w'] = ind['w'], Indicator()
+        old.destroy()
+    Gdk.Screen.get_default().connect('composited-changed', on_composited)
+
+    def show(icon, value, text):
+        try:
+            if value is not None:
+                value = max(0, min(100, int(value)))
+            ind['w'].show_level(icon if isinstance(icon, str) else None, value, str(text or ''))
+        except Exception as e:                  # noqa: BLE001 - the indicator must survive
+            print(f'zorro-thinkpad keyd: indicator: {type(e).__name__}: {e}', file=sys.stderr)
 
     def on_msg(fd, _cond):
         try:
-            data = srv.recv(4096)
-            m = json.loads(data)
-            ind.show_level(m.get('icon'), m.get('value'), m.get('text', ''))
-        except (OSError, ValueError):
+            m = json.loads(srv.recv(4096))
+            if isinstance(m, dict):
+                show(m.get('icon'), m.get('value'), m.get('text', ''))
+        except (OSError, ValueError, TypeError):
             pass
-        return True
+        return True                             # keep listening, whatever happened
     GLib.io_add_watch(srv.fileno(), GLib.IO_IN, on_msg)
 
     # keys that X cannot deliver: read the ThinkPad Extra Buttons device directly
@@ -721,7 +789,9 @@ def cmd_keyd():
                     print(f'zorro-thinkpad keyd: cannot read {dev}: {e} '
                           '(run apps/zorro-thinkpad/install.sh)', file=sys.stderr)
                     warned = True
-                time.sleep(30)
+                    time.sleep(2)               # after resume the device returns quickly
+                else:
+                    time.sleep(15)
     threading.Thread(target=evdev_reader, daemon=True).start()
     threading.Thread(target=dot_loop, daemon=True).start()
 
@@ -732,16 +802,16 @@ def cmd_keyd():
         fh.read()
 
         def on_kbd(_fd, _cond):
-            fh.seek(0)
             try:
+                fh.seek(0)
                 lvl = int(fh.read().strip() or 0)
-            except ValueError:
-                return True
-            mx = int((KBD_LED / 'max_brightness').read_text())
-            words = {0: 'Keyboard light off', 1: 'Keyboard light low', 2: 'Keyboard light high'}
-            update_conf('lights', kbd=lvl)          # remembered for login and resume
-            ind.show_level('keyboard-brightness-symbolic', round(lvl * 100 / mx) if lvl else None,
-                           words.get(lvl, f'Keyboard light {lvl}'))
+                mx = int((KBD_LED / 'max_brightness').read_text()) or 2
+                words = {0: 'Keyboard light off', 1: 'Keyboard light low', 2: 'Keyboard light high'}
+                update_conf('lights', kbd=lvl)      # remembered for login and resume
+                show('keyboard-brightness-symbolic', round(lvl * 100 / mx) if lvl else None,
+                     words.get(lvl, f'Keyboard light {lvl}'))
+            except Exception as e:                  # noqa: BLE001 - keep watching Fn+Space
+                print(f'zorro-thinkpad keyd: keyboard light: {e}', file=sys.stderr)
             return True
         GLib.io_add_watch(fh.fileno(), GLib.IO_PRI | GLib.IO_ERR, on_kbd)
 
@@ -765,6 +835,7 @@ def cmd_keyd():
 # ---- power: TLP settings (written by the root helper) + battery state ---------------------
 
 HELPER = '/usr/local/libexec/zorro-thinkpad-helper'
+LOOK_HELPER = '/usr/local/libexec/zorro-look-helper'     # asks a password: writes /etc
 BAT = Path('/sys/class/power_supply/BAT0')
 PROFILES = {'low-power': 'Battery saver', 'balanced': 'Balanced', 'performance': 'Performance'}
 CHARGE_PRESETS = {'long': ('Long battery life: charge to 80% (starts below 75%)', 75, 80),
@@ -1055,9 +1126,14 @@ def button_images(n):
     return {k: xbm(k, n, v) for k, v in imgs.items()}
 
 
+def colour_or(value, default):
+    return value if isinstance(value, str) and re.fullmatch(r'#[0-9a-fA-F]{6}', value) else default
+
+
 def write_theme(c):
     _, pad, bsize = TITLE_SIZES.get(c['titlebar'], TITLE_SIZES['medium'])
-    acc, fg = c['accent'], c['text']
+    acc = colour_or(c.get('accent'), WIN_DEFAULTS['accent'])
+    fg = colour_or(c.get('text'), WIN_DEFAULTS['text'])
     THEME_DIR.mkdir(parents=True, exist_ok=True)
     for name, data in button_images(bsize).items():
         (THEME_DIR / f'{name}.xbm').write_text(data)
@@ -1188,15 +1264,6 @@ def apply_windows(login=False):
             os.kill(int(pid), 10)                        # SIGUSR1
         except (OSError, ValueError):
             pass
-    if not login and want != was:
-        # the indicator chose its drawing mode (real or faked transparency) at start
-        for pid in run('pgrep', '-f', 'zorro-thinkpad keyd').split():
-            try:
-                os.kill(int(pid), 15)
-            except (OSError, ValueError):
-                pass
-        time.sleep(0.5)
-        spawn([os.path.realpath(__file__), 'keyd'])
 
 
 
@@ -1373,6 +1440,7 @@ def cmd_app(select=None):
     class Win(Gtk.ApplicationWindow):
         def __init__(self, app, select=None):
             super().__init__(application=app, title='Zorro')
+            self.timers = []
             self.set_default_size(860, 620)
             self.set_icon_name('preferences-desktop')
             stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
@@ -1417,13 +1485,34 @@ def cmd_app(select=None):
                     window.zfx-app list row:not(:selected) { background: none; }''')
                 Gtk.StyleContext.add_provider_for_screen(
                     self.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-                GLib.timeout_add(300, self.follow_app_bg)
+                self.timers.append(GLib.timeout_add(300, self.follow_app_bg))
             self.show_all()
-            grp = next((n for n, g in self.groups.items() if select in g.ids), None)
-            if grp:
-                stack.set_visible_child_name(grp)
+            self.show_page(select)
             self.custom_box.set_visible(load_conf().get('star') == 'custom')
-            GLib.timeout_add_seconds(5, self.refresh)
+            self.timers.append(GLib.timeout_add_seconds(5, self.refresh))
+            self.connect('destroy', self.on_destroy)
+
+        def on_destroy(self, _w):
+            """stop this window's timers; write slider changes that were still waiting"""
+            for tid in self.timers:
+                GLib.source_remove(tid)
+            self.timers = []
+            for profile, tid in list(getattr(self, 'fx_save_ids', {}).items()):
+                if tid:
+                    GLib.source_remove(tid)
+                    self.fx_save(profile)
+            for name in ('orb_save_id', 'win_apply_id'):
+                tid = getattr(self, name, None)
+                if tid:
+                    GLib.source_remove(tid)
+                    setattr(self, name, None)
+
+        def show_page(self, pid):
+            """open a sub-page by id, e.g. power:0 (sidebar + top tab)"""
+            grp = next((n for n, g in self.groups.items() if pid in g.ids), None)
+            if grp:
+                self.stack.set_visible_child_name(grp)
+                self.groups[grp].select(pid)
 
         # -- keys
         def keys_page(self):
@@ -1560,11 +1649,21 @@ def cmd_app(select=None):
             c = orb.load_conf()
             items = {k: v[0] for k, v in orb.ITEMS.items()}
 
-            def save(**kv):
+            pending = {}
+
+            def flush():
                 cur = orb.load_conf()
-                cur.update(kv)
-                orb.CONF.parent.mkdir(parents=True, exist_ok=True)
-                orb.CONF.write_text(json.dumps(cur, indent=2) + '\n')
+                cur.update(pending)
+                pending.clear()
+                write_atomic(orb.CONF, json.dumps(cur, indent=2) + '\n')
+                self.orb_save_id = None
+                return False
+
+            def save(**kv):                     # sliders: write once they rest (0.3 s)
+                pending.update(kv)
+                if getattr(self, 'orb_save_id', None):
+                    GLib.source_remove(self.orb_save_id)
+                self.orb_save_id = GLib.timeout_add(300, flush)
 
             def combo(current, on_change, options):
                 cb = Gtk.ComboBoxText()
@@ -1763,6 +1862,10 @@ def cmd_app(select=None):
             return False
 
         def fx_reset(self, profile):
+            tid = self.fx_save_ids.get(profile)
+            if tid:                             # a waiting save must not undo the reset
+                GLib.source_remove(tid)
+                self.fx_save_ids[profile] = None
             zorro_fx.save(zorro_fx.PROFILES[profile], profile)
             zorro_fx._preview.pop(profile, None)
             sec = {'overlay': 'fx:0', 'app': 'applook:0', 'orb': 'orb:2'}[profile]
@@ -1870,7 +1973,8 @@ def cmd_app(select=None):
         def mic_test(self):
             def fn():
                 import tempfile
-                wav = tempfile.mktemp(suffix='.wav', prefix='zorro-mic-')
+                fd, wav = tempfile.mkstemp(suffix='.wav', prefix='zorro-mic-', dir=RUNTIME)
+                os.close(fd)
                 GLib.idle_add(self.hw_msg.set_text, '● Recording 3 seconds: say something…')
                 p = subprocess.Popen(['pw-record', wav], stderr=subprocess.DEVNULL)
                 time.sleep(3)
@@ -1983,11 +2087,24 @@ def cmd_app(select=None):
             return box
 
         def windows_apply(self):
+            """one worker at a time; changes made meanwhile cause one more run after it"""
             self.win_apply_id = None
             self.win_msg.set_text('Applying…')
+            if getattr(self, 'win_busy', False):
+                self.win_again = True
+                return False
+            self.win_busy, self.win_again = True, False
 
             def work():
-                apply_windows()
+                while True:
+                    try:
+                        apply_windows()
+                    except Exception as e:      # noqa: BLE001 - shown to the user
+                        GLib.idle_add(self.win_msg.set_text, f'Failed: {e}')
+                    if not self.win_again:
+                        break
+                    self.win_again = False
+                self.win_busy = False
                 GLib.idle_add(self.win_msg.set_text, 'Applied' if shutil.which('picom') or
                               not self.win_c['compositor'] else
                               'Title bars applied; transparency needs: sudo apt install picom')
@@ -2020,7 +2137,6 @@ def cmd_app(select=None):
                 view = WebKit2.WebView.new_with_user_content_manager(ucm)
                 st = view.get_settings()
                 st.set_enable_webgl(True)
-                st.set_allow_file_access_from_file_urls(True)
                 black = Gdk.RGBA()
                 black.parse('black')
                 view.set_background_color(black)
@@ -2142,7 +2258,7 @@ def cmd_app(select=None):
 
             def work():
                 try:
-                    r = subprocess.run(['pkexec', HELPER, 'greeter-look', json.dumps(self.look)],
+                    r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(self.look)],
                                        capture_output=True, text=True, timeout=60)
                     msg = ('Saved: shows at the next login / lock' if r.returncode == 0 else
                            (r.stderr.strip().splitlines() or ['failed'])[-1])
@@ -2152,11 +2268,9 @@ def cmd_app(select=None):
             threading.Thread(target=work, daemon=True).start()
 
         def look_test(self):
-            import tempfile
-            fd, path = tempfile.mkstemp(prefix='zorro-look-', suffix='.json')
-            with os.fdopen(fd, 'w') as fh:
-                json.dump(self.look, fh)
-            spawn([str(DM_DIR / 'zorro-greeter'), '--preview', '--look', path])
+            path = RUNTIME / 'zorro-look-test.json'     # private, one file, reused
+            write_atomic(path, json.dumps(self.look))
+            spawn([str(DM_DIR / 'zorro-greeter'), '--preview', '--look', str(path)])
 
         def look_reset(self):
             _look_draft.update(LOOK_DEFAULTS)
@@ -2250,16 +2364,21 @@ def cmd_app(select=None):
             box.footer(self.light_msg)
             return box
 
-    app = Gtk.Application(application_id='org.zorro.settings')
+    from gi.repository import Gio
+    app = Gtk.Application(application_id='org.zorro.settings',
+                          flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
 
-    def activate(a):
-        win = a.get_active_window()
-        if win and select:
-            win.destroy()               # already open: reopen on the asked page
-            win = None
-        (win or Win(a, select=select)).present()
-    app.connect('activate', activate)
-    app.run([])
+    def on_command_line(a, cmdline):
+        """runs in the first instance, also for a second 'zorro-settings --page X'"""
+        args = cmdline.get_arguments()[1:]
+        page = args[args.index('--page') + 1] if '--page' in args[:-1] else None
+        win = a.get_active_window() or Win(a, select=page)
+        if page:
+            win.show_page(page)
+        win.present()
+        return 0
+    app.connect('command-line', on_command_line)
+    app.run(sys.argv[:1] + (['--page', select] if select else []))
 
 
 # ---- main --------------------------------------------------------------------------------

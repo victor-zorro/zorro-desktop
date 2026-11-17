@@ -618,7 +618,11 @@
     for (const f of listeners) f(strength, ms);
   }
 
+  let lastFrame = 0;
   function frame(now) {
+    // at most 30 frames a second: the lock screen can stay up for hours
+    if (now - lastFrame < 32) { requestAnimationFrame(frame); return; }
+    lastFrame = now;
     if (!wc.width || !wc.height) {          // window not sized yet
       if (innerWidth) resize();
       requestAnimationFrame(frame);

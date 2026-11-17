@@ -97,14 +97,18 @@ def greeter_look(text):
 
 def main():
     a = sys.argv[1:]
+    # installed twice: zorro-look-helper may only write the login look (asks a password,
+    # since it writes to /etc); zorro-thinkpad-helper does power, without asking
+    if os.path.basename(sys.argv[0]) == 'zorro-look-helper':
+        if a[:1] == ['greeter-look'] and len(a) == 2:
+            greeter_look(a[1])
+        die('usage: greeter-look JSON')
     if a[:1] == ['power'] and len(a) == 5:
         power(*a[1:])
-    elif a[:1] == ['greeter-look'] and len(a) == 2:
-        greeter_look(a[1])
     elif a == ['fullcharge']:
         sys.exit(subprocess.run([TLP, 'fullcharge', 'BAT0']).returncode)
     else:
-        die('usage: power AC BAT START STOP | fullcharge | greeter-look JSON')
+        die('usage: power AC BAT START STOP | fullcharge')
 
 
 if __name__ == '__main__':
