@@ -1076,7 +1076,8 @@ def hardware_rows(ui):
 # ---- windows: Openbox theme "Zorro", title bar size, compositor (picom), kitty opacity ---------
 
 WIN_DEFAULTS = {'titlebar': 'medium', 'compositor': True, 'kitty_opacity': 0.88,
-                'kitty_blur': True, 'accent': '#19e6ff', 'text': '#d8d8de'}
+                'kitty_blur': True, 'accent': '#19e6ff', 'text': '#d8d8de',
+                'font': 'DejaVu Sans', 'font_size': 10, 'term_size': 11}
 TITLE_SIZES = {'small': ('Small', 3, 8), 'medium': ('Medium', 6, 10), 'large': ('Large', 9, 12),
                'xl': ('Extra large', 12, 14)}       # name: (label, padding px, button px)
 THEME_DIR = HOME / '.local/share/themes/Zorro/openbox-3'
@@ -1238,9 +1239,32 @@ blur-background-exclude = [ "class_g != 'kitty'" ];
 
 def write_kitty(c, composited):
     op = c['kitty_opacity'] if composited else 1.0      # without picom: solid, never broken
-    KITTY_CONF.parent.mkdir(parents=True, exist_ok=True)
-    KITTY_CONF.write_text('# written by the Zorro app (Desktop → Windows); not in git\n'
-                          f'background_opacity {op:.2f}\ndynamic_background_opacity yes\n')
+    fg = colour_or(c.get('text'), WIN_DEFAULTS['text'])
+    acc = colour_or(c.get('accent'), WIN_DEFAULTS['accent'])
+    size = min(24, max(6, float(c.get('term_size', 11))))
+    write_atomic(KITTY_CONF, '# written by the Zorro app (Desktop → Windows / Text & colours); not in git\n'
+                 f'background_opacity {op:.2f}\ndynamic_background_opacity yes\n'
+                 f'font_size {size:g}\nforeground {fg}\ncursor {acc}\nselection_background {acc}\n'
+                 'selection_foreground #000000\n')
+
+
+GTK_CSS = [HOME / '.config/gtk-3.0/gtk.css', HOME / '.config/gtk-4.0/gtk.css']
+
+
+def write_gtk_css(c):
+    """font, text colour and accent for GTK apps (new windows pick it up); not in git"""
+    font = re.sub(r'[^A-Za-z0-9 ,.-]', '', str(c.get('font', 'DejaVu Sans'))) or 'DejaVu Sans'
+    size = min(20, max(6, float(c.get('font_size', 10))))
+    fg = colour_or(c.get('text'), WIN_DEFAULTS['text'])
+    acc = colour_or(c.get('accent'), WIN_DEFAULTS['accent'])
+    css = ('/* written by the Zorro app (Desktop -> Text & colours); not in git */\n'
+           f'* {{ font-family: "{font}"; font-size: {size:g}pt; }}\n'
+           f'window, label, entry, textview, .view, button, menuitem {{ color: {fg}; }}\n'
+           f'selection, *:selected, row:selected {{ background-color: alpha({acc}, 0.35); }}\n'
+           f'scale highlight, progressbar progress, switch:checked {{ background-color: {acc}; }}\n')
+    for p in GTK_CSS:
+        if p.parent.is_dir() and not (p.exists() and 'Zorro app' not in p.read_text()):
+            write_atomic(p, css)        # never overwrite a gtk.css someone else wrote
 
 
 def picom_running():
@@ -1255,6 +1279,7 @@ def apply_windows(login=False):
     write_theme(c)
     write_picom(c)
     write_kitty(c, want)
+    write_gtk_css(c)
     if not login:
         run('openbox', '--reconfigure')
     was = picom_running()
@@ -1492,6 +1517,7 @@ def cmd_app(select=None):
             desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
             desk.section('fx', 'Overlays', self.fx_page('overlay'))
             desk.section('windows', 'Windows', self.windows_page())
+            desk.section('text', 'Text & colours', self.text_page())
             desk.section('applook', 'This app', self.fx_page('app'))
             login = Group()
             login.section('look', 'Login & lock screen', self.look_page())
@@ -2069,6 +2095,62 @@ def cmd_app(select=None):
                 self.bt_found = [d for d in self.bt_found if d[0] != mac]
                 return 'Paired and connected' if 'successful' in out else 'Paired (connect failed: try Connect)'
             self.hw_do(f'Pairing with {mac}… confirm on the device if it asks', fn)
+
+        # -- text and colours: GTK apps, terminal, window theme, info circle
+        def text_page(self):
+            box = Pages()
+            c = win_conf()
+
+            def setv(key, value):
+                c[key] = value
+                update_conf('windows', **{key: value})
+                if key == 'text':           # the info circle's text too
+                    orb = load_orb()
+                    if orb:
+                        cur = orb.load_conf()
+                        cur['text_colour'] = value
+                        write_atomic(orb.CONF, json.dumps(cur, indent=2) + '\n')
+                if self.win_apply_id:
+                    GLib.source_remove(self.win_apply_id)
+                self.win_apply_id = GLib.timeout_add(600, self.windows_apply)
+
+            fams = sorted({l.split(',')[0].strip() for l in run('fc-list', ':', 'family').splitlines()
+                           if l.strip() and 'Emoji' not in l})
+            font = Gtk.ComboBoxText()
+            for fam in fams:
+                font.append(fam, fam)
+            font.set_active_id(c['font'])
+            font.connect('changed', lambda w: setv('font', w.get_active_id()))
+
+            def spin(key, lo, hi):
+                sp = Gtk.SpinButton.new_with_range(lo, hi, 0.5)
+                sp.set_value(float(c[key]))
+                sp.set_halign(Gtk.Align.START)
+                sp.connect('value-changed', lambda w: setv(key, round(w.get_value(), 1)))
+                return sp
+
+            def colour(key):
+                b = Gtk.ColorButton(halign=Gtk.Align.START)
+                rgba = Gdk.RGBA()
+                rgba.parse(c[key])
+                b.set_rgba(rgba)
+                b.connect('color-set', lambda w: setv(key, '#%02x%02x%02x' % tuple(
+                    round(v * 255) for v in (w.get_rgba().red, w.get_rgba().green, w.get_rgba().blue))))
+                return b
+
+            g = Gtk.Grid(column_spacing=12, row_spacing=8)
+            for i, (label, w) in enumerate((('Font', font), ('Size in apps', spin('font_size', 6, 20)),
+                                            ('Size in the terminal', spin('term_size', 6, 24)),
+                                            ('Text colour', colour('text')),
+                                            ('Accent colour', colour('accent')))):
+                g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                g.attach(w, 1, i, 1, 1)
+            box.add(heading('Screen font and colours', 'Text & colours'))
+            box.add(g)
+            box.add(note('Used by GTK apps (windows opened from now on), the terminal (right '
+                         'away), the window title bars and menus (accent) and the info circle '
+                         '(text). Chromatic sea: text #d8d8de, accent cyan #19e6ff.'))
+            return box
 
         # -- windows: title bars, compositor, kitty
         def windows_page(self):
