@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Drive
+GenericName=Google Drive sync
+Comment=Google Drive accounts and synced folders
+Exec=zorro-drive
+Icon=folder-remote
+Terminal=false
+Categories=Network;FileTransfer;
+StartupWMClass=zorro-drive

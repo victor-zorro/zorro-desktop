@@ -1,0 +1,10 @@
+[Unit]
+Description=Drive: upload local changes in synced folders (~30 s after saving)
+
+[Service]
+ExecStart=%h/.local/bin/zorro-drive watch
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

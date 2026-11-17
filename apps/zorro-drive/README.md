@@ -1,0 +1,24 @@
+# Drive (zorro-drive)
+
+Google Drive for the Openbox desktop: several accounts, pick folders to keep on the laptop,
+optional online mount per account. rclone does the work underneath.
+
+- **App** (rofi: *Drive*): accounts on the left (+ Account opens Google sign-in), synced folders
+  on the right with Sync / Open / Resync / Remove per folder; *+ Folder* browses My Drive and
+  Shared drives.
+- **Two-way sync** per folder with `rclone bisync`; conflicts keep both versions.
+- **Battery friendly**: saved files go up ~30 s after the last change (inotify, no polling);
+  Drive → laptop runs every 30 min **only on the charger**; on battery press Sync.
+- **Online** switch per account: whole Drive at `~/Drive/<account>/Online`, files fetched on open.
+
+| File | What |
+|---|---|
+| `zorro-drive` | app + CLI: `sync --folder ID / --all [--resync]`, `watch`, `status` |
+| `systemd/zorro-drive-watch.service` | uploads local saves |
+| `systemd/zorro-drive-sync.{service,timer}` | 30-min sync, `ConditionACPower=true` |
+| `systemd/zorro-drive-mount@.service` | online mount of one account |
+
+Install (no sudo): `./install.sh`. Needs `rclone` (update-extras.sh), `python3-gi`, `gir1.2-gtk-3.0`,
+`inotify-tools`, `fuse3`.
+Settings: `~/.config/zorro-drive/config.json`; state + logs: `~/.local/state/zorro-drive/<id>/`;
+Google tokens stay in rclone's own `~/.config/rclone/rclone.conf` (never in git).

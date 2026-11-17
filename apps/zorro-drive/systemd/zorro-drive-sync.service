@@ -1,0 +1,9 @@
+[Unit]
+Description=Drive: two-way sync of all folders (only on the charger)
+After=network-online.target
+# On battery this is skipped; use the Sync buttons in the Drive app instead
+ConditionACPower=true
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/zorro-drive sync --all

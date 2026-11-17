@@ -136,6 +136,20 @@ for pkg in config/*/; do
   stow -d config -t "$HOME" "${opts[@]}" --restow "$pkg"
 done
 
+log "Default apps: Thunar (folders), Ristretto (images), VLC (video, audio)"
+# xdg-mime only changes these types in ~/.config/mimeapps.list; PDF/web stay with Firefox
+declare -A DEFAULT_APPS=(
+  [thunar.desktop]="inode/directory"
+  [org.xfce.ristretto.desktop]="image/jpeg image/png image/gif image/webp image/bmp image/tiff image/svg+xml image/heic"
+  [vlc.desktop]="video/mp4 video/x-matroska video/webm video/quicktime video/x-msvideo video/mpeg video/ogg audio/mpeg audio/flac audio/ogg audio/x-wav audio/mp4 audio/aac"
+)
+for app in "${!DEFAULT_APPS[@]}"; do
+  [[ -f /usr/share/applications/$app ]] && xdg-mime default "$app" ${DEFAULT_APPS[$app]}
+done
+
+log "Drive app (apps/zorro-drive)"
+apps/zorro-drive/install.sh
+
 # Scripts in ~/.local/bin on PATH for every shell
 grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \
   || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
@@ -187,22 +201,19 @@ KBD
 sudo udevadm trigger --subsystem-match=input --action=change || true
 
 # --- Login screen -------------------------------------------------------
-# zorro-dm: our own display manager, animated greeter and lock screen (system/zorro-dm).
+# zorro-dm: our own display manager, animated greeter and lock screen (apps/zorro-dm).
 # LightDM + GTK greeter stay installed as fallback:
 #   sudo systemctl disable zorro-dm && sudo systemctl enable --force lightdm
 sudo install -Dm644 system/lightdm/50-zorro.conf /etc/xdg/lightdm/lightdm-gtk-greeter.conf.d/50-zorro.conf
 sudo rm -f /etc/lightdm/lightdm.conf.d/60-nody-greeter.conf   # old nody web greeter
-sudo system/zorro-dm/install.sh --enable
+sudo apps/zorro-dm/install.sh --enable
 sudo systemctl set-default graphical.target
 
 # --- Done ---------------------------------------------------------------
 log "Done. Manual follow-ups:"
 echo " - Reboot, then log in to the Openbox session"
 echo " - netbird up --management-url https://<your-server> --setup-key <key>"
-echo " - Google Drive: rclone config  (new remote named 'gdrive', type 'drive'), then:"
-echo "   systemctl --user enable --now rclone-gdrive   -> whole Drive online in ~/GoogleDrive"
-echo " - Offline folders: list them in ~/.config/gdrive-sync/folders.list, run gdrive-sync once,"
-echo "   then: systemctl --user enable --now gdrive-sync.timer  -> ~/DriveOffline, every 10 min"
+echo " - Google Drive: open the Drive app (rofi: Drive), add an account, pick folders"
 has nvidia && echo " - Install DaVinci Resolve manually (Blackmagic download), then reboot for the driver"
 if has laptop; then
   if [[ $DISTRO == debian ]]; then

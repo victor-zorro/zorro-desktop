@@ -34,7 +34,6 @@ mesa-vulkan-drivers
 mesa-utils
 vulkan-tools
 # Window control (focus-or-launch for app scripts), input devices
-wmctrl
 xinput
 fonts-dejavu
 fonts-noto-color-emoji
@@ -62,3 +61,12 @@ maim
 xclip
 conky-std
 systemd-timesyncd
+# Files and media: file manager (+ thumbnails, trash, USB), image viewer, video player
+thunar
+tumbler
+ffmpegthumbnailer
+gvfs
+ristretto
+vlc
+# Drive app (zorro-drive): notices saved files in synced folders without polling
+inotify-tools

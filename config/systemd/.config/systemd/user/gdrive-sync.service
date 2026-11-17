@@ -1,7 +1,0 @@
-[Unit]
-Description=Two-way sync of offline Google Drive folders
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/gdrive-sync

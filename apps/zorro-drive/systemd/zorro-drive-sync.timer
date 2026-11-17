@@ -1,0 +1,9 @@
+[Unit]
+Description=Drive: sync all folders every 30 minutes (runs only on the charger)
+
+[Timer]
+OnStartupSec=5min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target

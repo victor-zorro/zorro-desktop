@@ -431,13 +431,10 @@
       </action>
     </keybind>
     <!-- Keybindings for running applications -->
+    <!-- Super+E: file manager -->
     <keybind key="W-e">
       <action name="Execute">
-        <startupnotify>
-          <enabled>true</enabled>
-          <name>Konqueror</name>
-        </startupnotify>
-        <command>kfmclient openProfile filemanagement</command>
+        <command>thunar</command>
       </action>
     </keybind>
   </keyboard>

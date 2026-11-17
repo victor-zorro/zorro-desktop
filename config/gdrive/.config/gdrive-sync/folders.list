@@ -1,5 +1,0 @@
-# Google Drive folders kept fully offline (two-way sync every 10 minutes).
-# One Drive path per line, as it appears in Drive. Lands in ~/DriveOffline/<path>.
-# Examples:
-# Beeldjutters/Projects
-# Documents/Contracts

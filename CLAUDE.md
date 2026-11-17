@@ -10,7 +10,9 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 - `packages/*.txt` — apt lists per profile, installed with --no-install-recommends
 - `config/<pkg>/` — dotfiles, linked into ~ with GNU Stow (`stow -d config -t ~ --restow <pkg>`)
 - `system/` — files for /etc (udev, X11, tlp), copied by install.sh
-- `system/zorro-dm/` — own display manager (zorro-dm), greeter/lock screen (zorro-greeter) + theme; LightDM stays installed as fallback
+- `apps/<name>/` — our own apps, one folder each with its own install.sh + README (kept separable):
+  - `apps/zorro-dm/` — display manager, login + lock screen (zorro-greeter, theme); LightDM stays as fallback
+  - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
 
@@ -19,6 +21,6 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 - Keep install.sh safe to rerun: no blind appends; check before adding lines.
 - Desktop is windows-only Openbox: no panel, no tray. Launcher = rofi, overlay = conky, notifications = dunst.
 - Keybinds live in config/openbox/.config/openbox/rc.xml (Super = W-). Reload with `openbox --reconfigure`.
-- Scripts go in config/bin/.local/bin (on PATH).
+- Scripts go in config/bin/.local/bin (on PATH). New apps go in apps/<name>/, not in config/.
 - sudo needs a password: put sudo commands in a code block for Vincent to run, don't run them yourself.
 - After a working change: git add, commit with a clear message, git push.

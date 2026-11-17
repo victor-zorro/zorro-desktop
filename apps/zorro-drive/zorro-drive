@@ -1,0 +1,693 @@
+#!/usr/bin/python3
+"""zorro-drive: Google Drive accounts and synced folders (rclone underneath).
+
+  zorro-drive                     the app: accounts, folders, Sync buttons
+  zorro-drive sync --folder ID    sync one folder (two-way, rclone bisync)
+  zorro-drive sync --all          sync every folder (zorro-drive-sync.timer, on AC only)
+  zorro-drive sync --folder ID --resync   rebuild the sync baseline
+  zorro-drive watch               upload local saves: sync a folder ~30 s after
+                                  its last change (zorro-drive-watch.service)
+  zorro-drive status              print folders and their state
+
+Settings: ~/.config/zorro-drive/config.json (accounts = rclone remotes, folders).
+State:    ~/.local/state/zorro-drive/<folder id>/ (status, last log, bisync files).
+Tokens live in rclone's own ~/.config/rclone/rclone.conf, never in the repo.
+Online mount per account: systemd unit zorro-drive-mount@<account> -> ~/Drive/<account>/Online
+"""
+import argparse
+import fcntl
+import json
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from pathlib import Path
+
+HOME = Path.home()
+CONF_DIR = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-drive'
+CONF = CONF_DIR / 'config.json'
+STATE = Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state')) / 'zorro-drive'
+DRIVE_ROOT = HOME / 'Drive'
+DEBOUNCE = 30          # seconds after the last local change before uploading
+SELF = os.path.realpath(__file__)
+
+
+# ---- config & state ------------------------------------------------------------
+
+def load():
+    try:
+        cfg = json.loads(CONF.read_text())
+    except (FileNotFoundError, ValueError):
+        cfg = {}
+    cfg.setdefault('accounts', [])
+    cfg.setdefault('folders', [])
+    return cfg
+
+
+def save(cfg):
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CONF.with_suffix('.tmp')
+    tmp.write_text(json.dumps(cfg, indent=2) + '\n')
+    tmp.replace(CONF)
+
+
+def local_path(f):
+    return Path(os.path.expanduser(f['local']))
+
+
+def remote_spec(f):
+    """rclone path; a shared drive is selected with a connection-string override."""
+    base = f"{f['account']},team_drive={f['drive']}:" if f.get('drive') else f"{f['account']}:"
+    return base + f['path']
+
+
+def folder_title(f):
+    root = f.get('drive_name') or 'My Drive'
+    return f"{root}/{f['path']}" if f['path'] else root
+
+
+def state_dir(fid):
+    d = STATE / fid
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def read_status(fid):
+    try:
+        st = json.loads((STATE / fid / 'status.json').read_text())
+    except (FileNotFoundError, ValueError):
+        st = {'state': 'new'}
+    if st.get('state') == 'syncing' and not is_locked(fid):
+        st['state'] = 'error'           # the syncing process died
+        st['message'] = 'sync was interrupted'
+    return st
+
+
+def write_status(fid, **st):
+    p = state_dir(fid) / 'status.json'
+    old = {}
+    try:
+        old = json.loads(p.read_text())
+    except (FileNotFoundError, ValueError):
+        pass
+    old.update(st)
+    tmp = p.with_suffix('.tmp')
+    tmp.write_text(json.dumps(old))
+    tmp.replace(p)
+
+
+def is_locked(fid):
+    try:
+        with open(state_dir(fid) / 'lock', 'w') as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return False
+    except BlockingIOError:
+        return True
+
+
+def notify(title, body, urgency='normal'):
+    try:
+        subprocess.run(['notify-send', '-a', 'Drive', '-u', urgency, title, body],
+                       timeout=5, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+# ---- syncing ---------------------------------------------------------------------
+
+def sync_folder(f, resync=False):
+    """Two-way sync of one folder. Returns 'ok', 'busy', 'needs_resync' or 'error'."""
+    fid = f['id']
+    d = state_dir(fid)
+    lock = open(d / 'lock', 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 'busy'
+    try:
+        local = local_path(f)
+        local.mkdir(parents=True, exist_ok=True)
+        first = not (d / 'baseline').exists()
+        write_status(fid, state='syncing', started=time.time(), message='')
+        cmd = ['rclone', 'bisync', remote_spec(f), str(local),
+               '--workdir', str(d / 'bisync'), '--create-empty-src-dirs',
+               '--drive-skip-gdocs', '--resilient', '--recover', '--max-lock', '2m',
+               '--conflict-resolve', 'newer', '--conflict-loser', 'num', '-v']
+        if first or resync:
+            cmd.append('--resync')
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        log = p.stdout + p.stderr
+        (d / 'last.log').write_text(log)
+        if p.returncode == 0:
+            (d / 'baseline').touch()
+            write_status(fid, state='ok', last_ok=time.time(), message='')
+            return 'ok'
+        needs = 'must run --resync' in log.lower()
+        msg = next((ln.split(':', 3)[-1].strip() for ln in reversed(log.splitlines())
+                    if 'ERROR' in ln or 'NOTICE: Bisync aborted' in ln), f'rclone exit {p.returncode}')
+        state = 'needs_resync' if needs else 'error'
+        write_status(fid, state=state, last_error=time.time(), message=msg[:300])
+        notify('Drive sync failed', f"{folder_title(f)}: "
+               + ('open Drive and choose Resync' if needs else msg[:120]), 'critical')
+        return state
+    finally:
+        lock.close()
+
+
+def start_sync_detached(fid, resync=False):
+    """Run 'zorro-drive sync' in its own process, so closing the app doesn't stop it."""
+    cmd = [sys.executable, SELF, 'sync', '--folder', fid] + (['--resync'] if resync else [])
+    subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def cmd_sync(args):
+    cfg = load()
+    folders = [f for f in cfg['folders'] if f.get('enabled', True)]
+    if args.folder:
+        folders = [f for f in cfg['folders'] if f['id'] == args.folder]
+        if not folders:
+            sys.exit(f'zorro-drive: no folder {args.folder}')
+    elif not args.all:
+        sys.exit('zorro-drive sync: --folder ID or --all')
+    rc = 0
+    for f in folders:
+        r = sync_folder(f, args.resync)
+        print(f"{folder_title(f)}: {r}")
+        rc |= r in ('error', 'needs_resync')
+    return rc
+
+
+def cmd_status(_args):
+    cfg = load()
+    for f in cfg['folders']:
+        st = read_status(f['id'])
+        print(f"{f['id']}  {f['account']:10}  {folder_title(f):40}  {f['local']:35}  {st['state']}"
+              + (f"  {st.get('message')}" if st.get('message') else ''))
+
+
+# ---- watcher: upload local saves ---------------------------------------------------
+
+IGNORE = re.compile(r'(\.partial$|\.tmp$|~$|\.swp$|\.swx$|/\.~lock\.|\.part$)')
+
+
+def cmd_watch(_args):
+    if not shutil.which('inotifywait'):
+        sys.exit('zorro-drive watch: needs inotify-tools')
+    while True:
+        cfg = load()
+        roots = {}
+        for f in cfg['folders']:
+            if f.get('enabled', True):
+                p = local_path(f)
+                p.mkdir(parents=True, exist_ok=True)
+                roots[str(p.resolve())] = f
+        mtime = CONF.stat().st_mtime if CONF.exists() else 0
+        if not roots:
+            while (CONF.stat().st_mtime if CONF.exists() else 0) == mtime:
+                time.sleep(10)
+            continue
+        proc = subprocess.Popen(
+            ['inotifywait', '-m', '-r', '-q', '--format', '%w%f',
+             '-e', 'close_write,moved_to,moved_from,create,delete', *roots],
+            stdout=subprocess.PIPE, text=True)
+        pending, running = {}, {}
+        try:
+            while True:
+                r, _, _ = select.select([proc.stdout], [], [], 1)
+                if r:
+                    path = proc.stdout.readline()
+                    if not path:
+                        break                   # inotifywait died: restart it
+                    path = path.rstrip('\n')
+                    if IGNORE.search(path):
+                        continue
+                    for root, f in roots.items():
+                        if (path + '/').startswith(root + '/'):
+                            # changes written by a running sync are not new local edits
+                            if f['id'] not in running and not is_locked(f['id']):
+                                pending[f['id']] = time.monotonic() + DEBOUNCE
+                            break
+                now = time.monotonic()
+                for fid, due in list(pending.items()):
+                    if now >= due and fid not in running:
+                        del pending[fid]
+                        f = next(x for x in roots.values() if x['id'] == fid)
+                        t = threading.Thread(target=lambda f=f: (sync_folder(f),
+                                                                  running.pop(f['id'], None)))
+                        running[fid] = t
+                        t.start()
+                if (CONF.stat().st_mtime if CONF.exists() else 0) != mtime:
+                    break                       # folders changed: rewatch
+        finally:
+            proc.terminate()
+            for t in list(running.values()):
+                t.join()
+
+
+# ---- the app -------------------------------------------------------------------------
+
+def ago(ts):
+    if not ts:
+        return 'never'
+    s = int(time.time() - ts)
+    if s < 60:
+        return 'just now'
+    if s < 3600:
+        return f'{s // 60} min ago'
+    if s < 86400:
+        return f'{s // 3600} h ago'
+    return time.strftime('%d %b %H:%M', time.localtime(ts))
+
+
+def run_app():
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import GLib, Gtk, Pango
+
+    def rclone_json(args):
+        p = subprocess.run(['rclone', *args], capture_output=True, text=True)
+        if p.returncode:
+            raise RuntimeError(p.stderr.strip().splitlines()[-1] if p.stderr.strip() else 'rclone failed')
+        return json.loads(p.stdout or '[]')
+
+    def in_thread(work, done):
+        def run():
+            try:
+                res, err = work(), None
+            except Exception as e:      # shown to the user
+                res, err = None, str(e)
+            GLib.idle_add(lambda: done(res, err) and False)
+        threading.Thread(target=run, daemon=True).start()
+
+    def systemctl(*a):
+        return subprocess.run(['systemctl', '--user', *a], capture_output=True, text=True)
+
+    def mount_active(acc):
+        return systemctl('is-active', f'zorro-drive-mount@{acc}.service').stdout.strip() == 'active'
+
+    class AddAccount(Gtk.Dialog):
+        def __init__(self, parent):
+            super().__init__(title='Add Google account', transient_for=parent, modal=True)
+            self.set_default_size(460, -1)
+            box = self.get_content_area()
+            box.set_spacing(8)
+            box.set_border_width(12)
+            box.add(Gtk.Label(label='A short name for this account, e.g. "work" or "personal".\n'
+                              'Firefox opens Google\'s sign-in page; come back here afterwards.',
+                              xalign=0, wrap=True))
+            self.name = Gtk.Entry(placeholder_text='name')
+            box.add(self.name)
+            self.msg = Gtk.Label(xalign=0, wrap=True, selectable=True)
+            box.add(self.msg)
+            self.add_button('Cancel', Gtk.ResponseType.CANCEL)
+            self.ok = self.add_button('Sign in', Gtk.ResponseType.OK)
+            self.ok.get_style_context().add_class('suggested-action')
+            self.show_all()
+
+    class AddFolder(Gtk.Dialog):
+        """Pick a Drive folder (My Drive or a shared drive) and where it goes locally."""
+
+        def __init__(self, parent, acc, taken):
+            super().__init__(title=f'Sync a folder — {acc}', transient_for=parent, modal=True)
+            self.acc, self.taken = acc, taken
+            self.set_default_size(620, 560)
+            box = self.get_content_area()
+            box.set_spacing(8)
+            box.set_border_width(12)
+            # columns: name, drive id, drive name, path, loaded
+            self.store = Gtk.TreeStore(str, str, str, str, bool)
+            self.tree = Gtk.TreeView(model=self.store, headers_visible=False)
+            self.tree.append_column(Gtk.TreeViewColumn('Folder', Gtk.CellRendererText(), text=0))
+            self.tree.connect('row-expanded', self.on_expand)
+            self.tree.get_selection().connect('changed', self.on_select)
+            sw = Gtk.ScrolledWindow(vexpand=True)
+            sw.add(self.tree)
+            box.add(sw)
+            row = Gtk.Box(spacing=6)
+            row.add(Gtk.Label(label='Local folder'))
+            self.local = Gtk.Entry(hexpand=True)
+            row.add(self.local)
+            pick = Gtk.Button(label='Choose…')
+            pick.connect('clicked', self.on_pick)
+            row.add(pick)
+            box.add(row)
+            self.msg = Gtk.Label(xalign=0, wrap=True)
+            box.add(self.msg)
+            self.add_button('Cancel', Gtk.ResponseType.CANCEL)
+            self.ok = self.add_button('Sync this folder', Gtk.ResponseType.OK)
+            self.ok.get_style_context().add_class('suggested-action')
+            self.ok.set_sensitive(False)
+            self.add_root('My Drive', '', '')
+            self.msg.set_text('Loading shared drives…')
+            in_thread(lambda: rclone_json(['backend', 'drives', f'{acc}:']), self.got_drives)
+            self.show_all()
+
+        def add_root(self, name, drive, drive_name):
+            it = self.store.append(None, [name, drive, drive_name, '', False])
+            self.store.append(it, ['loading…', None, None, None, True])
+
+        def got_drives(self, drives, err):
+            self.msg.set_text('' if not err else '')
+            for d in drives or []:
+                self.add_root(f"Shared: {d.get('name')}", d.get('id', ''), d.get('name', ''))
+
+        def on_expand(self, tree, it, path):
+            if self.store[it][4]:
+                return
+            self.store[it][4] = True
+            name, drive, dname, rpath, _ = self.store[it]
+            spec = (f'{self.acc},team_drive={drive}:' if drive else f'{self.acc}:') + rpath
+
+            def done(items, err):
+                child = self.store.iter_children(it)
+                if err:
+                    self.store[child][0] = f'⚠ {err}'
+                    return
+                self.store.remove(child)
+                for e in sorted(items, key=lambda e: e['Name'].lower()):
+                    sub = f"{rpath}/{e['Name']}" if rpath else e['Name']
+                    c = self.store.append(it, [e['Name'], drive, dname, sub, False])
+                    self.store.append(c, ['loading…', None, None, None, True])
+                if not items:
+                    self.store.append(it, ['(no subfolders)', None, None, None, True])
+            in_thread(lambda: rclone_json(['lsjson', '--dirs-only', spec]), done)
+
+        def on_select(self, sel):
+            model, it = sel.get_selected()
+            ok = it is not None and model[it][1] is not None
+            self.ok.set_sensitive(ok)
+            if ok:
+                _, drive, dname, rpath, _ = model[it]
+                parts = [self.acc] + ([dname] if drive else []) + ([rpath] if rpath else [])
+                self.local.set_text(str(DRIVE_ROOT.joinpath(*parts)).replace(str(HOME), '~', 1))
+
+        def on_pick(self, _b):
+            fc = Gtk.FileChooserNative(title='Local folder', transient_for=self,
+                                       action=Gtk.FileChooserAction.SELECT_FOLDER)
+            if fc.run() == Gtk.ResponseType.ACCEPT:
+                self.local.set_text(fc.get_filename().replace(str(HOME), '~', 1))
+
+        def result(self):
+            model, it = self.tree.get_selection().get_selected()
+            _, drive, dname, rpath, _ = model[it]
+            return {'id': uuid.uuid4().hex[:8], 'account': self.acc, 'drive': drive or None,
+                    'drive_name': dname or None, 'path': rpath,
+                    'local': self.local.get_text().strip(), 'enabled': True}
+
+    class Window(Gtk.Window):
+        def __init__(self):
+            super().__init__(title='Drive')
+            self.set_default_size(900, 560)
+            self.set_wmclass('zorro-drive', 'Drive')
+            hb = Gtk.HeaderBar(show_close_button=True, title='Drive')
+            self.set_titlebar(hb)
+            self.sync_all = Gtk.Button(label='Sync all')
+            self.sync_all.connect('clicked', lambda b: [start_sync_detached(f['id'])
+                                                        for f in self.folders_of(self.acc)])
+            hb.pack_end(self.sync_all)
+            self.add_folder_btn = Gtk.Button(label='+ Folder')
+            self.add_folder_btn.connect('clicked', self.on_add_folder)
+            hb.pack_end(self.add_folder_btn)
+
+            paned = Gtk.Paned()
+            self.add(paned)
+            left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, border_width=8)
+            left.set_size_request(240, -1)
+            left.add(Gtk.Label(label='<b>Accounts</b>', use_markup=True, xalign=0))
+            self.accounts = Gtk.ListBox()
+            self.accounts.connect('row-selected', self.on_account)
+            left.pack_start(self.accounts, True, True, 0)
+            add = Gtk.Button(label='+ Account')
+            add.connect('clicked', self.on_add_account)
+            left.add(add)
+            paned.pack1(left, False, False)
+
+            right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, border_width=8)
+            self.heading = Gtk.Label(xalign=0, use_markup=True)
+            right.add(self.heading)
+            self.folders = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+            sw = Gtk.ScrolledWindow(vexpand=True)
+            sw.add(self.folders)
+            right.pack_start(sw, True, True, 0)
+            self.hint = Gtk.Label(xalign=0, wrap=True)
+            self.hint.get_style_context().add_class('dim-label')
+            right.add(self.hint)
+            paned.pack2(right, True, False)
+
+            self.acc, self.status_labels = None, {}
+            self.reload_accounts()
+            GLib.timeout_add_seconds(2, self.refresh_status)
+            self.connect('destroy', Gtk.main_quit)
+            self.show_all()
+
+        # -- accounts
+        def folders_of(self, acc):
+            return [f for f in load()['folders'] if f['account'] == acc]
+
+        def reload_accounts(self, select=None):
+            for r in self.accounts.get_children():
+                self.accounts.remove(r)
+            cfg = load()
+            for a in cfg['accounts']:
+                row = Gtk.ListBoxRow()
+                row.acc = a['name']
+                box = Gtk.Box(spacing=6, border_width=6)
+                box.pack_start(Gtk.Label(label=a['name'], xalign=0), True, True, 0)
+                sw = Gtk.Switch(active=mount_active(a['name']), valign=Gtk.Align.CENTER,
+                                tooltip_text=f"Whole Drive online in ~/Drive/{a['name']}/Online")
+                sw.connect('notify::active', self.on_mount, a['name'])
+                box.add(Gtk.Label(label='online'))
+                box.add(sw)
+                row.add(box)
+                self.accounts.add(row)
+            self.accounts.show_all()
+            rows = self.accounts.get_children()
+            pick = next((r for r in rows if r.acc == select), rows[0] if rows else None)
+            if pick:
+                self.accounts.select_row(pick)
+            else:
+                self.show_folders(None)
+
+        def on_account(self, _lb, row):
+            self.show_folders(row.acc if row else None)
+
+        def on_mount(self, sw, _p, acc):
+            unit = f'zorro-drive-mount@{acc}.service'
+            r = systemctl('enable' if sw.get_active() else 'disable', '--now', unit)
+            if r.returncode:
+                self.hint.set_text(r.stderr.strip())
+
+        def on_add_account(self, _b):
+            dlg = AddAccount(self)
+            proc = None
+            resp = dlg.run()
+            while resp == Gtk.ResponseType.OK:
+                name = dlg.name.get_text().strip()
+                if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,30}', name):
+                    dlg.msg.set_text('Use letters, digits, - or _ (no spaces).')
+                elif any(a['name'] == name for a in load()['accounts']):
+                    dlg.msg.set_text('That name is already used.')
+                else:
+                    dlg.ok.set_sensitive(False)
+                    dlg.msg.set_text('Waiting for Google sign-in in Firefox…')
+                    # rclone opens the browser and waits for Google's answer on localhost
+                    proc = subprocess.Popen(['rclone', 'config', 'create', name, 'drive', 'scope=drive'],
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+                    def done(out, err, dlg=dlg, name=name, proc=proc):
+                        if proc.returncode:
+                            dlg.msg.set_text('Sign-in failed: ' + (out or '').strip()[-300:])
+                            dlg.ok.set_sensitive(True)
+                            return
+                        cfg = load()
+                        cfg['accounts'].append({'name': name})
+                        save(cfg)
+                        dlg.response(Gtk.ResponseType.CLOSE)
+                    in_thread(lambda proc=proc: proc.communicate()[0], done)
+                resp = dlg.run()
+            if proc and proc.poll() is None:
+                proc.terminate()            # cancelled while waiting for Google
+            dlg.destroy()
+            if resp == Gtk.ResponseType.CLOSE:
+                self.reload_accounts(select=load()['accounts'][-1]['name'])
+
+        def remove_account(self, acc):
+            d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                  buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text=f'Remove account "{acc}"?',
+                                  secondary_text='Its folders stop syncing. Files on this laptop and '
+                                                 'on Drive stay where they are.')
+            if d.run() == Gtk.ResponseType.OK:
+                systemctl('disable', '--now', f'zorro-drive-mount@{acc}.service')
+                cfg = load()
+                cfg['accounts'] = [a for a in cfg['accounts'] if a['name'] != acc]
+                cfg['folders'] = [f for f in cfg['folders'] if f['account'] != acc]
+                save(cfg)
+                subprocess.run(['rclone', 'config', 'delete', acc], capture_output=True)
+                self.reload_accounts()
+            d.destroy()
+
+        # -- folders
+        def show_folders(self, acc):
+            self.acc = acc
+            for r in self.folders.get_children():
+                self.folders.remove(r)
+            self.status_labels = {}
+            self.add_folder_btn.set_sensitive(bool(acc))
+            self.sync_all.set_sensitive(bool(acc))
+            if not acc:
+                self.heading.set_markup('<b>No account yet</b>')
+                self.hint.set_text('Add a Google account on the left to get started.')
+                return
+            self.heading.set_markup(f'<b>{GLib.markup_escape_text(acc)}</b> — synced folders')
+            folders = self.folders_of(acc)
+            for f in folders:
+                self.folders.add(self.folder_row(f))
+            if not folders:
+                lbl = Gtk.Label(label='No folders yet. Use “+ Folder” to pick one from Drive.',
+                                margin=24)
+                self.folders.add(lbl)
+            self.hint.set_text('Saved files go up about 30 s after you stop editing. '
+                               'Changes made on Drive come in every 30 min while on the charger, '
+                               'or when you press Sync.')
+            rm = Gtk.Button(label=f'Remove account “{acc}”…', halign=Gtk.Align.START)
+            rm.get_style_context().add_class('destructive-action')
+            rm.connect('clicked', lambda b: self.remove_account(acc))
+            row = Gtk.ListBoxRow(activatable=False, selectable=False)
+            row.add(rm)
+            self.folders.add(row)
+            self.folders.show_all()
+            self.refresh_status()
+
+        def folder_row(self, f):
+            row = Gtk.ListBoxRow(activatable=False)
+            box = Gtk.Box(spacing=8, border_width=8)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+            title.set_markup(f'<b>{GLib.markup_escape_text(folder_title(f))}</b>')
+            text.add(title)
+            text.add(Gtk.Label(label=f"→ {f['local']}", xalign=0,
+                               ellipsize=Pango.EllipsizeMode.MIDDLE))
+            st = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+            st.get_style_context().add_class('dim-label')
+            text.add(st)
+            self.status_labels[f['id']] = st
+            box.pack_start(text, True, True, 0)
+            for label, cb in (('Sync', lambda b: self.sync(f['id'])),
+                              ('Open', lambda b: subprocess.Popen(['xdg-open', str(local_path(f))])),
+                              ('Resync', lambda b: self.resync(f)),
+                              ('Remove', lambda b: self.remove_folder(f))):
+                b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
+                b.connect('clicked', cb)
+                if label == 'Sync':
+                    b.get_style_context().add_class('suggested-action')
+                box.add(b)
+            row.add(box)
+            return row
+
+        def sync(self, fid):
+            start_sync_detached(fid)
+            GLib.timeout_add(300, lambda: self.refresh_status() and False)
+
+        def resync(self, f):
+            d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                  buttons=Gtk.ButtonsType.OK_CANCEL, text='Resync this folder?',
+                                  secondary_text='Compares everything again and merges both sides: '
+                                                 'nothing is deleted, files that differ are copied '
+                                                 'the newest way. Use it after an error.')
+            if d.run() == Gtk.ResponseType.OK:
+                start_sync_detached(f['id'], resync=True)
+            d.destroy()
+
+        def remove_folder(self, f):
+            d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                  buttons=Gtk.ButtonsType.OK_CANCEL,
+                                  text=f'Stop syncing {folder_title(f)}?',
+                                  secondary_text=f"The files stay on Drive and in {f['local']}.")
+            if d.run() == Gtk.ResponseType.OK:
+                cfg = load()
+                cfg['folders'] = [x for x in cfg['folders'] if x['id'] != f['id']]
+                save(cfg)
+                shutil.rmtree(STATE / f['id'], ignore_errors=True)
+                self.show_folders(self.acc)
+            d.destroy()
+
+        def on_add_folder(self, _b):
+            cfg = load()
+            dlg = AddFolder(self, self.acc, [local_path(f) for f in cfg['folders']])
+            while dlg.run() == Gtk.ResponseType.OK:
+                f = dlg.result()
+                lp = local_path(f).resolve()
+                clash = next((x for x in cfg['folders']
+                              if lp == local_path(x).resolve()
+                              or lp in local_path(x).resolve().parents
+                              or local_path(x).resolve() in lp.parents), None)
+                if not f['local'] or not str(lp).startswith(str(HOME)):
+                    dlg.msg.set_text('Choose a local folder inside your home folder.')
+                elif clash:
+                    dlg.msg.set_text(f"Overlaps with {clash['local']} — pick another local folder.")
+                elif (DRIVE_ROOT / self.acc / 'Online') in [lp, *lp.parents]:
+                    dlg.msg.set_text('That is inside the online mount — pick another folder.')
+                else:
+                    cfg['folders'].append(f)
+                    save(cfg)
+                    start_sync_detached(f['id'])       # first sync merges both sides
+                    break
+            dlg.destroy()
+            self.show_folders(self.acc)
+
+        def refresh_status(self):
+            for fid, lbl in list(self.status_labels.items()):
+                st = read_status(fid)
+                s = st.get('state')
+                if s == 'syncing':
+                    txt = 'syncing…'
+                elif s == 'ok':
+                    txt = f"synced {ago(st.get('last_ok'))}"
+                elif s == 'needs_resync':
+                    txt = '⚠ needs Resync — ' + st.get('message', '')
+                elif s == 'error':
+                    txt = f"⚠ error {ago(st.get('last_error'))}: {st.get('message', '')}"
+                    if st.get('last_ok'):
+                        txt += f"  (last good sync {ago(st['last_ok'])})"
+                else:
+                    txt = 'not synced yet'
+                lbl.set_text(txt)
+            return True
+
+    if not shutil.which('rclone'):
+        Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
+                          text='rclone is not installed (run update-extras.sh)').run()
+        return
+    Window()
+    Gtk.main()
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='zorro-drive')
+    sub = ap.add_subparsers(dest='cmd')
+    s = sub.add_parser('sync')
+    s.add_argument('--folder')
+    s.add_argument('--all', action='store_true')
+    s.add_argument('--resync', action='store_true')
+    sub.add_parser('watch')
+    sub.add_parser('status')
+    args = ap.parse_args()
+    if args.cmd == 'sync':
+        sys.exit(cmd_sync(args))
+    if args.cmd == 'watch':
+        cmd_watch(args)
+    elif args.cmd == 'status':
+        cmd_status(args)
+    else:
+        run_app()
+
+
+if __name__ == '__main__':
+    main()
