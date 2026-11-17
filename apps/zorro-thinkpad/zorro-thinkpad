@@ -290,8 +290,22 @@ DOT_MODES = {                       # mode: (label, trigger or None = steady on/
     'charging': ('Blinks while charging, on when full', 'BAT0-charging-blink-full-solid'),
     'ac': ('On only on the charger', 'AC-online'),
     'disk': ('Flickers with disk activity', 'disk-activity'),
-    'morse': ('Morse code: your own word or sentence', None),     # keyd blinks it
+    'fast': ('Fast blink', None),                                  # keyd blinks these
+    'flash': ('Double flash every 2 seconds', None),
+    'morse': ('Morse code: your own word or sentence', None),
 }
+SOFT_MODES = ('fast', 'flash', 'morse')         # blinked by keyd's dot_loop, not the kernel
+# activity overrides for the red dot, most important first; each can pick its own pattern
+OVERRIDES = [
+    ('message', 'A message arrives (notification on screen)'),
+    ('privacy', 'Webcam or microphone in use'),
+    ('bat_low', 'Battery low'),
+    ('bat_full', 'Battery full (on the charger)'),
+    ('charger', 'On the charger'),
+]
+OVERRIDE_MODES = [('none', 'No change')] + [(k, v[0]) for k, v in DOT_MODES.items()
+                                            if k not in ('charging', 'ac')]
+BAT_LOW = 15
 KBD_LEVELS = {0: 'Off', 1: 'Low', 2: 'High'}
 
 
@@ -372,21 +386,94 @@ def play_morse(text, unit, keep_going=lambda: True):
     return True
 
 
-def morse_loop():
-    """keyd thread: while the lid dot is in Morse mode, repeat the text (3 s pause between)"""
-    while True:
-        li = load_conf().get('lights', {})
-        if li.get('dot') != 'morse':
-            time.sleep(1)
-            continue
-        text = li.get('morse_text') or MORSE_TEXT
-        unit = min(1.0, max(0.05, float(li.get('morse_unit', MORSE_UNIT))))
-        same = lambda: load_conf().get('lights', {}) == li     # setting changed: restart
+def on_charger():
+    return sysread('/sys/class/power_supply/AC/online', '1') == '1'
+
+
+def camera_or_mic_in_use():
+    for fd_dir in Path('/proc').glob('[0-9]*/fd'):           # our own processes only
         try:
-            if play_morse(text, unit, same):
-                time.sleep(3)
+            for fd in fd_dir.iterdir():
+                if os.readlink(fd).startswith('/dev/video'):
+                    return True
         except OSError:
-            time.sleep(30)                                   # no permission yet
+            pass
+    return bool(run('pactl', 'list', 'short', 'source-outputs').strip())
+
+
+def condition(key, li):
+    if key == 'message':
+        return run('dunstctl', 'count', 'displayed').strip() not in ('', '0')
+    if key == 'privacy':
+        return camera_or_mic_in_use()
+    if key == 'charger':
+        return on_charger()
+    status = sysread(BAT / 'status')
+    if key == 'bat_full':
+        return on_charger() and status in ('Full', 'Not charging')
+    if key == 'bat_low':
+        try:
+            cap = int(sysread(BAT / 'capacity', '100'))
+        except ValueError:
+            return False
+        return not on_charger() and cap <= int(li.get('bat_low_pct', BAT_LOW))
+    return False
+
+
+_dot = {'refresh': False, 'checked': 0.0, 'mode': None, 'conf': None}
+
+
+def dot_mode():
+    """the pattern the red dot should show now: the first active override, else the
+    normal one. Conditions are checked at most every 2 seconds."""
+    li = load_conf().get('lights', {})
+    if li != _dot['conf'] or time.monotonic() - _dot['checked'] > 2:
+        mode = li.get('dot', 'on')
+        for key, _ in OVERRIDES:
+            m = li.get('overrides', {}).get(key, 'none')
+            if m != 'none' and condition(key, li):
+                mode = m
+                break
+        _dot.update(conf=li, mode=mode, checked=time.monotonic())
+    return _dot['mode'], li
+
+
+def dot_loop():
+    """keyd thread: keeps the red dot on the right pattern and blinks the software ones"""
+    current = None
+    while True:
+        try:
+            mode, li = dot_mode()
+            if mode != current or _dot['refresh']:
+                _dot['refresh'] = False
+                if not li and mode == 'on':
+                    current = mode                  # never configured: leave it alone
+                else:
+                    set_led(DOT_LED, mode)
+                    current = mode
+            same = lambda: dot_mode()[0] == mode and dot_mode()[1] == li
+            unit = min(1.0, max(0.05, float(li.get('morse_unit', MORSE_UNIT))))
+            if mode == 'morse':
+                if play_morse(li.get('morse_text') or MORSE_TEXT, unit, same):
+                    time.sleep(3)
+            elif mode == 'fast':
+                play_pattern([(True, 0.15), (False, 0.15)] * 7, same)
+            elif mode == 'flash':
+                play_pattern([(True, 0.1), (False, 0.15), (True, 0.1), (False, 1.65)], same)
+            else:
+                time.sleep(1)
+        except OSError:
+            time.sleep(30)                          # no permission yet
+
+
+def play_pattern(steps, keep_going):
+    bright = DOT_LED / 'brightness'
+    mx = (DOT_LED / 'max_brightness').read_text().strip()
+    for on, secs in steps:
+        if not keep_going():
+            return
+        bright.write_text(mx if on else '0')
+        time.sleep(secs)
 
 
 def apply_lights():
@@ -394,6 +481,7 @@ def apply_lights():
     errs = []
     if 'dot' in li:
         errs.append(set_led(DOT_LED, li['dot']))
+        _dot['refresh'] = True              # keyd's dot_loop re-applies overrides too
     if 'power' in li:
         errs.append(set_led(POWER_LED, li['power']))
     if li.get('kbd') is not None:
@@ -635,7 +723,7 @@ def cmd_keyd():
                     warned = True
                 time.sleep(30)
     threading.Thread(target=evdev_reader, daemon=True).start()
-    threading.Thread(target=morse_loop, daemon=True).start()
+    threading.Thread(target=dot_loop, daemon=True).start()
 
     # Fn+Space: the firmware changes the keyboard light and pokes brightness_hw_changed
     hw = KBD_LED / 'brightness_hw_changed'
@@ -781,7 +869,22 @@ def cmd_app():
             stack.add_titled(self.lights_page(), 'lights', 'Lights')
             stack.add_titled(self.fx_page(), 'fx', 'Overlays')
             style_osd(self.get_screen())
-            self.add(stack)
+            # optional: the app gets the overlay background (Overlays page switch)
+            outer = Gtk.Box()
+            stack.set_hexpand(True)
+            stack.set_vexpand(True)
+            outer.add(stack)
+            self.add(outer)
+            if zorro_fx:
+                self.bg_snow = Snow(outer, radius=0, fps=24, max_parts=1500,
+                                    enabled=lambda: zorro_fx.settings()['app_bg'])
+                css = Gtk.CssProvider()
+                css.load_from_data(b'''
+                    window.zfx-app scrolledwindow, window.zfx-app viewport,
+                    window.zfx-app stack { background: none; }''')
+                Gtk.StyleContext.add_provider_for_screen(
+                    self.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+                GLib.timeout_add(300, self.follow_app_bg)
             self.show_all()
             self.custom_box.set_visible(load_conf().get('star') == 'custom')
             GLib.timeout_add_seconds(5, self.refresh)
@@ -981,6 +1084,9 @@ def cmd_app():
                 ('Level bar', scale('bar_opacity', 0, 1, 0.01, 2, pct)),
                 ('Indicator stays', scale('osd_seconds', 0.5, 5, 0.25, 2, lambda v: f'{v:.2g} s')),
             ]
+            appbg = Gtk.Switch(active=s['app_bg'], halign=Gtk.Align.START)
+            appbg.connect('notify::active', lambda w, _p: self.fx_set('app_bg', w.get_active()))
+            rows.append(('This app too', appbg))
             glow = Gtk.Switch(active=s['glow'], halign=Gtk.Align.START)
             glow.connect('notify::active', lambda w, _p: self.fx_set('glow', w.get_active()))
             for i, (label, w) in enumerate(rows):
@@ -999,6 +1105,13 @@ def cmd_app():
             reset.connect('clicked', self.fx_reset)
             box.add(reset)
             return sw
+
+        def follow_app_bg(self):
+            ctx = self.get_style_context()
+            on = zorro_fx.settings()['app_bg']
+            if on != ctx.has_class('zfx-app'):
+                (ctx.add_class if on else ctx.remove_class)('zfx-app')
+            return True
 
         def fx_checker(self, w, cr):
             a = w.get_allocation()
@@ -1048,7 +1161,7 @@ def cmd_app():
                     self.light_msg.set_text(err or '')
                 return cb
 
-            box.add(heading('Red dot on the lid'))
+            box.add(heading('Red dot on the lid: normally'))
             box.add(radios([(k, v[0]) for k, v in DOT_MODES.items()], li.get('dot', 'on'),
                            pick(DOT_LED, 'dot')))
             box.add(note('In standby the dot still blinks slowly (the firmware does that).'))
@@ -1074,6 +1187,32 @@ def cmd_app():
             box.add(srow)
             box.add(note('Letters, digits and . , ? ! / - @ : = + & are blinked; other '
                          'characters are skipped. The text repeats with a 3 second pause.'))
+
+            box.add(heading('Red dot: activity overrides'))
+            ov = li.get('overrides', {})
+            grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+            for i, (key, label) in enumerate(OVERRIDES):
+                c = Gtk.ComboBoxText()
+                for k, lab in OVERRIDE_MODES:
+                    c.append(k, lab)
+                c.set_active_id(ov.get(key, 'none'))
+                c.connect('changed', lambda w, k=key: update_conf(
+                    'lights', overrides={**load_conf().get('lights', {}).get('overrides', {}),
+                                         k: w.get_active_id()}))
+                grid.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                grid.attach(c, 1, i, 1, 1)
+            low = Gtk.SpinButton.new_with_range(5, 50, 1)
+            low.set_value(int(li.get('bat_low_pct', BAT_LOW)))
+            low.connect('value-changed', lambda w: update_conf('lights', bat_low_pct=int(w.get_value())))
+            lrow = Gtk.Box(spacing=6)
+            lrow.add(Gtk.Label(label='Battery low means below'))
+            lrow.add(low)
+            lrow.add(Gtk.Label(label='%'))
+            grid.attach(lrow, 0, len(OVERRIDES), 2, 1)
+            box.add(grid)
+            box.add(note('While one of these is happening the dot shows its pattern instead of '
+                         'the normal one; the highest one in the list wins. Morse uses the '
+                         'text above.'))
 
             box.add(heading('Power button light'))
             box.add(radios([('on', 'On'), ('off', 'Off')], li.get('power', 'on'),

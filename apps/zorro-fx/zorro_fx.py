@@ -27,6 +27,7 @@ DEFAULTS = {
     'particle_opacity': 1.0,    # particles
     'bar_opacity': 1.0,         # level bar of the indicator
     'osd_seconds': 1.5,         # how long the indicator stays
+    'app_bg': False,            # the ThinkPad app window gets the same background
 }
 PATTERNS = {
     'float': 'Floating around',
@@ -97,8 +98,11 @@ class Snow:
     backdrop: a GdkPixbuf painted first - a still image of what is behind the overlay, so
     see-through and spill also work without a compositor."""
 
-    def __init__(self, widget, radius=12, fps=30, inner=None):
+    def __init__(self, widget, radius=12, fps=30, inner=None, enabled=None,
+                 max_parts=MAX_PARTICLES):
         self.widget, self.radius, self.fps, self.inner = widget, radius, fps, inner
+        self.enabled, self.max_parts = enabled, max_parts
+        self.was_on = None
         self.parts, self.timer = [], None
         self.t0 = self.last = time.monotonic()
         self.backdrop = None
@@ -124,8 +128,11 @@ class Snow:
             self.timer = None
 
     def tick(self):
-        self.update_spill()
-        self.widget.queue_draw()
+        on = self.enabled is None or self.enabled()
+        if on or on != self.was_on:                 # off: one last redraw, then idle
+            self.update_spill()
+            self.widget.queue_draw()
+        self.was_on = on
         return True
 
     def update_spill(self):
@@ -210,6 +217,8 @@ class Snow:
             cr.rectangle(x, y, w, h)
 
     def draw(self, w, cr):
+        if self.enabled is not None and not self.enabled():
+            return False                # switched off: the normal theme background
         s = settings()
         a = w.get_allocation()
         W, H = max(1, a.width), max(1, a.height)
@@ -224,7 +233,7 @@ class Snow:
         n = bw * bh / 1000 * max(0.0, s['amount'])
         if spill:
             n *= 1 + 0.5 * ((W * H) / max(1, bw * bh) - 1)
-        n = min(MAX_PARTICLES, int(n))
+        n = min(self.max_parts, int(n))
         if len(self.parts) > n:
             del self.parts[n:]
         while len(self.parts) < n:

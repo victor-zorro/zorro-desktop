@@ -6,10 +6,13 @@ the bottom centre of the screen. The app (F9, or rofi "ThinkPad") has these page
 - **Keys**: what each Fn key does, and what the star key (F12 ★) does.
 - **Power**: power mode on charger / battery (TLP platform profile), charge limit
   (80% for long battery life, or 100%), "charge to 100% once", battery health.
-- **Lights**: red dot on the lid (on, off, heartbeat, blink, charging, charger only, disk),
-  power button light, keyboard light. keyd re-applies them at login and after standby.
+- **Lights**: red dot on the lid: a normal pattern (on, off, heartbeat, slow / fast blink,
+  double flash, charging, charger only, disk, Morse code with your own text) plus activity
+  overrides with their own pattern (message arrives, webcam or mic in use, battery low,
+  battery full, on the charger; the highest active one wins). Power button light, keyboard
+  light. keyd runs the dot and re-applies everything at login and after standby.
 - **Overlays**: particles in the indicator and the screenshot bar (`apps/zorro-fx`),
-  with a live preview.
+  with a live preview; optionally the app window gets the same background.
 
 Still to come: LTE + SMS and a hardware check (webcam, mic, bluetooth, printer, fingerprint).
 
