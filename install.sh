@@ -153,6 +153,9 @@ apps/zorro-drive/install.sh
 log "Screenshot overlay (apps/zorro-shot)"
 apps/zorro-shot/install.sh
 
+log "Moving background (apps/zorro-backdrop)"
+apps/zorro-backdrop/install.sh
+
 # Scripts in ~/.local/bin on PATH for every shell
 grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \
   || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"

@@ -14,6 +14,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-dm/` — display manager, login + lock screen (zorro-greeter, theme); LightDM stays as fallback
   - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
   - `apps/zorro-thinkpad/` — ThinkPad app: Fn keys + indicator (keyd), power, LEDs, LTE, hardware check
+  - `apps/zorro-backdrop/` — moving desktop background (marine snow, like the lock screen)
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
