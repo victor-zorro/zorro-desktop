@@ -82,7 +82,9 @@ def read_status(fid):
         st = json.loads((STATE / fid / 'status.json').read_text())
     except (FileNotFoundError, ValueError):
         st = {'state': 'new'}
-    if st.get('state') == 'syncing' and not is_locked(fid):
+    if st.get('state') == 'queued' and pid_alive(st.get('pid')):
+        return st                       # waiting in a batch, not started yet
+    if st.get('state') in ('syncing', 'queued') and not is_locked(fid):
         st['state'] = 'error'           # the syncing process died
         st['message'] = 'sync was interrupted'
     return st
@@ -99,6 +101,16 @@ def write_status(fid, **st):
     tmp = p.with_suffix('.tmp')
     tmp.write_text(json.dumps(old))
     tmp.replace(p)
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (TypeError, ValueError, ProcessLookupError):
+        return False
+    except PermissionError:
+        return True
 
 
 def is_locked(fid):
@@ -120,8 +132,54 @@ def notify(title, body, urgency='normal'):
 
 # ---- syncing ---------------------------------------------------------------------
 
+QUEUE_LOCK = STATE / 'queue.lock'      # one rclone sync at a time (Google rate limits)
+ACTIVITY = STATE / 'activity.jsonl'    # recent file changes, shown in the app
+RETRY_AFTER = 15 * 60                  # seconds to wait after Google's rate limit
+PHASES = (('Building Path1 and Path2 listings', 'listing'),
+          ('checking for diffs', 'comparing'),
+          ('Applying changes', 'transferring'),
+          ('Resync is copying files', 'transferring'),
+          ('Updating listings', 'finishing'),
+          ('Resync updating listings', 'finishing'))
+FILE_EVENTS = {'Copied (new)': 'new', 'Copied (replaced existing)': 'updated',
+               'Deleted': 'deleted', 'Moved (server-side)': 'moved'}
+
+
+def log_activity(entries):
+    if not entries:
+        return
+    STATE.mkdir(parents=True, exist_ok=True)
+    with open(ACTIVITY, 'a') as fh:
+        for e in entries:
+            fh.write(json.dumps(e) + '\n')
+    try:                                # keep the last 500 lines
+        lines = ACTIVITY.read_text().splitlines()
+        if len(lines) > 600:
+            tmp = ACTIVITY.with_suffix('.tmp')
+            tmp.write_text('\n'.join(lines[-500:]) + '\n')
+            tmp.replace(ACTIVITY)
+    except OSError:
+        pass
+
+
+def read_activity(n=200):
+    try:
+        lines = ACTIVITY.read_text().splitlines()[-n:]
+    except OSError:
+        return []
+    out = []
+    for ln in reversed(lines):
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            pass
+    return out
+
+
 def sync_folder(f, resync=False):
-    """Two-way sync of one folder. Returns 'ok', 'busy', 'needs_resync' or 'error'."""
+    """Two-way sync of one folder. Returns 'ok', 'busy', 'needs_resync', 'rate_limited'
+    or 'error'. Waits for other folders first (one sync at a time) and writes live
+    progress to status.json while rclone runs."""
     fid = f['id']
     d = state_dir(fid)
     lock = open(d / 'lock', 'w')
@@ -129,33 +187,82 @@ def sync_folder(f, resync=False):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return 'busy'
+    queue = open(QUEUE_LOCK, 'w')
     try:
+        try:
+            fcntl.flock(queue, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            write_status(fid, state='queued', pid=os.getpid(), message='', progress=None)
+            fcntl.flock(queue, fcntl.LOCK_EX)
         local = local_path(f)
         local.mkdir(parents=True, exist_ok=True)
         first = not (d / 'baseline').exists()
-        write_status(fid, state='syncing', started=time.time(), message='')
+        write_status(fid, state='syncing', started=time.time(), message='',
+                     progress={'phase': 'starting'}, retry_at=None)
         cmd = ['rclone', 'bisync', remote_spec(f), str(local),
                '--workdir', str(d / 'bisync'), '--create-empty-src-dirs',
                '--drive-skip-gdocs', '--resilient', '--recover', '--max-lock', '2m',
-               '--conflict-resolve', 'newer', '--conflict-loser', 'num', '-v']
+               '--conflict-resolve', 'newer', '--conflict-loser', 'num',
+               '--tpslimit', '8', '--color', 'NEVER', '--use-json-log',
+               '--stats', '2s', '--stats-log-level', 'NOTICE', '-v']
         if first or resync:
             cmd.append('--resync')
-        p = subprocess.run(cmd, capture_output=True, text=True)
-        log = p.stdout + p.stderr
-        (d / 'last.log').write_text(log)
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        log, prog, events, last_write = [], {'phase': 'starting'}, [], 0
+        direction = ''      # Path1 = Drive, Path2 = this laptop
+        for line in p.stderr:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                log.append(line.rstrip())
+                continue
+            msg = e.get('msg', '')
+            if 'stats' in e:
+                st = e['stats']
+                prog.update({k: st.get(k) for k in (
+                    'bytes', 'totalBytes', 'speed', 'eta', 'transfers', 'totalTransfers',
+                    'checks', 'totalChecks', 'listed', 'deletes', 'errors')})
+                prog['current'] = [{'name': t.get('name'), 'pct': t.get('percentage'),
+                                    'size': t.get('size')} for t in st.get('transferring') or []][:4]
+            else:
+                log.append(f"{e.get('time', '')[11:19]} {e.get('level', '')}: {msg}"
+                           + (f" ({e['object']})" if e.get('object') else ''))
+                if 'queued copies to' in msg or 'Resync is copying files to' in msg:
+                    direction = 'up' if msg.rstrip().endswith('Path1') else 'down'
+                for key, ph in PHASES:
+                    if key in msg:
+                        prog['phase'] = ph
+                if e.get('object') and msg in FILE_EVENTS:
+                    events.append({'t': time.time(), 'folder': fid, 'what': FILE_EVENTS[msg],
+                                   'dir': direction, 'file': e['object']})
+            if time.monotonic() - last_write > 1:
+                write_status(fid, progress=prog)
+                log_activity(events)
+                events, last_write = [], time.monotonic()
+        p.wait()
+        log_activity(events)
+        (d / 'last.log').write_text('\n'.join(log) + '\n')
+        text = '\n'.join(log)
         if p.returncode == 0:
             (d / 'baseline').touch()
-            write_status(fid, state='ok', last_ok=time.time(), message='')
+            write_status(fid, state='ok', last_ok=time.time(), message='', progress=None)
             return 'ok'
-        needs = 'must run --resync' in log.lower()
-        msg = next((ln.split(':', 3)[-1].strip() for ln in reversed(log.splitlines())
-                    if 'ERROR' in ln or 'NOTICE: Bisync aborted' in ln), f'rclone exit {p.returncode}')
+        if re.search(r'rateLimitExceeded|Quota exceeded|userRateLimit|Error 429', text):
+            write_status(fid, state='rate_limited', last_error=time.time(), progress=None,
+                         retry_at=time.time() + RETRY_AFTER,
+                         message='Google\'s request limit was reached; retrying automatically')
+            return 'rate_limited'
+        # a first sync that failed simply starts over (it is a resync anyway)
+        needs = not first and 'must run --resync' in text.lower()
+        msg = next((ln.split(': ', 1)[-1] for ln in reversed(log)
+                    if ' error: ' in ln and 'Bisync aborted' not in ln), f'rclone exit {p.returncode}')
         state = 'needs_resync' if needs else 'error'
-        write_status(fid, state=state, last_error=time.time(), message=msg[:300])
+        write_status(fid, state=state, last_error=time.time(), message=msg[:300], progress=None)
         notify('Drive sync failed', f"{folder_title(f)}: "
                + ('open Drive and choose Resync' if needs else msg[:120]), 'critical')
         return state
     finally:
+        queue.close()
         lock.close()
 
 
@@ -165,9 +272,6 @@ def start_sync_detached(fids, resync=False):
     fids = [fids] if isinstance(fids, str) else list(fids)
     if not fids:
         return
-    for fid in fids:
-        if read_status(fid).get('state') == 'new':
-            write_status(fid, state='queued')
     cmd = [sys.executable, SELF, 'sync'] + [a for fid in fids for a in ('--folder', fid)]
     cmd += ['--resync'] if resync else []
     subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL,
@@ -184,10 +288,13 @@ def cmd_sync(args):
     elif not args.all:
         sys.exit('zorro-drive sync: --folder ID or --all')
     rc = 0
+    for f in folders[1:]:               # show the rest of the batch as waiting
+        if not is_locked(f['id']):
+            write_status(f['id'], state='queued', pid=os.getpid(), progress=None)
     for f in folders:
         r = sync_folder(f, args.resync)
         print(f"{folder_title(f)}: {r}")
-        rc |= r in ('error', 'needs_resync')
+        rc |= r in ('error', 'needs_resync', 'rate_limited')
     return rc
 
 
@@ -225,6 +332,7 @@ def cmd_watch(_args):
              '-e', 'close_write,moved_to,moved_from,create,delete', *roots],
             stdout=subprocess.PIPE, text=True)
         pending, running = {}, {}
+        next_check = 0
         try:
             while True:
                 r, _, _ = select.select([proc.stdout], [], [], 1)
@@ -242,6 +350,15 @@ def cmd_watch(_args):
                                 pending[f['id']] = time.monotonic() + DEBOUNCE
                             break
                 now = time.monotonic()
+                if now >= next_check:
+                    # resume syncs cut off by a reboot, retry after Google's rate limit
+                    next_check = now + 60
+                    for f in roots.values():
+                        st = read_status(f['id'])
+                        if ((st.get('state') == 'rate_limited'
+                             and (st.get('retry_at') or 0) <= time.time())
+                                or st.get('message') == 'sync was interrupted'):
+                            pending.setdefault(f['id'], now)
                 for fid, due in list(pending.items()):
                     if now >= due and fid not in running:
                         del pending[fid]
@@ -259,6 +376,53 @@ def cmd_watch(_args):
 
 
 # ---- the app -------------------------------------------------------------------------
+
+def human_bytes(n):
+    n = float(n or 0)
+    for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+        if n < 1000 or unit == 'TB':
+            return f'{n:.0f} {unit}' if unit in ('B', 'KB') else f'{n:.1f} {unit}'
+        n /= 1000
+
+
+def human_eta(sec):
+    if sec is None:
+        return None
+    sec = int(sec)
+    if sec < 60:
+        return 'less than a minute left'
+    if sec < 3600:
+        return f'about {sec // 60 + 1} min left'
+    return f'about {sec // 3600} h {sec % 3600 // 60} min left'
+
+
+def progress_text(prog):
+    """(fraction or None, line 1, line 2) for a folder that is syncing"""
+    phase = prog.get('phase', 'starting')
+    total, done = prog.get('totalBytes') or 0, prog.get('bytes') or 0
+    tt, td = prog.get('totalTransfers') or 0, prog.get('transfers') or 0
+    if phase in ('starting', 'listing') and not tt:
+        listed = prog.get('listed')
+        return None, f"Loading file lists from Drive and this laptop… ({listed or 0} files listed)", ''
+    if phase == 'comparing' and not tt:
+        return None, 'Comparing both sides…', ''
+    if phase == 'finishing':
+        return 1.0, 'Saving the sync state…', ''
+    if not tt:
+        return None, 'Checking…', ''
+    eta = prog.get('eta')
+    if eta is None and prog.get('speed') and total > done:
+        eta = (total - done) / prog['speed']
+    parts = [f'{td} of {tt} files', f'{human_bytes(done)} of {human_bytes(total)}']
+    if prog.get('speed'):
+        parts.append(f"{human_bytes(prog['speed'])}/s")
+    if human_eta(eta) and total > done:
+        parts.append(human_eta(eta))
+    cur = prog.get('current') or []
+    line2 = '  ·  '.join(f"{os.path.basename(c['name'] or '')} {c.get('pct') or 0}%" for c in cur[:2])
+    frac = done / total if total else td / tt
+    return min(max(frac, 0.0), 1.0), '  ·  '.join(parts), line2
+
 
 def ago(ts):
     if not ts:
@@ -292,6 +456,13 @@ def run_app():
                 res, err = None, str(e)
             GLib.idle_add(lambda: done(res, err) and False)
         threading.Thread(target=run, daemon=True).start()
+
+    def rclone_value(acc, key):
+        p = subprocess.run(['rclone', 'config', 'dump'], capture_output=True, text=True)
+        try:
+            return json.loads(p.stdout).get(acc, {}).get(key, '')
+        except ValueError:
+            return ''
 
     def systemctl(*a):
         return subprocess.run(['systemctl', '--user', *a], capture_output=True, text=True)
@@ -499,23 +670,52 @@ def run_app():
             add = Gtk.Button(label='+ Account')
             add.connect('clicked', self.on_add_account)
             left.add(add)
+            self.key_btn = Gtk.Button(label='Google API key…')
+            self.key_btn.connect('clicked', self.on_api_key)
+            left.add(self.key_btn)
+            self.key_warn = Gtk.Label(xalign=0, wrap=True, max_width_chars=30)
+            left.add(self.key_warn)
             paned.pack1(left, False, False)
 
             right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, border_width=8)
             self.heading = Gtk.Label(xalign=0, use_markup=True)
             right.add(self.heading)
+            vpaned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
             self.folders = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
             sw = Gtk.ScrolledWindow(vexpand=True)
             sw.add(self.folders)
-            right.pack_start(sw, True, True, 0)
+            vpaned.pack1(sw, True, False)
+            act = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_top=6)
+            act.add(Gtk.Label(label='<b>Activity</b>', use_markup=True, xalign=0))
+            # time, folder, what, file
+            self.act_store = Gtk.ListStore(str, str, str, str)
+            tv = Gtk.TreeView(model=self.act_store)
+            for i, name in enumerate(('Time', 'Folder', 'What', 'File')):
+                cell = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.MIDDLE if i == 3
+                                            else Pango.EllipsizeMode.END)
+                col = Gtk.TreeViewColumn(name, cell, text=i)
+                col.set_resizable(True)
+                col.set_expand(i == 3)
+                if i == 1:
+                    col.set_fixed_width(160)
+                    col.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
+                tv.append_column(col)
+            asw = Gtk.ScrolledWindow(vexpand=True)
+            asw.set_size_request(-1, 150)
+            asw.add(tv)
+            act.pack_start(asw, True, True, 0)
+            vpaned.pack2(act, False, False)
+            vpaned.set_position(360)
+            right.pack_start(vpaned, True, True, 0)
             self.hint = Gtk.Label(xalign=0, wrap=True)
             self.hint.get_style_context().add_class('dim-label')
             right.add(self.hint)
             paned.pack2(right, True, False)
+            self.act_mtime = None
 
             self.acc, self.status_labels = None, {}
             self.reload_accounts()
-            GLib.timeout_add_seconds(2, self.refresh_status)
+            GLib.timeout_add(1000, self.refresh_status)
             self.connect('destroy', Gtk.main_quit)
             self.show_all()
 
@@ -549,12 +749,88 @@ def run_app():
 
         def on_account(self, _lb, row):
             self.show_folders(row.acc if row else None)
+            self.update_key_warning()
 
         def on_mount(self, sw, _p, acc):
             unit = f'zorro-drive-mount@{acc}.service'
             r = systemctl('enable' if sw.get_active() else 'disable', '--now', unit)
             if r.returncode:
                 self.hint.set_text(r.stderr.strip())
+
+        def on_api_key(self, _b):
+            acc = self.acc
+            if not acc:
+                return
+            d = Gtk.Dialog(title=f'Google API key — {acc}', transient_for=self, modal=True)
+            d.set_default_size(560, -1)
+            box = d.get_content_area()
+            box.set_spacing(8)
+            box.set_border_width(12)
+            box.add(Gtk.Label(use_markup=True, xalign=0, wrap=True, label=(
+                'Without its own key, this account uses rclone\'s <b>shared</b> Google key. '
+                'All rclone users share its request limit (syncs stop with “quota exceeded”), '
+                'and Google is retiring it during 2026.\n\n'
+                '<b>Make your own (free, ~5 min):</b>\n'
+                '1. Open the Google Cloud console (button below), sign in with this account, '
+                'create a project, e.g. “zorro-drive”.\n'
+                '2. APIs &amp; Services → Library → <b>Google Drive API</b> → Enable.\n'
+                '3. OAuth consent screen → User type <b>Internal</b> (Workspace) or External + '
+                'add yourself as test user.\n'
+                '4. Credentials → Create credentials → OAuth client ID → <b>Desktop app</b>.\n'
+                '5. Paste the client ID and secret here. Firefox then asks you to sign in once '
+                'more.')))
+            link = Gtk.LinkButton(uri='https://console.cloud.google.com/apis/credentials',
+                                  label='Open Google Cloud console', halign=Gtk.Align.START)
+            box.add(link)
+            cid = Gtk.Entry(placeholder_text='Client ID  (…apps.googleusercontent.com)')
+            sec = Gtk.Entry(placeholder_text='Client secret', visibility=False)
+            box.add(cid)
+            box.add(sec)
+            msg = Gtk.Label(xalign=0, wrap=True, selectable=True)
+            box.add(msg)
+            d.add_button('Cancel', Gtk.ResponseType.CANCEL)
+            ok = d.add_button('Save and sign in', Gtk.ResponseType.OK)
+            ok.get_style_context().add_class('suggested-action')
+            d.show_all()
+            proc = None
+            resp = d.run()
+            while resp == Gtk.ResponseType.OK:
+                c, k = cid.get_text().strip(), sec.get_text().strip()
+                if not c.endswith('.apps.googleusercontent.com') or not k:
+                    msg.set_text('The client ID ends in .apps.googleusercontent.com, '
+                                 'and the secret is needed too.')
+                else:
+                    ok.set_sensitive(False)
+                    msg.set_text('Waiting for Google sign-in in Firefox…')
+                    # new key = new sign-in; rclone opens the browser (config_refresh_token)
+                    proc = subprocess.Popen(['rclone', 'config', 'update', acc,
+                                             f'client_id={c}', f'client_secret={k}',
+                                             'config_refresh_token=true'],
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                            text=True)
+
+                    def done(out, err, proc=proc):
+                        if proc.returncode:
+                            msg.set_text('Failed: ' + (out or '').strip()[-300:])
+                            ok.set_sensitive(True)
+                            return
+                        d.response(Gtk.ResponseType.CLOSE)
+                    in_thread(lambda proc=proc: proc.communicate()[0], done)
+                resp = d.run()
+            if proc and proc.poll() is None:
+                proc.terminate()
+            d.destroy()
+            if resp == Gtk.ResponseType.CLOSE:
+                systemctl('try-restart', f'zorro-drive-mount@{acc}.service')
+                self.update_key_warning()
+
+        def update_key_warning(self):
+            acc = self.acc
+            self.key_btn.set_sensitive(bool(acc))
+            shared = bool(acc) and not rclone_value(acc, 'client_id')
+            self.key_warn.set_markup('<small>⚠ This account uses rclone\'s shared Google key: '
+                                     'set your own to avoid “quota exceeded”.</small>'
+                                     if shared else '')
 
         def on_add_account(self, _b):
             dlg = AddAccount(self)
@@ -650,10 +926,16 @@ def run_app():
             st = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
             st.get_style_context().add_class('dim-label')
             text.add(st)
-            self.status_labels[f['id']] = st
+            bar = Gtk.ProgressBar(no_show_all=True, margin_top=2)
+            text.add(bar)
+            cur = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, no_show_all=True)
+            cur.get_style_context().add_class('dim-label')
+            text.add(cur)
+            self.status_labels[f['id']] = (st, bar, cur)
             box.pack_start(text, True, True, 0)
             for label, cb in (('Sync', lambda b: self.sync(f['id'])),
                               ('Open', lambda b: subprocess.Popen(['xdg-open', str(local_path(f))])),
+                              ('Log', lambda b: self.show_log(f)),
                               ('Resync', lambda b: self.resync(f)),
                               ('Remove', lambda b: self.remove_folder(f))):
                 b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
@@ -663,6 +945,25 @@ def run_app():
                 box.add(b)
             row.add(box)
             return row
+
+        def show_log(self, f):
+            try:
+                text = (STATE / f['id'] / 'last.log').read_text()
+            except OSError:
+                text = 'No sync has run yet.'
+            d = Gtk.Dialog(title=f'Last sync — {folder_title(f)}', transient_for=self, modal=True)
+            d.set_default_size(820, 500)
+            tv = Gtk.TextView(editable=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
+            tv.get_buffer().set_text(text[-200000:])
+            sw = Gtk.ScrolledWindow(vexpand=True)
+            sw.add(tv)
+            d.get_content_area().pack_start(sw, True, True, 0)
+            d.add_button('Close', Gtk.ResponseType.CLOSE)
+            d.show_all()
+            GLib.idle_add(lambda: tv.scroll_to_iter(tv.get_buffer().get_end_iter(), 0, False, 0, 0)
+                          and False)
+            d.run()
+            d.destroy()
 
         def sync(self, fid):
             start_sync_detached(fid)
@@ -747,15 +1048,21 @@ def run_app():
             return ok
 
         def refresh_status(self):
-            for fid, lbl in list(self.status_labels.items()):
+            titles = {f['id']: folder_title(f) for f in load()['folders']}
+            for fid, (lbl, bar, cur) in list(self.status_labels.items()):
                 st = read_status(fid)
                 s = st.get('state')
+                frac, line2 = None, ''
                 if s == 'syncing':
-                    txt = 'syncing…'
+                    frac, txt, line2 = progress_text(st.get('progress') or {})
                 elif s == 'queued':
-                    txt = 'waiting to sync…'
+                    txt = 'Waiting for the other folders to finish…'
                 elif s == 'ok':
-                    txt = f"synced {ago(st.get('last_ok'))}"
+                    txt = f"✓ synced {ago(st.get('last_ok'))}"
+                elif s == 'rate_limited':
+                    left = max(0, int((st.get('retry_at') or 0) - time.time()))
+                    txt = (f"⏸ Google's request limit was reached — retrying "
+                           + (f'in {left // 60 + 1} min' if left else 'soon'))
                 elif s == 'needs_resync':
                     txt = '⚠ needs Resync — ' + st.get('message', '')
                 elif s == 'error':
@@ -765,7 +1072,36 @@ def run_app():
                 else:
                     txt = 'not synced yet'
                 lbl.set_text(txt)
+                if s == 'syncing':
+                    bar.show()
+                    if frac is None:
+                        bar.pulse()
+                    else:
+                        bar.set_fraction(frac)
+                else:
+                    bar.hide()
+                cur.set_text(line2)
+                cur.set_visible(bool(line2))
+            self.refresh_activity(titles)
             return True
+
+        def refresh_activity(self, titles):
+            try:
+                m = ACTIVITY.stat().st_mtime
+            except OSError:
+                m = None
+            if m == self.act_mtime:
+                return
+            self.act_mtime = m
+            self.act_store.clear()
+            words = {('new', 'up'): '↑ uploaded', ('updated', 'up'): '↑ updated',
+                     ('new', 'down'): '↓ downloaded', ('updated', 'down'): '↓ updated',
+                     ('deleted', 'up'): '✕ deleted on Drive',
+                     ('deleted', 'down'): '✕ deleted here'}
+            for e in read_activity(300):
+                self.act_store.append([time.strftime('%d %b %H:%M', time.localtime(e['t'])),
+                                       titles.get(e['folder'], '?'),
+                                       words.get((e['what'], e.get('dir')), e['what']), e['file']])
 
     if not shutil.which('rclone'):
         Gtk.MessageDialog(message_type=Gtk.MessageType.ERROR, buttons=Gtk.ButtonsType.CLOSE,
