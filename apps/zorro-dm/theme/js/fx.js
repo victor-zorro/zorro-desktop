@@ -16,7 +16,7 @@
     snow_amount: 140, snow_speed: 1, snow_size: 1, snow_colour: '#9a9aa0', snow_alpha: 1,
     // defaults = the "Chromatic sea" preset (theme/presets.json)
     grain: 0.6, scratches: 0.25, dust: 0.25, scanlines: 0.6, vignette: 1, flicker: 0.3,
-    chroma: 0.6, glitch_rate: 0.15, glitch_strength: 0.5, bars: false, crt: true,
+    chroma: 0.6, glitch_rate: 0.15, glitch_strength: 0.5, bars: false, crt: false,
     // chromatic blur: the light splits into its colours and smears like through a lens
     cblur: 1, cblur_mode: 'lens',  // lens (from the centre outward), prism (sideways), glow
     bloom: 0.6,                    // soft coloured glow around the lines
@@ -66,7 +66,7 @@
     uniform vec2  uRes;
     uniform float uTime, uStatic, uBurst, uBars, uPower, uSeed;
     uniform float uGrain, uScratch, uDust, uScan, uVig, uFlick, uChroma, uBarsOn;
-    uniform float uCBlur, uCMode, uBloom, uBgOn, uBgStrength;
+    uniform float uCBlur, uCMode, uBloom, uBgOn, uBgStrength, uFade;
     uniform sampler2D uBg;
     uniform sampler2D uWhale;
 
@@ -209,7 +209,7 @@
       // bright line while the tube switches on/off
       col += vec3(1.) * (1. - smoothstep(.3, .55, uPower)) * step(.001, uPower);
 
-      gl_FragColor = vec4(clamp(col, 0., 1.), 1.);
+      gl_FragColor = vec4(clamp(col * uFade, 0., 1.), 1.);
     }`;
 
   // ---------- iridescent background (own program, quarter resolution) -----
@@ -252,7 +252,7 @@
   let prog, U = {}, tex, quadBuf;
   const UNIFORMS = ['uRes','uTime','uStatic','uBurst','uBars','uPower','uSeed','uWhale',
                     'uGrain','uScratch','uDust','uScan','uVig','uFlick','uChroma','uBarsOn',
-                    'uCBlur','uCMode','uBloom','uBgOn','uBgStrength','uBg'];
+                    'uCBlur','uCMode','uBloom','uBgOn','uBgStrength','uBg','uFade'];
   function initGL() {
     if (!gl) return false;
     const sh = (type, src) => {
@@ -891,6 +891,8 @@
       const bgOn = drawBackground(t, now);
       gl.uniform1f(U.uBgOn, bgOn ? 1 : 0);
       gl.uniform1f(U.uBgStrength, +cfg.bg_strength);
+      // no TV start: a soft fade in from black over two seconds instead of static
+      gl.uniform1f(U.uFade, cfg.crt ? 1 : ss(0, 2, t));
       gl.uniform2f(U.uRes, W, H);
       gl.uniform1f(U.uTime, t);
       gl.uniform1f(U.uStatic, stat);
