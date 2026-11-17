@@ -703,6 +703,11 @@ def cmd_keyd():
                 self.label.set_text(text or f'{value}%')
                 self.label.set_width_chars(5 if not text else -1)
             s = zorro_fx.settings() if zorro_fx else {}
+            if not self.composited:
+                # no compositor: no particle cloud; the window is cut to the icon, bar and
+                # number below, so only slivers of the screen snapshot can show
+                s = dict(s, spill=0)
+                self.snow.max_spill = 0
             self.snow.update_spill() if zorro_fx else None
             spill = int(s.get('spill', 0))
             self.resize(1, 1)
@@ -722,9 +727,25 @@ def cmd_keyd():
             self.geom = geom
             self.move(x, y)
             self.show()
+            if not self.composited:
+                GLib.idle_add(self.cut_to_content)
             if self.hide_id:
                 GLib.source_remove(self.hide_id)
             self.hide_id = GLib.timeout_add(int(s.get('osd_seconds', 1.5) * 1000), self.done)
+
+        def cut_to_content(self):
+            """X shape: only the icon, the level bar and the text stay visible"""
+            import cairo
+            gw = self.get_window()
+            if not gw:
+                return False
+            reg = cairo.Region()
+            for wdg in (self.icon, self.bar, self.label):
+                if wdg.get_visible():
+                    a = wdg.get_allocation()
+                    reg.union(cairo.RectangleInt(a.x - 3, a.y - 3, a.width + 6, a.height + 6))
+            gw.shape_combine_region(reg, 0, 0)
+            return False
 
         @staticmethod
         def grab_behind(x, y, w, h):
