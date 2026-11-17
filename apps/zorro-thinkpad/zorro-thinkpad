@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import socket
 import struct
 import subprocess
@@ -273,6 +274,72 @@ def key_settings():
     spawn([sys.executable, os.path.realpath(__file__)])
 
 
+# ---- lights: red dot on the lid, power button LED, keyboard light --------------------------
+# The udev rule makes brightness + trigger writable for group video, so no root is needed.
+# Saved in config.json under "lights"; keyd applies them at login and after every resume
+# (the firmware resets the LEDs on resume).
+
+LEDS = Path('/sys/class/leds')
+DOT_LED, POWER_LED = LEDS / 'tpacpi::lid_logo_dot', LEDS / 'tpacpi::power'
+DOT_MODES = {                       # mode: (label, trigger or None = steady on/off)
+    'on': ('On', None),
+    'off': ('Off', None),
+    'heartbeat': ('Heartbeat pulse', 'heartbeat'),
+    'blink': ('Slow blink', 'timer'),
+    'charging': ('Blinks while charging, on when full', 'BAT0-charging-blink-full-solid'),
+    'ac': ('On only on the charger', 'AC-online'),
+    'disk': ('Flickers with disk activity', 'disk-activity'),
+}
+KBD_LEVELS = {0: 'Off', 1: 'Low', 2: 'High'}
+
+
+def set_led(led, mode):
+    """mode: 'on', 'off' or a DOT_MODES key; returns an error text or None"""
+    trig = DOT_MODES.get(mode, ('', None))[1]
+    try:
+        if trig:
+            if trig not in (led / 'trigger').read_text():
+                return f'{trig}: not available (run apps/zorro-thinkpad/install.sh)'
+            (led / 'trigger').write_text(trig)
+        else:
+            if '[none]' not in (led / 'trigger').read_text():
+                (led / 'trigger').write_text('none')
+            mx = (led / 'max_brightness').read_text().strip()
+            (led / 'brightness').write_text(mx if mode == 'on' else '0')
+    except PermissionError:
+        return 'no permission: run sudo apps/zorro-thinkpad/install.sh'
+    except OSError as e:
+        return f'{led.name}: {e.strerror}'
+    return None
+
+
+def set_kbd(level):
+    try:
+        (KBD_LED / 'brightness').write_text(str(int(level)))
+    except OSError as e:
+        return f'keyboard light: {e.strerror}'
+    return None
+
+
+def update_conf(section, **kv):
+    c = load_conf()                     # re-read: keyd and the app both write it
+    c.setdefault(section, {}).update(kv) if section else c.update(kv)
+    save_conf(c)
+    return c
+
+
+def apply_lights():
+    li = load_conf().get('lights', {})
+    errs = []
+    if 'dot' in li:
+        errs.append(set_led(DOT_LED, li['dot']))
+    if 'power' in li:
+        errs.append(set_led(POWER_LED, li['power']))
+    if li.get('kbd') is not None:
+        errs.append(set_kbd(li['kbd']))
+    return [e for e in errs if e]
+
+
 KEYS = {
     'vol-up': lambda: key_volume(5), 'vol-down': lambda: key_volume(-5), 'mute': key_mute,
     'mic-mute': key_mic_mute,
@@ -284,81 +351,62 @@ KEYS = {
 }
 
 
-# ---- overlay background (same look as the lock screen) ---------------------------------
+# ---- overlay background: the shared lock-screen look (apps/zorro-fx) -----------------------
 
-class Snow:
-    """Lock-screen style background for a small overlay widget: black with slowly
-    sinking "marine snow". Draws under the widget's children; animates only while the
-    widget is on screen."""
-    FLAKE = (0.60, 0.60, 0.63)          # #9a9aa0, as in the lock screen
+sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+try:
+    import zorro_fx
+    Snow = zorro_fx.Snow
+except ImportError:                     # zorro-fx missing: a plain dark box
+    zorro_fx = None
 
-    def __init__(self, widget, radius=12, fps=30):
-        import random
-        self.rnd = random.random
-        self.widget, self.radius, self.fps = widget, radius, fps
-        self.parts, self.timer, self.t0 = [], None, time.monotonic()
-        widget.set_app_paintable(True)
-        widget.connect('draw', self.draw)
-        widget.connect('map', lambda w: self.start())
-        widget.connect('unmap', lambda w: self.stop())
+    class Snow:
+        def __init__(self, widget, radius=12, fps=30):
+            self.backdrop = None
+            widget.set_app_paintable(True)
+            widget.connect('draw', self.draw)
 
-    def start(self):
-        from gi.repository import GLib
-        if not self.timer:
-            self.timer = GLib.timeout_add(1000 // self.fps, self.tick)
-
-    def stop(self):
-        from gi.repository import GLib
-        if self.timer:
-            GLib.source_remove(self.timer)
-            self.timer = None
-
-    def tick(self):
-        self.widget.queue_draw()
-        return True
-
-    def flakes(self, W, H):
-        n = max(12, W * H // 450)       # same density whatever the box size
-        while len(self.parts) < n:
-            z = self.rnd() ** 1.5       # most flakes far away: small, dim, slow
-            self.parts.append((self.rnd(), self.rnd(), z, self.rnd() * 6.28))
-        return self.parts[:n]
-
-    def draw(self, w, cr):
-        import math
-        a = w.get_allocation()
-        W, H, r = a.width, a.height, min(self.radius, a.height / 2)
-        t = time.monotonic() - self.t0
-        cr.save()
-        if r:
-            cr.new_sub_path()
-            for cx, cy, a0 in ((W - r, r, -math.pi / 2), (W - r, H - r, 0),
-                               (r, H - r, math.pi / 2), (r, r, math.pi)):
-                cr.arc(cx, cy, r, a0, a0 + math.pi / 2)
-            cr.close_path()
-        else:
-            cr.rectangle(0, 0, W, H)
-        path = cr.copy_path()
-        cr.clip()
-        cr.set_source_rgba(0, 0, 0, 0.94)
-        cr.paint()
-        for x0, y0, z, s in self.flakes(W, H):
-            y = (y0 * H + t * (3 + 11 * z)) % (H + 4) - 2          # sink 3-14 px/s
-            x = (x0 * W + math.sin(t * 0.4 + s) * (3 + 5 * z)) % W  # gentle sway
-            size = 1 + 1.6 * z
-            cr.set_source_rgba(*self.FLAKE, 0.18 + 0.6 * z)
-            cr.rectangle(x, y, size, size)
-            cr.fill()
-        cr.restore()
-        cr.new_path()
-        cr.append_path(path)
-        cr.set_source_rgba(1, 1, 1, 0.10)                          # thin edge
-        cr.set_line_width(1)
-        cr.stroke()
-        return False                    # GTK draws the children on top
+        @staticmethod
+        def draw(_w, cr):
+            cr.set_source_rgba(0, 0, 0, 0.94)
+            cr.paint()
+            return False
 
 
 # ---- keyd: indicator window + evdev keys + keyboard light ---------------------------------
+
+OSD_CSS = b'''
+    .zosd { background: none; padding: 12px 18px; }      /* Snow paints the black */
+    .zosd label { color: #d8d8de; font-size: 12pt; }
+    .zosd image { color: #d8d8de; }
+    .zosd progressbar trough { min-height: 6px; border-radius: 3px;
+                               background: rgba(255,255,255,0.18); border: none; }
+    .zosd progressbar progress { min-height: 6px; border-radius: 3px;
+                                 background: #d8d8de; border: none; }
+'''
+
+
+def style_osd(screen):
+    """indicator look; the level bar's opacity follows the zorro-fx setting (live)"""
+    from gi.repository import GLib, Gtk
+    css = Gtk.CssProvider()
+    css.load_from_data(OSD_CSS)
+    Gtk.StyleContext.add_provider_for_screen(screen, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    if not zorro_fx:
+        return
+    bar = Gtk.CssProvider()
+    Gtk.StyleContext.add_provider_for_screen(screen, bar, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    last = [None]
+
+    def update():
+        data = zorro_fx.bar_css()
+        if data != last[0]:
+            last[0] = data
+            bar.load_from_data(data)
+        return True
+    update()
+    GLib.timeout_add(500, update)
+
 
 def find_event_device(name):
     for ev in sorted(Path('/sys/class/input').glob('event*')):
@@ -392,18 +440,7 @@ def cmd_keyd():
     srv.bind(str(SOCK))
     os.chmod(SOCK, 0o600)
 
-    css = Gtk.CssProvider()
-    css.load_from_data(b'''
-        .zosd { background: none; padding: 12px 18px; }      /* Snow paints the black */
-        .zosd label { color: #d8d8de; font-size: 12pt; }
-        .zosd image { color: #d8d8de; }
-        .zosd progressbar trough { min-height: 6px; border-radius: 3px;
-                                   background: rgba(255,255,255,0.18); border: none; }
-        .zosd progressbar progress { min-height: 6px; border-radius: 3px;
-                                     background: #d8d8de; border: none; }
-    ''')
-    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
-                                             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    style_osd(Gdk.Screen.get_default())
 
     class Indicator(Gtk.Window):
         def __init__(self):
@@ -417,7 +454,8 @@ def cmd_keyd():
             box = Gtk.Box(spacing=14)
             box.get_style_context().add_class('zosd')
             # rounded corners only show with a compositor; without one, square
-            Snow(box, radius=14 if screen.is_composited() else 0)
+            self.composited = screen.is_composited()
+            self.snow = Snow(box, radius=14 if self.composited else 0)
             self.icon = Gtk.Image()
             self.icon.set_pixel_size(28)
             box.add(self.icon)
@@ -452,11 +490,18 @@ def cmd_keyd():
             disp = Gdk.Display.get_default()
             mon = disp.get_primary_monitor() or disp.get_monitor(0)
             g = mon.get_geometry()
-            self.move(g.x + (g.width - nat.width) // 2, g.y + g.height - nat.height - 90)
+            x, y = g.x + (g.width - nat.width) // 2, g.y + g.height - nat.height - 90
+            self.move(x, y)
+            s = zorro_fx.settings() if zorro_fx else {}
+            if not self.composited and not self.get_visible() and s.get('opacity', 1) < 1:
+                # no compositor: see-through = a still image of what is behind the box
+                root = Gdk.get_default_root_window()
+                self.snow.backdrop = Gdk.pixbuf_get_from_window(root, x, y, nat.width + 40,
+                                                                nat.height)
             self.show()
             if self.hide_id:
                 GLib.source_remove(self.hide_id)
-            self.hide_id = GLib.timeout_add(1500, self.done)
+            self.hide_id = GLib.timeout_add(int(s.get('osd_seconds', 1.5) * 1000), self.done)
 
         def done(self):
             self.hide()
@@ -515,12 +560,421 @@ def cmd_keyd():
                 return True
             mx = int((KBD_LED / 'max_brightness').read_text())
             words = {0: 'Keyboard light off', 1: 'Keyboard light low', 2: 'Keyboard light high'}
+            update_conf('lights', kbd=lvl)          # remembered for login and resume
             ind.show_level('keyboard-brightness-symbolic', round(lvl * 100 / mx) if lvl else None,
                            words.get(lvl, f'Keyboard light {lvl}'))
             return True
         GLib.io_add_watch(fh.fileno(), GLib.IO_PRI | GLib.IO_ERR, on_kbd)
 
+    # saved light settings: now, and again after every resume (firmware resets the LEDs)
+    from gi.repository import Gio
+    apply_lights()
+
+    def on_sleep(_conn, _sender, _path, _iface, _signal, params):
+        if not params.unpack()[0]:                      # False = just woke up
+            GLib.timeout_add(1500, lambda: apply_lights() and False)
+    try:
+        Gio.bus_get_sync(Gio.BusType.SYSTEM, None).signal_subscribe(
+            'org.freedesktop.login1', 'org.freedesktop.login1.Manager', 'PrepareForSleep',
+            '/org/freedesktop/login1', None, Gio.DBusSignalFlags.NONE, on_sleep)
+    except GLib.Error as e:
+        print(f'zorro-thinkpad keyd: no resume signal: {e.message}', file=sys.stderr)
+
     Gtk.main()
+
+
+# ---- power: TLP settings (written by the root helper) + battery state ---------------------
+
+HELPER = '/usr/local/libexec/zorro-thinkpad-helper'
+BAT = Path('/sys/class/power_supply/BAT0')
+PROFILES = {'low-power': 'Battery saver', 'balanced': 'Balanced', 'performance': 'Performance'}
+CHARGE_PRESETS = {'long': ('Long battery life: charge to 80% (starts below 75%)', 75, 80),
+                  'full': ('Full: charge to 100% (starts below 95%)', 95, 100)}
+
+
+def tlp_settings():
+    """the TLP values in effect: /etc/tlp.conf, then /etc/tlp.d/*.conf in order"""
+    vals = {}
+    files = [Path('/etc/tlp.conf')] + sorted(Path('/etc/tlp.d').glob('*.conf'))
+    for fn in files:
+        try:
+            for line in fn.read_text().splitlines():
+                m = re.match(r'\s*([A-Z0-9_]+)\s*=\s*"?([^"#]*?)"?\s*$', line)
+                if m:
+                    vals[m.group(1)] = m.group(2)
+        except OSError:
+            pass
+    return vals
+
+
+def sysread(p, default=''):
+    try:
+        return Path(p).read_text().strip()
+    except OSError:
+        return default
+
+
+def battery_text():
+    if not BAT.exists():
+        return 'No battery found'
+    cap, status = sysread(BAT / 'capacity', '?'), sysread(BAT / 'status', '?')
+    now = sysread(BAT / 'energy_full') or sysread(BAT / 'charge_full')
+    new = sysread(BAT / 'energy_full_design') or sysread(BAT / 'charge_full_design')
+    health = f'{int(now) * 100 // int(new)}%' if now and new else '?'
+    cycles = sysread(BAT / 'cycle_count', '?')
+    lo = sysread(BAT / 'charge_control_start_threshold', '?')
+    hi = sysread(BAT / 'charge_control_end_threshold', '?')
+    return (f'{cap}%  ·  {status.lower()}  ·  health {health} of new  ·  {cycles} charge cycles\n'
+            f'Charges when below {lo}%, stops at {hi}%')
+
+
+# ---- the app window ------------------------------------------------------------------------
+
+KEY_TABLE = [
+    ('F1', 'Sound on / off'), ('F2 / F3', 'Volume down / up (up also unmutes)'),
+    ('F4', 'Microphone on / off (the key light shows "off")'),
+    ('F5 / F6', 'Screen brightness'), ('F7', 'External screen: extend → mirror → external → laptop'),
+    ('F8', 'Airplane mode: all radios off / on'), ('F9', 'Opens this app'),
+    ('F10 / F11', 'Mobile data (LTE) on / off'), ('F12 ★', 'Your choice, below'),
+    ('Fn + Space', 'Keyboard light off → low → high (remembered)'),
+    ('PrtSc', 'Screenshot: drag an area, click a window or Space for the whole screen'),
+    ('Fn + PrtSc', 'Screenshot of an area right away'), ('Alt + PrtSc', 'Screenshot of the active window'),
+]
+
+
+def cmd_app():
+    import threading
+    import gi
+    gi.require_version('Gtk', '3.0')
+    from gi.repository import GLib, Gtk
+
+    def heading(text):
+        lb = Gtk.Label(xalign=0, margin_top=14)
+        lb.set_markup(f'<b>{GLib.markup_escape_text(text)}</b>')
+        return lb
+
+    def note(text=''):
+        lb = Gtk.Label(label=text, xalign=0, wrap=True)
+        lb.get_style_context().add_class('dim-label')
+        return lb
+
+    def page():
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=18)
+        sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        sw.add(box)
+        return sw, box
+
+    def radios(options, current, on_pick):
+        """vertical radio group; options: [(key, label)]"""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        group = None
+        for key, label in options:
+            rb = Gtk.RadioButton.new_with_label_from_widget(group, label)
+            group = group or rb
+            rb.set_active(key == current)
+            rb.connect('toggled', lambda b, k=key: b.get_active() and on_pick(k))
+            box.add(rb)
+        return box
+
+    class Win(Gtk.ApplicationWindow):
+        def __init__(self, app):
+            super().__init__(application=app, title='ThinkPad')
+            self.set_default_size(620, 560)
+            self.set_icon_name('computer')
+            stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+            hb = Gtk.HeaderBar(show_close_button=True)
+            hb.set_custom_title(Gtk.StackSwitcher(stack=stack))
+            self.set_titlebar(hb)
+            stack.add_titled(self.keys_page(), 'keys', 'Keys')
+            stack.add_titled(self.power_page(), 'power', 'Power')
+            stack.add_titled(self.lights_page(), 'lights', 'Lights')
+            stack.add_titled(self.fx_page(), 'fx', 'Overlays')
+            style_osd(self.get_screen())
+            self.add(stack)
+            self.show_all()
+            self.custom_box.set_visible(load_conf().get('star') == 'custom')
+            GLib.timeout_add_seconds(5, self.refresh)
+
+        # -- keys
+        def keys_page(self):
+            sw, box = page()
+            box.add(heading('Fn keys'))
+            grid = Gtk.Grid(column_spacing=18, row_spacing=4)
+            for i, (k, what) in enumerate(KEY_TABLE):
+                kl = Gtk.Label(xalign=0)
+                kl.set_markup(f'<tt>{GLib.markup_escape_text(k)}</tt>')
+                grid.attach(kl, 0, i, 1, 1)
+                grid.attach(Gtk.Label(label=what, xalign=0, wrap=True), 1, i, 1, 1)
+            box.add(grid)
+
+            box.add(heading('Star key (F12 ★)'))
+            c = load_conf()
+            combo = Gtk.ComboBoxText()
+            for k, (label, _) in STAR_ACTIONS.items():
+                combo.append(k, label)
+            combo.set_active_id(c.get('star', 'screenshot'))
+            combo.connect('changed', self.on_star)
+            box.add(combo)
+            self.custom_box = Gtk.Box(spacing=6, no_show_all=True)
+            self.custom = Gtk.Entry(hexpand=True, text=c.get('star_command', ''),
+                                    placeholder_text='command, e.g.  firefox https://example.org')
+            self.custom.connect('changed', lambda e: update_conf(None, star_command=e.get_text()))
+            test = Gtk.Button(label='Try')
+            test.connect('clicked', lambda b: key_star())
+            self.custom_box.add(self.custom)
+            self.custom_box.add(test)
+            self.custom.show()
+            test.show()
+            box.add(self.custom_box)
+            box.add(note('Takes effect right away.'))
+            return sw
+
+        def on_star(self, combo):
+            act = combo.get_active_id()
+            update_conf(None, star=act)
+            self.custom_box.set_visible(act == 'custom')
+
+        # -- power
+        def power_page(self):
+            sw, box = page()
+            tlp = tlp_settings()
+            box.add(heading('Battery'))
+            self.bat_label = Gtk.Label(label=battery_text(), xalign=0)
+            box.add(self.bat_label)
+            self.profile_label = note()
+            box.add(self.profile_label)
+
+            box.add(heading('Power mode'))
+            grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+            self.prof = {}
+            for i, (key, label) in enumerate((('AC', 'On the charger'), ('BAT', 'On battery'))):
+                combo = Gtk.ComboBoxText()
+                for p, plabel in PROFILES.items():
+                    combo.append(p, plabel)
+                combo.set_active_id(tlp.get(f'PLATFORM_PROFILE_ON_{key}', 'balanced'))
+                if combo.get_active_id() is None:
+                    combo.set_active_id('balanced')
+                self.prof[key] = combo
+                grid.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                grid.attach(combo, 1, i, 1, 1)
+            box.add(grid)
+            box.add(note('Battery saver: slower, cooler and quieter. Performance: fastest, '
+                         'fan more often.'))
+
+            box.add(heading('Charging'))
+            lo = tlp.get('START_CHARGE_THRESH_BAT0', '75')
+            self.charge = 'full' if lo in ('0', '95', '96') else 'long'
+            box.add(radios([(k, v[0]) for k, v in CHARGE_PRESETS.items()], self.charge,
+                           lambda k: setattr(self, 'charge', k)))
+            box.add(note('Keeping a battery below 80% most of the time makes it last years longer.'))
+
+            row = Gtk.Box(spacing=6, margin_top=12)
+            apply = Gtk.Button(label='Apply')
+            apply.get_style_context().add_class('suggested-action')
+            apply.connect('clicked', self.on_power_apply)
+            full = Gtk.Button(label='Charge to 100% once',
+                              tooltip_text='Until the charger is unplugged, then back to the '
+                                           'setting above (handy before a trip)')
+            full.connect('clicked', lambda b: self.helper(['fullcharge'], 'Charging to 100% '
+                                                          'until you unplug'))
+            row.add(apply)
+            row.add(full)
+            box.add(row)
+            self.power_msg = note()
+            box.add(self.power_msg)
+            if not os.path.exists(HELPER) or not shutil.which('pkexec'):
+                self.power_msg.set_text('Not installed yet: run  sudo apt install pkexec  and  '
+                                        'sudo apps/zorro-thinkpad/install.sh')
+            self.refresh()
+            return sw
+
+        def on_power_apply(self, _b):
+            _, lo, hi = CHARGE_PRESETS[self.charge]
+            self.helper(['power', self.prof['AC'].get_active_id(),
+                         self.prof['BAT'].get_active_id(), str(lo), str(hi)], 'Saved')
+
+        def helper(self, args, ok_text):
+            self.power_msg.set_text('Working…')
+
+            def work():
+                try:
+                    r = subprocess.run(['pkexec', HELPER, *args], capture_output=True,
+                                       text=True, timeout=60)
+                    msg = ok_text if r.returncode == 0 else \
+                        (r.stderr.strip().splitlines() or [f'failed ({r.returncode})'])[-1]
+                except (OSError, subprocess.TimeoutExpired) as e:
+                    msg = f'Could not run the helper: {e}'
+                GLib.idle_add(self.helper_done, msg)
+            threading.Thread(target=work, daemon=True).start()
+
+        def helper_done(self, msg):
+            self.power_msg.set_text(msg)
+            self.refresh()
+            return False
+
+        def refresh(self):
+            self.bat_label.set_text(battery_text())
+            prof = sysread('/sys/firmware/acpi/platform_profile', '?')
+            src = 'battery' if sysread('/sys/class/power_supply/AC/online', '1') == '0' else 'charger'
+            self.profile_label.set_text(f'Now on the {src}, mode: {PROFILES.get(prof, prof)}')
+            return True
+
+        # -- overlays (shared zorro-fx settings, live preview)
+        def fx_page(self):
+            sw, box = page()
+            if not zorro_fx:
+                box.add(note('apps/zorro-fx is missing: overlays use a plain dark box.'))
+                return sw
+            s = dict(zorro_fx.settings())
+            self.fx = s
+            self.fx_save_id = None
+
+            prev = Gtk.Box(spacing=14, halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=6)
+            prev.get_style_context().add_class('zosd')
+            icon = Gtk.Image.new_from_icon_name('audio-volume-medium-symbolic', Gtk.IconSize.DIALOG)
+            icon.set_pixel_size(28)
+            pbar = Gtk.ProgressBar(valign=Gtk.Align.CENTER, fraction=0.6)
+            pbar.set_size_request(200, -1)
+            prev.add(icon)
+            prev.add(pbar)
+            prev.add(Gtk.Label(label='60%'))
+            self.fx_snow = Snow(prev, radius=14)
+            # what the box sits on: a light pattern, so see-through is visible here too
+            frame = Gtk.EventBox()
+            frame.set_app_paintable(True)
+            frame.connect('draw', self.fx_checker)
+            inner = Gtk.Box(margin=22)
+            inner.set_center_widget(prev)
+            frame.add(inner)
+            box.add(heading('Preview'))
+            box.add(frame)
+            show = Gtk.Button(label='Show on screen', halign=Gtk.Align.START,
+                              tooltip_text='The real indicator, bottom centre')
+            show.connect('clicked', lambda b: osd('audio-volume-medium-symbolic', 60))
+            box.add(show)
+
+            def combo(key, options):
+                c = Gtk.ComboBoxText()
+                for k, label in options.items():
+                    c.append(k, label)
+                c.set_active_id(s[key])
+                c.connect('changed', lambda w: self.fx_set(key, w.get_active_id()))
+                return c
+
+            def scale(key, lo, hi, step, digits=1, fmt=None):
+                sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
+                sc.set_hexpand(True)
+                sc.set_digits(digits)
+                sc.set_value(s[key])
+                sc.set_value_pos(Gtk.PositionType.RIGHT)
+                if fmt:
+                    sc.connect('format-value', lambda w, v: fmt(v))
+                sc.connect('value-changed', lambda w: self.fx_set(key, round(w.get_value(), 2)))
+                return sc
+
+            pct = lambda v: f'{v * 100:.0f}%'
+            grid = Gtk.Grid(column_spacing=12, row_spacing=6)
+            self.fx_widgets = []
+            rows = [
+                ('Pattern', combo('pattern', zorro_fx.PATTERNS)),
+                ('Colour', combo('colour', {k: v[0] for k, v in zorro_fx.COLOURS.items()})),
+                ('Amount', scale('amount', 0, 20, 0.5)),
+                ('Speed', scale('speed', 0.1, 5, 0.1)),
+                ('Particle size', scale('size', 0.4, 3, 0.1)),
+                ('Glow', None),
+                ('Background', scale('opacity', 0.2, 1, 0.02, 2, pct)),
+                ('Level bar', scale('bar_opacity', 0.1, 1, 0.05, 2, pct)),
+                ('Indicator stays', scale('osd_seconds', 0.5, 5, 0.25, 2, lambda v: f'{v:.2g} s')),
+            ]
+            glow = Gtk.Switch(active=s['glow'], halign=Gtk.Align.START)
+            glow.connect('notify::active', lambda w, _p: self.fx_set('glow', w.get_active()))
+            for i, (label, w) in enumerate(rows):
+                grid.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                grid.attach(w or glow, 1, i, 1, 1)
+            box.add(heading('Particles and boxes'))
+            box.add(grid)
+            box.add(note('Used by the volume / brightness indicator and the screenshot bar. '
+                         'Background below 100% is see-through (a still image of what is '
+                         'behind the box, since this desktop has no compositor).'))
+            reset = Gtk.Button(label='Back to defaults', halign=Gtk.Align.START, margin_top=8)
+            reset.connect('clicked', self.fx_reset)
+            box.add(reset)
+            return sw
+
+        def fx_checker(self, w, cr):
+            a = w.get_allocation()
+            cr.set_source_rgb(0.80, 0.80, 0.83)
+            cr.paint()
+            cr.set_source_rgb(0.62, 0.62, 0.66)
+            for y in range(0, a.height, 16):
+                for x in range(0, a.width, 16):
+                    if (x // 16 + y // 16) % 2:
+                        cr.rectangle(x, y, 16, 16)
+            cr.fill()
+            return False
+
+        def fx_set(self, key, value):
+            self.fx[key] = value
+            zorro_fx._cache.update(data=dict(self.fx))       # preview follows at once
+            if self.fx_save_id:
+                GLib.source_remove(self.fx_save_id)
+            self.fx_save_id = GLib.timeout_add(300, self.fx_save)
+
+        def fx_save(self):
+            self.fx_save_id = None
+            zorro_fx.save(self.fx)
+            zorro_fx._cache['mtime'] = -1                    # re-read our own file next frame
+            return False
+
+        def fx_reset(self, _b):
+            zorro_fx.save(zorro_fx.DEFAULTS)
+            zorro_fx._cache['mtime'] = -1
+            stack = self.get_child()
+            old = stack.get_child_by_name('fx')
+            stack.remove(old)
+            stack.add_titled(self.fx_page(), 'fx', 'Overlays')
+            stack.show_all()
+            stack.set_visible_child_name('fx')
+
+        # -- lights
+        def lights_page(self):
+            sw, box = page()
+            li = load_conf().get('lights', {})
+            self.light_msg = note()
+
+            def pick(led, key):
+                def cb(mode):
+                    err = set_led(led, mode)
+                    update_conf('lights', **{key: mode})
+                    self.light_msg.set_text(err or '')
+                return cb
+
+            box.add(heading('Red dot on the lid'))
+            box.add(radios([(k, v[0]) for k, v in DOT_MODES.items()], li.get('dot', 'on'),
+                           pick(DOT_LED, 'dot')))
+            box.add(note('In standby the dot still blinks slowly (the firmware does that).'))
+
+            box.add(heading('Power button light'))
+            box.add(radios([('on', 'On'), ('off', 'Off')], li.get('power', 'on'),
+                           pick(POWER_LED, 'power')))
+
+            box.add(heading('Keyboard light'))
+            try:
+                cur = int(sysread(KBD_LED / 'brightness', '0'))
+            except ValueError:
+                cur = 0
+
+            def kbd(level):
+                self.light_msg.set_text(set_kbd(level) or '')
+                update_conf('lights', kbd=level)
+            box.add(radios(list(KBD_LEVELS.items()), cur, kbd))
+            box.add(note('Fn + Space changes it too. The level is kept after standby and restart.'))
+            box.add(self.light_msg)
+            return sw
+
+    app = Gtk.Application(application_id='org.zorro.thinkpad')
+    app.connect('activate', lambda a: (a.get_active_window() or Win(a)).present())
+    app.run([])
 
 
 # ---- main --------------------------------------------------------------------------------
@@ -534,7 +988,7 @@ def main():
     elif a[:1] == ['osd'] and len(a) >= 3:
         osd(a[1], None if a[2] == '-' else int(a[2]), ' '.join(a[3:]))
     elif not a:
-        osd('preferences-system-symbolic', None, 'ThinkPad settings app: coming next')
+        cmd_app()
     else:
         print(__doc__.strip())
         sys.exit(1)

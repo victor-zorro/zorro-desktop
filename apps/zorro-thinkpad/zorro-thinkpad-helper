@@ -1,0 +1,59 @@
+#!/usr/bin/python3 -I
+"""zorro-thinkpad-helper: the few things of the ThinkPad app that need root.
+Installed root-owned in /usr/local/libexec, run through pkexec (polkit: the active local
+session may run it without a password). Only these fixed verbs, every value validated:
+
+  power AC_PROFILE BAT_PROFILE START STOP   power mode on charger / battery + charge
+                                            thresholds -> /etc/tlp.d/20-zorro-thinkpad.conf,
+                                            then 'tlp start' applies it right away
+  fullcharge                                charge to 100% once (until unplugged)
+"""
+import os
+import subprocess
+import sys
+
+CONF = '/etc/tlp.d/20-zorro-thinkpad.conf'
+PROFILES = ('low-power', 'balanced', 'performance')
+TLP = '/usr/sbin/tlp'
+os.environ['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin'
+
+
+def die(msg):
+    print(f'zorro-thinkpad-helper: {msg}', file=sys.stderr)
+    sys.exit(2)
+
+
+def power(ac, bat, start, stop):
+    if ac not in PROFILES or bat not in PROFILES:
+        die('profile must be one of ' + ', '.join(PROFILES))
+    try:
+        start, stop = int(start), int(stop)
+    except ValueError:
+        die('thresholds must be numbers')
+    if not (0 <= start < stop <= 100 and stop >= 50):
+        die('need 0 <= START < STOP <= 100 and STOP >= 50')
+    text = ('# written by the ThinkPad app (zorro-thinkpad); overrides 10-battery.conf\n'
+            f'PLATFORM_PROFILE_ON_AC={ac}\n'
+            f'PLATFORM_PROFILE_ON_BAT={bat}\n'
+            f'START_CHARGE_THRESH_BAT0={start}\n'
+            f'STOP_CHARGE_THRESH_BAT0={stop}\n')
+    tmp = CONF + '.tmp'
+    with open(tmp, 'w') as fh:
+        fh.write(text)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, CONF)
+    sys.exit(subprocess.run([TLP, 'start']).returncode)
+
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] == ['power'] and len(a) == 5:
+        power(*a[1:])
+    elif a == ['fullcharge']:
+        sys.exit(subprocess.run([TLP, 'fullcharge', 'BAT0']).returncode)
+    else:
+        die('usage: power AC BAT START STOP | fullcharge')
+
+
+if __name__ == '__main__':
+    main()

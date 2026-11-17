@@ -15,6 +15,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
   - `apps/zorro-thinkpad/` — ThinkPad app: Fn keys + indicator (keyd), power, LEDs, LTE, hardware check
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
+  - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
 

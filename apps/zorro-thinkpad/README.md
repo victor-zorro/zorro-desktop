@@ -1,8 +1,20 @@
 # ThinkPad (zorro-thinkpad)
 
 ThinkPad T14 (Gen 1 AMD) under Openbox: every Fn key works and shows a small indicator at
-the bottom centre of the screen. Later steps add the settings app: power modes, lid LED,
-keyboard light, LTE + SMS and a hardware check.
+the bottom centre of the screen. The app (F9, or rofi "ThinkPad") has these pages:
+
+- **Keys**: what each Fn key does, and what the star key (F12 ★) does.
+- **Power**: power mode on charger / battery (TLP platform profile), charge limit
+  (80% for long battery life, or 100%), "charge to 100% once", battery health.
+- **Lights**: red dot on the lid (on, off, heartbeat, blink, charging, charger only, disk),
+  power button light, keyboard light. keyd re-applies them at login and after standby.
+- **Overlays**: particles in the indicator and the screenshot bar (`apps/zorro-fx`),
+  with a live preview.
+
+Still to come: LTE + SMS and a hardware check (webcam, mic, bluetooth, printer, fingerprint).
+
+Settings: `~/.config/zorro-thinkpad/config.json` (star key, lights) and
+`/etc/tlp.d/20-zorro-thinkpad.conf` (power; written by the root helper through pkexec).
 
 ## Keys
 
@@ -31,8 +43,10 @@ a tiny `zorro-thinkpad key NAME` that sends one message over a unix socket.
 
 | File | What |
 |---|---|
-| `zorro-thinkpad` | key actions, `keyd`, indicator, (later) the app |
-| `70-zorro-thinkpad.rules` | udev: brightness + ThinkPad LEDs writable for group video, Extra Buttons readable |
-| `install.sh` | system part (sudo): the udev rule |
+| `zorro-thinkpad` | key actions, `keyd`, indicator and the app |
+| `zorro-thinkpad-helper` | root helper, fixed verbs only (`power`, `fullcharge`); installed as a root-owned copy |
+| `org.zorro.thinkpad.policy` | polkit: the active local session may run the helper without a password |
+| `70-zorro-thinkpad.rules` | udev: brightness + ThinkPad LEDs (level, blink mode) writable for group video, Extra Buttons readable |
+| `install.sh` | system part (sudo): udev rule, LED blink modules, helper + polkit |
 | `install-user.sh` | user part: links into ~/.local |
 | `keytest` | key code tester |
