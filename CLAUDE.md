@@ -10,6 +10,8 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 - `packages/*.txt` — apt lists per profile, installed with --no-install-recommends
 - `config/<pkg>/` — dotfiles, linked into ~ with GNU Stow (`stow -d config -t ~ --restow <pkg>`)
 - `system/` — files for /etc (udev, X11, tlp), copied by install.sh
+- `system/zorro-dm/` — own display manager (zorro-dm), greeter/lock screen (zorro-greeter) + theme; LightDM stays installed as fallback
+- Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
 
 ## Rules

@@ -13,16 +13,21 @@ openbox
 obconf
 lightdm
 lightdm-gtk-greeter
-# nody-greeter (web login screen, from update-extras.sh) needs the LightDM typelib
-gir1.2-lightdm-1
-gir1.2-girepository-2.0
-# Lock screen (LightDM greeter via dm-tool lock) before suspend/hibernate
+# zorro-dm (system/zorro-dm): Python + GTK3 + WebKitGTK greeter, PAM, X auth.
+# LightDM above is only the fallback.
+python3-gi
+gir1.2-gtk-3.0
+gir1.2-webkit2-4.1
+python3-pam
+xauth
+# Lock screen before suspend/hibernate (zorro-greeter --lock)
 xss-lock
 # App launchers (google-apps, whatsapp) focus an existing window
 wmctrl
 accountsservice
 x11-xserver-utils
 dbus-x11
+dbus-user-session
 # GPU: Mesa (OpenGL/Vulkan) for Intel, AMD and VMs
 libgl1-mesa-dri
 mesa-vulkan-drivers

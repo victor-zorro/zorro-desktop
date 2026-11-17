@@ -1,0 +1,312 @@
+#!/usr/bin/python3
+"""zorro-greeter: the zorro login screen (GTK3 + WebKitGTK), three modes.
+
+  zorro-greeter            login screen for zorro-dm (talks over $ZORRO_DM_FD)
+  zorro-greeter --lock     lock screen inside a session (PAM service 'zorro-lock');
+                           for xss-lock -l: closes $XSS_SLEEP_LOCK_FD once locked
+  zorro-greeter --preview  in a normal window, password 'test' (theme work)
+
+The theme (index.html + js/login.js) talks to a 'window.lightdm' object, the same
+API nody-greeter offers, so it runs unchanged here and there.
+"""
+import glob
+import json
+import os
+import pwd
+import socket
+import subprocess
+import sys
+import threading
+import configparser
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('WebKit2', '4.1')
+from gi.repository import Gdk, GLib, Gtk, WebKit2  # noqa: E402
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+THEME = next(d for d in (os.environ.get('ZORRO_THEME', ''), os.path.join(HERE, 'theme'),
+                         '/usr/share/zorro-dm/theme') if d and os.path.isdir(d))
+
+SHIM = r"""
+(() => {
+  const sig = () => { const f = []; return {
+    connect: (fn) => f.push(fn),
+    disconnect: (fn) => { const i = f.indexOf(fn); if (i >= 0) f.splice(i, 1); },
+    _emit: (...a) => f.forEach((fn) => { try { fn(...a); } catch (e) { console.error(e); } }) }; };
+  const post = (m) => window.webkit.messageHandlers.zorro.postMessage(JSON.stringify(m));
+  const L = Object.assign(__INFO__, {
+    in_authentication: false, is_authenticated: false, authentication_user: null,
+    show_prompt: sig(), show_message: sig(), authentication_complete: sig(),
+    authenticate(u) { this.in_authentication = true; this.is_authenticated = false;
+      this.authentication_user = u || null; post({cmd: 'authenticate', user: u || null}); return true; },
+    cancel_authentication() { this.in_authentication = false; post({cmd: 'cancel'}); return true; },
+    respond(t) { post({cmd: 'respond', text: String(t)}); return true; },
+    start_session(k) { post({cmd: 'start_session', session: k || this.default_session}); return true; },
+    suspend() { post({cmd: 'power', action: 'suspend'}); return true; },
+    hibernate() { post({cmd: 'power', action: 'hibernate'}); return true; },
+    restart() { post({cmd: 'power', action: 'reboot'}); return true; },
+    shutdown() { post({cmd: 'power', action: 'poweroff'}); return true; },
+  });
+  window.lightdm = L;
+  window.__zorro = (m) => {
+    if (m.type === 'prompt') L.show_prompt._emit(m.text, m.secret ? 1 : 0);
+    else if (m.type === 'message') L.show_message._emit(m.text, m.error ? 1 : 0);
+    else if (m.type === 'complete') {
+      L.in_authentication = false; L.is_authenticated = !!m.ok;
+      L.authentication_complete._emit();
+    }
+  };
+  window.addEventListener('DOMContentLoaded',
+    () => setTimeout(() => window.dispatchEvent(new Event('GreeterReady')), 0));
+})();
+"""
+
+
+def login_users():
+    users = []
+    for p in sorted(pwd.getpwall(), key=lambda p: p.pw_uid):
+        if 1000 <= p.pw_uid < 60000 and not p.pw_shell.endswith(('nologin', 'false')):
+            users.append({'username': p.pw_name,
+                          'display_name': p.pw_gecos.split(',')[0] or p.pw_name})
+    return users
+
+
+def xsessions():
+    out = []
+    for f in sorted(glob.glob('/usr/share/xsessions/*.desktop')):
+        cp = configparser.ConfigParser(interpolation=None, strict=False)
+        try:
+            cp.read(f)
+            e = cp['Desktop Entry']
+        except Exception:
+            continue
+        if e.get('exec', 'default') != 'default':
+            out.append({'key': os.path.basename(f)[:-8], 'name': e.get('name', '')})
+    return out
+
+
+# ---- backends: who checks the password -------------------------------------------
+
+class DaemonBackend:
+    """Login screen: zorro-dm does PAM; we pass messages back and forth."""
+
+    def __init__(self, emit, quit_):
+        self.sock = socket.socket(fileno=int(os.environ['ZORRO_DM_FD']))
+        self.emit, self.quit, self.buf = emit, quit_, b''
+        GLib.io_add_watch(self.sock.fileno(), GLib.PRIORITY_DEFAULT,
+                          GLib.IOCondition.IN | GLib.IOCondition.HUP, self.on_data)
+
+    def on_data(self, *_):
+        data = self.sock.recv(65536)
+        if not data:
+            self.quit()
+            return False
+        self.buf += data
+        while b'\n' in self.buf:
+            line, self.buf = self.buf.split(b'\n', 1)
+            m = json.loads(line)
+            if m.get('type') == 'quit':
+                self.quit()
+                return False
+            self.emit(m)
+        return True
+
+    def handle(self, m):
+        self.sock.sendall((json.dumps(m) + '\n').encode())
+
+
+class LocalBackend:
+    """Lock screen / preview: check the password ourselves (as the logged-in user)."""
+
+    def __init__(self, emit, quit_, preview=False):
+        self.emit, self.quit, self.preview = emit, quit_, preview
+        self.answers, self.gen = None, 0
+
+    def send(self, gen, **m):
+        GLib.idle_add(lambda: (gen == self.gen and self.emit(m)) and False)
+
+    def handle(self, m):
+        cmd = m.get('cmd')
+        if cmd == 'authenticate':
+            self.cancel()
+            self.gen += 1
+            import queue
+            self.answers = queue.Queue()
+            threading.Thread(target=self.run, args=(self.gen, self.answers, m.get('user')),
+                             daemon=True).start()
+        elif cmd == 'respond' and self.answers:
+            self.answers.put(m.get('text', ''))
+        elif cmd == 'cancel':
+            self.cancel()
+        elif cmd == 'start_session':
+            self.quit()
+        elif cmd == 'power' and m.get('action') == 'suspend':
+            subprocess.Popen(['systemctl', 'suspend'])
+
+    def cancel(self):
+        if self.answers:
+            self.answers.put(None)
+            self.answers = None
+
+    def run(self, gen, answers, user):
+        user = user or pwd.getpwuid(os.getuid()).pw_name
+        if self.preview:
+            self.send(gen, type='prompt', text='Password:', secret=True)
+            ok = answers.get() == 'test'
+            self.send(gen, type='complete', ok=ok)
+            return
+        import PAM
+
+        def conv(_p, queries, _d):
+            out = []
+            for text, kind in queries:
+                if kind in (PAM.PAM_PROMPT_ECHO_ON, PAM.PAM_PROMPT_ECHO_OFF):
+                    self.send(gen, type='prompt', text=text,
+                              secret=kind == PAM.PAM_PROMPT_ECHO_OFF)
+                    a = answers.get()
+                    if a is None:
+                        raise RuntimeError('cancelled')
+                    out.append((a, 0))
+                else:
+                    self.send(gen, type='message', text=text, error=kind == PAM.PAM_ERROR_MSG)
+                    out.append(('', 0))
+            return out
+        ok = False
+        try:
+            p = PAM.pam()
+            p.start('zorro-lock')
+            p.set_item(PAM.PAM_USER, user)
+            p.set_item(PAM.PAM_CONV, conv)
+            p.authenticate()
+            ok = True
+        except Exception as e:
+            print('zorro-lock:', e, file=sys.stderr)
+        self.send(gen, type='complete', ok=ok)
+
+
+# ---- windows -----------------------------------------------------------------------
+
+class Greeter:
+    def __init__(self, mode):
+        self.mode = mode
+        self.windows, self.view = [], None
+        me = pwd.getpwuid(os.getuid())
+        local = mode != 'greeter'
+        info = {
+            'hostname': socket.gethostname(),
+            'users': ([{'username': me.pw_name,
+                        'display_name': me.pw_gecos.split(',')[0] or me.pw_name}]
+                      if local else login_users()),
+            'sessions': xsessions(), 'default_session': 'openbox',
+            'can_suspend': True, 'can_hibernate': not local,
+            'can_restart': not local, 'can_shutdown': not local,
+            'lock_hint': mode == 'lock',
+        }
+        self.shim = SHIM.replace('__INFO__', json.dumps(info))
+        if local:
+            self.backend = LocalBackend(self.to_js, self.quit, preview=mode == 'preview')
+        else:
+            self.backend = DaemonBackend(self.to_js, self.quit)
+
+        display = Gdk.Display.get_default()
+        n = display.get_n_monitors()
+        primary = next((i for i in range(n) if display.get_monitor(i).is_primary()), 0)
+        if mode == 'preview':
+            self.add_window('index.html', None, primary=True)
+        else:
+            for i in range(n):
+                self.add_window('index.html' if i == primary else 'secondary.html',
+                                display.get_monitor(i), primary=i == primary, index=i)
+        if mode == 'lock':
+            GLib.timeout_add(100, self.grab)
+
+    def add_window(self, page, monitor, primary, index=0):
+        ucm = WebKit2.UserContentManager()
+        if primary:
+            ucm.connect('script-message-received::zorro', self.from_js)
+            ucm.register_script_message_handler('zorro')
+            ucm.add_script(WebKit2.UserScript.new(
+                self.shim, WebKit2.UserContentInjectedFrames.TOP_FRAME,
+                WebKit2.UserScriptInjectionTime.START, None, None))
+        view = WebKit2.WebView.new_with_user_content_manager(ucm)
+        s = view.get_settings()
+        s.set_enable_webgl(True)
+        s.set_allow_file_access_from_file_urls(True)
+        s.set_enable_developer_extras(self.mode == 'preview')
+        black = Gdk.RGBA()
+        black.parse('black')
+        view.set_background_color(black)
+        view.connect('context-menu', lambda *a: True)
+        view.load_uri('file://' + os.path.join(THEME, page))
+
+        win = Gtk.Window(title='zorro')
+        win.add(view)
+        win.connect('delete-event', lambda *a: self.mode != 'preview')
+        if self.mode == 'preview':
+            win.set_default_size(1280, 800)
+            win.connect('destroy', lambda *a: Gtk.main_quit())
+        else:
+            g = monitor.get_geometry()
+            win.set_decorated(False)
+            win.set_keep_above(True)
+            win.move(g.x, g.y)
+            win.set_default_size(g.width, g.height)
+            win.fullscreen_on_monitor(win.get_screen(), index)
+        win.show_all()
+        if primary:
+            self.view = view
+            view.grab_focus()
+        self.windows.append(win)
+
+    def grab(self):
+        """Lock: take keyboard + pointer (retry until we have them), then release sleep."""
+        gw = self.windows[0].get_window() if self.windows else None
+        if gw is None or not gw.is_viewable():
+            return True
+        for w in self.windows:
+            w.present()
+        seat = Gdk.Display.get_default().get_default_seat()
+        if seat.grab(gw, Gdk.SeatCapabilities.ALL, False, None, None, None, None) \
+                != Gdk.GrabStatus.SUCCESS:
+            return True
+        fd = os.environ.pop('XSS_SLEEP_LOCK_FD', None)
+        if fd:
+            try:
+                os.close(int(fd))
+            except OSError:
+                pass
+        return False
+
+    def from_js(self, _ucm, result):
+        v = result.get_js_value() if hasattr(result, 'get_js_value') else result
+        try:
+            self.backend.handle(json.loads(v.to_string()))
+        except Exception as e:
+            print('zorro-greeter:', e, file=sys.stderr)
+
+    def to_js(self, m):
+        if self.view:
+            self.view.evaluate_javascript(f'window.__zorro({json.dumps(m)})', -1,
+                                          None, None, None, None, None)
+
+    def quit(self):
+        if self.mode == 'lock':
+            Gdk.Display.get_default().get_default_seat().ungrab()
+        Gtk.main_quit()
+
+
+def main():
+    mode = {'--lock': 'lock', '--preview': 'preview'}.get(sys.argv[1] if len(sys.argv) > 1 else '',
+                                                           'greeter')
+    if mode == 'greeter' and 'ZORRO_DM_FD' not in os.environ:
+        sys.exit('zorro-greeter: run by zorro-dm (or use --lock / --preview)')
+    if mode == 'greeter':
+        subprocess.run(['xsetroot', '-cursor_name', 'left_ptr'], check=False)
+    Greeter(mode)
+    Gtk.main()
+
+
+if __name__ == '__main__':
+    main()

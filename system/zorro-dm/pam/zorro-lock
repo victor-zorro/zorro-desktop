@@ -1,0 +1,4 @@
+#%PAM-1.0
+# zorro-greeter --lock: unlock the screen with the user's password
+@include common-auth
+-auth     optional  pam_gnome_keyring.so

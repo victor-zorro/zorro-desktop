@@ -1,0 +1,383 @@
+#!/usr/bin/python3
+"""zorro-dm: a minimal display manager for one seat.
+
+Starts Xorg on vt7, shows zorro-greeter (as the unprivileged user _zorro-dm),
+logs the user in with PAM (service 'zorro-dm') and runs the chosen X session
+through /etc/X11/Xsession. When the session ends, everything starts over.
+
+Greeter <-> daemon: JSON lines over a socketpair (fd in $ZORRO_DM_FD).
+  greeter -> dm: authenticate{user}, respond{text}, cancel, start_session{session},
+                 power{action}
+  dm -> greeter: prompt{text,secret}, message{text,error}, complete{ok}, quit
+"""
+import configparser
+import glob
+import json
+import os
+import pwd
+import queue
+import secrets
+import select
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+import traceback
+
+import PAM
+
+DISPLAY = ':0'
+VT = 7
+RUN = '/run/zorro-dm'
+GREETER_USER = '_zorro-dm'
+GREETER = os.environ.get('ZORRO_GREETER', '/usr/local/bin/zorro-greeter')
+XSESSION = '/etc/X11/Xsession'
+PATH = '/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games'
+POWER = {'suspend', 'hibernate', 'reboot', 'poweroff'}
+
+
+def log(*a):
+    print('zorro-dm:', *a, file=sys.stderr, flush=True)
+
+
+# ---- X server ----------------------------------------------------------------
+
+def start_x():
+    os.makedirs(RUN, mode=0o711, exist_ok=True)
+    auth = f'{RUN}/xauth'
+    if os.path.exists(auth):
+        os.unlink(auth)
+    cookie = secrets.token_hex(16)
+    subprocess.run(['xauth', '-q', '-f', auth, 'add', DISPLAY, '.', cookie], check=True)
+    r, w = os.pipe()
+    x = subprocess.Popen(
+        ['/usr/bin/Xorg', DISPLAY, '-seat', 'seat0', '-auth', auth, '-nolisten', 'tcp',
+         f'vt{VT}', '-novtswitch', '-displayfd', str(w)],
+        pass_fds=(w,), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, start_new_session=True)
+    os.close(w)
+    ready, _, _ = select.select([r], [], [], 30)
+    ok = ready and os.read(r, 16).strip()
+    os.close(r)
+    if not ok:
+        x.kill()
+        raise RuntimeError('X server did not start (see /var/log/Xorg.0.log)')
+    log('X server ready on', DISPLAY)
+    return x, cookie
+
+
+def stop_x(x):
+    if x.poll() is None:
+        x.terminate()
+        try:
+            x.wait(10)
+        except subprocess.TimeoutExpired:
+            x.kill()
+            x.wait()
+
+
+def write_xauth(pw, cookie):
+    """Write ~/.Xauthority as the user itself (never as root: symlink attacks)."""
+    path = os.path.join(pw.pw_dir, '.Xauthority')
+    subprocess.run(['xauth', '-q', '-f', path, 'add', DISPLAY, '.', cookie],
+                   user=pw.pw_uid, group=pw.pw_gid, extra_groups=[], check=True,
+                   cwd='/', env={'PATH': PATH, 'HOME': pw.pw_dir})
+    return path
+
+
+# ---- sessions (/usr/share/xsessions) --------------------------------------------
+
+def xsessions():
+    out = {}
+    for f in sorted(glob.glob('/usr/share/xsessions/*.desktop')):
+        cp = configparser.ConfigParser(interpolation=None, strict=False)
+        try:
+            cp.read(f)
+            e = cp['Desktop Entry']
+        except Exception:
+            continue
+        if e.get('hidden', 'false').lower() == 'true' or e.get('exec', 'default') == 'default':
+            continue
+        key = os.path.basename(f)[:-len('.desktop')]
+        out[key] = {'exec': e['exec'], 'desktop': e.get('desktopnames', key).split(';')[0] or key}
+    return out
+
+
+# ---- PAM -------------------------------------------------------------------------
+
+def pam_env(pam):
+    env = pam.getenvlist() or {}
+    if isinstance(env, dict):
+        return dict(env)
+    return dict(kv.split('=', 1) for kv in env if '=' in kv)
+
+
+def run_session_child(pam, pw, argv, xdg, extra_env, pass_fds=(), log_to_journal=False):
+    """Fork a root child that owns the PAM session (it becomes the logind session leader,
+    not the daemon), runs argv as the user, and closes the session when argv exits.
+    Must be called while the daemon has no other threads."""
+    pid = os.fork()
+    if pid:
+        return pid
+    code = 1
+    try:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        for k, v in xdg.items():
+            pam.putenv(f'{k}={v}')
+        pam.setcred(PAM.PAM_ESTABLISH_CRED)
+        pam.open_session()
+        try:
+            pam.setcred(PAM.PAM_REINITIALIZE_CRED)
+        except PAM.error:
+            pass
+        env = {'HOME': pw.pw_dir, 'USER': pw.pw_name, 'LOGNAME': pw.pw_name,
+               'SHELL': pw.pw_shell, 'PATH': PATH, 'DISPLAY': DISPLAY, **xdg, **extra_env}
+        env.update(pam_env(pam))
+        out = None if log_to_journal else subprocess.DEVNULL
+        proc = subprocess.Popen(
+            argv, env=env, cwd=pw.pw_dir if os.path.isdir(pw.pw_dir) else '/',
+            user=pw.pw_uid, group=pw.pw_gid,
+            extra_groups=os.getgrouplist(pw.pw_name, pw.pw_gid),
+            start_new_session=True, pass_fds=pass_fds,
+            stdin=subprocess.DEVNULL, stdout=out, stderr=out)
+
+        def stop(*_):
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        signal.signal(signal.SIGTERM, stop)
+        proc.wait()
+        stop()
+        pam.close_session()
+        pam.setcred(PAM.PAM_DELETE_CRED)
+        code = 0
+    except Exception:
+        traceback.print_exc()
+    finally:
+        os._exit(code)
+
+
+def wait_child(pid, timeout):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        done, _ = os.waitpid(pid, os.WNOHANG)
+        if done:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def reap(pid):
+    if not wait_child(pid, 5):
+        os.kill(pid, signal.SIGTERM)
+        if not wait_child(pid, 5):
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+
+
+class Login:
+    """One PAM conversation for the 'zorro-dm' service, run in a thread."""
+
+    def __init__(self, dm, username):
+        self.dm, self.ok, self.done = dm, False, False
+        self.events = dm.events          # the queue of the greeter round that started us
+        self.answers = queue.Queue()
+        self.pam = PAM.pam()
+        self.pam.start('zorro-dm')
+        if username:
+            self.pam.set_item(PAM.PAM_USER, username)
+        self.pam.set_item(PAM.PAM_TTY, DISPLAY)
+        self.pam.set_item(PAM.PAM_CONV, self.conv)
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def conv(self, _pam, queries, _data):
+        replies = []
+        for text, kind in queries:
+            if kind in (PAM.PAM_PROMPT_ECHO_ON, PAM.PAM_PROMPT_ECHO_OFF):
+                self.dm.send(type='prompt', text=text, secret=kind == PAM.PAM_PROMPT_ECHO_OFF)
+                answer = self.answers.get()
+                if answer is None:
+                    raise RuntimeError('cancelled')
+                replies.append((answer, 0))
+            else:
+                self.dm.send(type='message', text=text, error=kind == PAM.PAM_ERROR_MSG)
+                replies.append(('', 0))
+        return replies
+
+    def run(self):
+        try:
+            self.pam.authenticate()
+            self.pam.acct_mgmt()
+            self.ok = True
+        except Exception as e:
+            log('authentication failed:', e)
+        self.done = True
+        self.events.put(('auth_done', self))
+
+    def cancel(self):
+        if not self.done:
+            self.answers.put(None)
+
+    @property
+    def user(self):
+        return self.pam.get_item(PAM.PAM_USER)
+
+
+# ---- the display manager ---------------------------------------------------------
+
+class DM:
+    def __init__(self):
+        self.events = queue.Queue()
+        self.sock = None
+        self.lock = threading.Lock()
+
+    def send(self, **msg):
+        try:
+            with self.lock:
+                self.sock.sendall((json.dumps(msg) + '\n').encode())
+        except OSError:
+            pass
+
+    def reader(self, sock):
+        buf = b''
+        while True:
+            try:
+                data = sock.recv(65536)
+            except OSError:
+                data = b''
+            if not data:
+                self.events.put(('eof', None))
+                return
+            buf += data
+            while b'\n' in buf:
+                line, buf = buf.split(b'\n', 1)
+                try:
+                    self.events.put(('msg', json.loads(line)))
+                except ValueError:
+                    log('bad message from greeter')
+
+    def greeter_phase(self, cookie):
+        """Show the greeter until someone logs in. Returns (Login, session) or None."""
+        gpw = pwd.getpwnam(GREETER_USER)
+        self.events = queue.Queue()      # fresh per round: no stale 'eof' from the last greeter
+        gauth = write_xauth(gpw, cookie)
+        self.sock, child = socket.socketpair()
+        gpam = PAM.pam()
+        gpam.start('zorro-dm-greeter')
+        gpam.set_item(PAM.PAM_USER, GREETER_USER)
+        gpam.set_item(PAM.PAM_TTY, DISPLAY)
+        gpam.set_item(PAM.PAM_CONV, lambda *a: [])
+        gpam.authenticate()
+        gpam.acct_mgmt()
+        xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(VT), 'XDG_SESSION_TYPE': 'x11',
+               'XDG_SESSION_CLASS': 'greeter'}
+        gpid = run_session_child(gpam, gpw, [GREETER], xdg,
+                                 {'XAUTHORITY': gauth, 'ZORRO_DM_FD': str(child.fileno())},
+                                 pass_fds=(child.fileno(),), log_to_journal=True)
+        child.close()
+        rd = threading.Thread(target=self.reader, args=(self.sock,), daemon=True)
+        rd.start()
+
+        login, chosen, result = None, None, None
+        while True:
+            kind, m = self.events.get()
+            if kind == 'eof':
+                break
+            if kind == 'auth_done':
+                if m is login:
+                    self.send(type='complete', ok=m.ok)
+                continue
+            cmd = m.get('cmd')
+            if cmd == 'authenticate':
+                if login:
+                    login.cancel()
+                login = Login(self, m.get('user'))
+            elif cmd == 'respond' and login and not login.done:
+                login.answers.put(str(m.get('text', '')))
+            elif cmd == 'cancel' and login:
+                login.cancel()
+                login = None
+            elif cmd == 'start_session' and login and login.done and login.ok:
+                sessions = xsessions()
+                key = m.get('session') if m.get('session') in sessions else 'openbox'
+                if key not in sessions:
+                    key = next(iter(sessions), None)
+                if key:
+                    chosen = (login, key, sessions[key])
+                    self.send(type='quit')
+                    if wait_child(gpid, 5):
+                        gpid = None
+                    break
+            elif cmd == 'power' and m.get('action') in POWER:
+                log('power:', m['action'])
+                subprocess.Popen(['systemctl', m['action']])
+
+        if login and chosen is None:
+            login.cancel()
+        if gpid:
+            reap(gpid)
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)   # wakes the reader thread
+        except OSError:
+            pass
+        self.sock.close()
+        rd.join(5)
+        if login and not chosen:
+            login.thread.join(5)
+        if chosen:
+            result = chosen
+        else:
+            log('greeter exited')
+        return result
+
+    def session_phase(self, login, key, ses, cookie):
+        pw = pwd.getpwnam(login.user)
+        log(f'starting session {key} for {pw.pw_name}')
+        xauth = write_xauth(pw, cookie)
+        xdg = {'XDG_SEAT': 'seat0', 'XDG_VTNR': str(VT), 'XDG_SESSION_TYPE': 'x11',
+               'XDG_SESSION_CLASS': 'user', 'XDG_SESSION_DESKTOP': key,
+               'XDG_CURRENT_DESKTOP': ses['desktop'], 'DESKTOP_SESSION': key}
+        pid = run_session_child(login.pam, pw, [XSESSION, ses['exec']], xdg,
+                                {'XAUTHORITY': xauth})
+        os.waitpid(pid, 0)
+        log(f'session of {pw.pw_name} ended')
+
+    def run(self):
+        while True:
+            x, cookie = start_x()
+            try:
+                chosen = self.greeter_phase(cookie)
+                if chosen:
+                    self.session_phase(*chosen, cookie)
+            finally:
+                stop_x(x)
+            time.sleep(0.5)
+
+
+def main():
+    if os.getuid() != 0:
+        sys.exit('zorro-dm must run as root')
+
+    def bye(*_):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM, bye)
+    signal.signal(signal.SIGINT, bye)
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        DM().run()
+    finally:
+        # take the process group down with us (greeter / session children, X)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            os.killpg(0, signal.SIGTERM)
+        except OSError:
+            pass
+
+
+if __name__ == '__main__':
+    main()

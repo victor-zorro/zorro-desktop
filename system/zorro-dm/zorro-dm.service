@@ -1,0 +1,13 @@
+[Unit]
+Description=zorro display manager
+Documentation=https://github.com/victor-zorro/zorro-desktop
+Conflicts=getty@tty7.service plymouth-quit.service
+After=systemd-user-sessions.service getty@tty7.service plymouth-quit.service
+
+[Service]
+ExecStart=/usr/local/sbin/zorro-dm
+Restart=always
+RestartSec=2
+
+[Install]
+Alias=display-manager.service
