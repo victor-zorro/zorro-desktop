@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Screenshot
+Comment=Screen, window or region to file and clipboard
+Exec=zorro-shot
+Icon=applets-screenshooter
+Terminal=false
+Categories=Utility;Graphics;

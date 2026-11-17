@@ -1,0 +1,497 @@
+#!/usr/bin/python3
+"""zorro-shot: screenshot overlay for the Openbox desktop.
+
+  zorro-shot            freeze the screen, then pick: drag = region, click = window,
+                        Space = whole screen. Enter/double-click saves, Esc cancels.
+  zorro-shot --region   same, starts in region mode (Fn+PrtSc)
+  zorro-shot --window   the active window right away, no overlay (Alt+PrtSc)
+  zorro-shot --full     the whole screen right away
+
+Saved to ~/Pictures/Screenshots/YYYY-MM-DD_HH-MM-SS.png and copied to the clipboard.
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+OUT_DIR = Path.home() / 'Pictures' / 'Screenshots'
+SELF = os.path.realpath(__file__)
+
+
+# ---- X helpers (xprop / xwininfo, no extra Python modules) -------------------------
+
+def xprop(args):
+    p = subprocess.run(['xprop', *args], capture_output=True, text=True)
+    return p.stdout if p.returncode == 0 else ''
+
+
+def ints(text):
+    return [int(x, 0) for x in re.findall(r'0x[0-9a-fA-F]+|-?\d+', text)]
+
+
+def window_rect(wid):
+    """(x, y, w, h) of a client window including its Openbox frame, or None"""
+    info = subprocess.run(['xwininfo', '-id', str(wid)], capture_output=True, text=True).stdout
+    if 'IsViewable' not in info:
+        return None
+    g = {k: int(v) for k, v in re.findall(
+        r'(Absolute upper-left X|Absolute upper-left Y|Width|Height):\s+(-?\d+)', info)}
+    if len(g) < 4:
+        return None
+    ext = ints(xprop(['-id', str(wid), '_NET_FRAME_EXTENTS']).partition('=')[2]) or [0, 0, 0, 0]
+    left, right, top, bottom = (ext + [0, 0, 0, 0])[:4]
+    return (g['Absolute upper-left X'] - left, g['Absolute upper-left Y'] - top,
+            g['Width'] + left + right, g['Height'] + top + bottom)
+
+
+def visible_windows():
+    """window rects on the current desktop, topmost first"""
+    stack = ints(xprop(['-root', '_NET_CLIENT_LIST_STACKING']).partition('#')[2])
+    cur = ints(xprop(['-root', '_NET_CURRENT_DESKTOP']).partition('=')[2])
+    cur = cur[0] if cur else 0
+    out = []
+    for wid in reversed(stack):
+        p = xprop(['-id', str(wid), '_NET_WM_DESKTOP', '_NET_WM_STATE', '_NET_WM_WINDOW_TYPE'])
+        desk = re.search(r'_NET_WM_DESKTOP\(CARDINAL\) = (\d+)', p)
+        if desk and int(desk.group(1)) not in (cur, 0xFFFFFFFF):
+            continue
+        if '_NET_WM_STATE_HIDDEN' in p or '_NET_WM_WINDOW_TYPE_DESKTOP' in p:
+            continue
+        r = window_rect(wid)
+        if r and r[2] > 1 and r[3] > 1:
+            out.append(r)
+    return out
+
+
+def active_window_rect():
+    a = ints(xprop(['-root', '_NET_ACTIVE_WINDOW']).partition('#')[2])
+    return window_rect(a[0]) if a and a[0] else None
+
+
+# ---- saving -------------------------------------------------------------------------
+
+def grab_screen():
+    fd, path = tempfile.mkstemp(prefix='zorro-shot-', suffix='.png',
+                                dir=os.environ.get('XDG_RUNTIME_DIR'))
+    os.close(fd)
+    if subprocess.run(['maim', '-u', path]).returncode:   # -u: without the mouse pointer
+        sys.exit('zorro-shot: maim failed')
+    return path
+
+
+def to_clipboard(path):
+    # xclip reads the file, then stays in the background to serve the clipboard
+    subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', path],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def finish(pixbuf, rect, save=True):
+    x, y, w, h = clamp(rect, pixbuf.get_width(), pixbuf.get_height())
+    sub = pixbuf.new_subpixbuf(x, y, w, h)
+    if save:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = OUT_DIR / f"{time.strftime('%Y-%m-%d_%H-%M-%S')}.png"
+        n = 1
+        while path.exists():
+            n += 1
+            path = OUT_DIR / f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-{n}.png"
+        sub.savev(str(path), 'png', [], [])
+        to_clipboard(str(path))
+    else:
+        fd, tmp = tempfile.mkstemp(suffix='.png', dir=os.environ.get('XDG_RUNTIME_DIR'))
+        os.close(fd)
+        sub.savev(tmp, 'png', [], [])
+        to_clipboard(tmp)
+        os.unlink(tmp)
+        path = None
+    # the notification waits for a click, so it runs in its own process
+    subprocess.Popen([sys.executable, SELF, '--notify', str(path or ''), f'{w}x{h}'],
+                     start_new_session=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def clamp(rect, maxw, maxh):
+    x, y, w, h = (int(round(v)) for v in rect)
+    if w < 0:
+        x, w = x + w, -w
+    if h < 0:
+        y, h = y + h, -h
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(maxw, x + w), min(maxh, y + h)
+    return x0, y0, max(1, x1 - x0), max(1, y1 - y0)
+
+
+def cmd_notify(path, size):
+    if not path:
+        subprocess.run(['notify-send', '-a', 'Screenshot', '-i', 'edit-copy',
+                        'Screenshot copied', f'{size} on the clipboard'])
+        return
+    p = subprocess.run(['notify-send', '-a', 'Screenshot', '-i', path,
+                        '-A', 'open=Open', '-A', 'folder=Show in folder',
+                        'Screenshot saved', f'{os.path.basename(path)}  ({size})\nAlso on the clipboard'],
+                       capture_output=True, text=True)
+    act = p.stdout.strip()
+    if act == 'open':
+        subprocess.Popen(['xdg-open', path])
+    elif act == 'folder':
+        subprocess.Popen(['thunar', '--', path] if subprocess.run(
+            ['sh', '-c', 'command -v thunar'], capture_output=True).returncode == 0
+            else ['xdg-open', os.path.dirname(path)])
+
+
+# ---- the overlay ----------------------------------------------------------------------
+
+def run_overlay(start_mode):
+    import gi
+    gi.require_version('Gtk', '3.0')
+    gi.require_version('Gdk', '3.0')
+    from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
+
+    shot = grab_screen()
+    try:
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file(shot)
+    finally:
+        os.unlink(shot)
+    W, H = pixbuf.get_width(), pixbuf.get_height()
+    windows = visible_windows()
+    display = Gdk.Display.get_default()
+    mon = display.get_primary_monitor() or display.get_monitor(0)
+    prim = mon.get_geometry()
+
+    HANDLE = 7
+
+    class Overlay(Gtk.Window):
+        def __init__(self):
+            super().__init__(type=Gtk.WindowType.POPUP)
+            self.move(0, 0)
+            self.set_default_size(W, H)
+            self.resize(W, H)
+            self.mode = start_mode          # 'region' or 'window'
+            self.sel = None                 # (x, y, w, h)
+            self.hover = None               # window rect under the pointer
+            self.drag = None                # ('new'|'move'|edge string, start x, y, sel at start)
+            self.result = None
+
+            ov = Gtk.Overlay()
+            self.add(ov)
+            self.area = Gtk.DrawingArea()
+            self.area.set_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
+                                 | Gdk.EventMask.POINTER_MOTION_MASK)
+            self.area.connect('draw', self.on_draw)
+            self.area.connect('button-press-event', self.on_press)
+            self.area.connect('button-release-event', self.on_release)
+            self.area.connect('motion-notify-event', self.on_motion)
+            ov.add(self.area)
+
+            bar = Gtk.Box(spacing=4)
+            bar.get_style_context().add_class('zshot-bar')
+            self.mode_btns = {}
+            group = None
+            for key, label in (('screen', 'Screen'), ('window', 'Window'), ('region', 'Region')):
+                b = Gtk.RadioButton.new_with_label_from_widget(group, label)
+                b.set_mode(False)
+                group = group or b
+                b.connect('toggled', self.on_mode, key)
+                self.mode_btns[key] = b
+                bar.add(b)
+            bar.add(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=6))
+            for label, cb, tip in (('Copy', lambda b: self.done(save=False), 'Ctrl+C'),
+                                   ('Save', lambda b: self.done(save=True), 'Enter'),
+                                   ('Cancel', lambda b: self.cancel(), 'Esc')):
+                b = Gtk.Button(label=label, tooltip_text=tip)
+                if label == 'Save':
+                    b.get_style_context().add_class('suggested-action')
+                b.connect('clicked', cb)
+                bar.add(b)
+            self.hint = Gtk.Label()
+            self.hint.get_style_context().add_class('zshot-hint')
+            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            col.add(self.hint)
+            col.add(bar)
+            self.bar = col
+            ov.add_overlay(col)
+            ov.connect('get-child-position', self.place_bar)
+
+            css = Gtk.CssProvider()
+            css.load_from_data(b'''
+                .zshot-bar { background: rgba(30,30,34,0.92); border-radius: 10px; padding: 6px; }
+                .zshot-hint { color: white; background: rgba(30,30,34,0.80);
+                              border-radius: 8px; padding: 4px 10px; }
+            ''')
+            Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                                     Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            self.connect('key-press-event', self.on_key)
+            self.connect('realize', lambda w: w.get_window().set_cursor(
+                Gdk.Cursor.new_from_name(display, 'crosshair')))
+            self.show_all()
+            self.mode_btns[self.mode].set_active(True)
+            self.update_hint()
+            GLib.idle_add(self.grab)
+
+        def grab(self):
+            seat = display.get_default_seat()
+            for _ in range(20):         # Openbox may still hold the key that started us
+                if seat.grab(self.get_window(), Gdk.SeatCapabilities.ALL, True,
+                             None, None, None) == Gdk.GrabStatus.SUCCESS:
+                    break
+                time.sleep(0.05)
+            return False
+
+        def place_bar(self, ov, child, alloc):
+            if child is not self.bar:
+                return False
+            _, nat = child.get_preferred_size()
+            alloc.width, alloc.height = nat.width, nat.height
+            alloc.x = prim.x + (prim.width - nat.width) // 2
+            # keep the bar out of the way of a selection at the bottom
+            alloc.y = prim.y + prim.height - nat.height - 28
+            if self.sel and self.sel[1] + self.sel[3] > alloc.y - 10:
+                alloc.y = prim.y + 28
+            return True
+
+        # -- state
+        def update_hint(self):
+            if self.mode == 'window':
+                t = 'Click a window  ·  Esc cancels'
+            elif self.sel:
+                t = (f'{abs(int(self.sel[2]))} × {abs(int(self.sel[3]))}  ·  drag the edges to adjust  '
+                     '·  Enter or double-click saves')
+            else:
+                t = 'Drag to select an area  ·  click a window  ·  Space = whole screen'
+            self.hint.set_text(t)
+
+        def on_mode(self, btn, key):
+            if not btn.get_active():
+                return
+            if key == 'screen':
+                self.sel = (0, 0, W, H)
+                self.mode = 'region'
+            else:
+                self.mode = key
+                if key == 'window':
+                    self.sel = None
+            self.update_hint()
+            self.area.queue_draw()
+            self.bar.queue_resize()
+
+        def window_at(self, x, y):
+            return next((r for r in windows
+                         if r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]), None)
+
+        def edge_at(self, x, y):
+            if not self.sel:
+                return None
+            sx, sy, sw, sh = clamp(self.sel, W, H)
+            near = lambda a, b: abs(a - b) <= HANDLE
+            e = ''
+            if sx - HANDLE <= x <= sx + sw + HANDLE and sy - HANDLE <= y <= sy + sh + HANDLE:
+                e += 'n' if near(y, sy) else 's' if near(y, sy + sh) else ''
+                e += 'w' if near(x, sx) else 'e' if near(x, sx + sw) else ''
+                if not e and sx < x < sx + sw and sy < y < sy + sh:
+                    return 'move'
+            return e or None
+
+        # -- mouse
+        def on_press(self, _w, ev):
+            if ev.button == 3:
+                self.cancel()
+                return True
+            if ev.button != 1:
+                return False
+            if ev.type == Gdk.EventType._2BUTTON_PRESS:
+                if self.sel:
+                    self.done(save=True)
+                return True
+            if self.mode == 'window':
+                r = self.window_at(ev.x, ev.y)
+                if r:
+                    self.sel = r
+                    self.done(save=True)
+                return True
+            what = self.edge_at(ev.x, ev.y) or 'new'
+            self.drag = (what, ev.x, ev.y, self.sel and clamp(self.sel, W, H))
+            return True
+
+        def on_motion(self, _w, ev):
+            x, y = ev.x, ev.y
+            if not self.drag:
+                if self.mode == 'window' or not self.sel:
+                    r = self.window_at(x, y)
+                    if r != self.hover:
+                        self.hover = r
+                        self.area.queue_draw()
+                e = self.edge_at(x, y) if self.mode == 'region' else None
+                names = {'move': 'move', 'n': 'n-resize', 's': 's-resize', 'e': 'e-resize',
+                         'w': 'w-resize', 'ne': 'ne-resize', 'nw': 'nw-resize',
+                         'se': 'se-resize', 'sw': 'sw-resize'}
+                self.get_window().set_cursor(Gdk.Cursor.new_from_name(
+                    display, names.get(e, 'crosshair')))
+                return True
+            what, x0, y0, s0 = self.drag
+            if what == 'new':
+                if abs(x - x0) > 3 or abs(y - y0) > 3:
+                    self.sel = (x0, y0, x - x0, y - y0)
+                    self.hover = None
+            elif what == 'move':
+                sx, sy, sw, sh = s0
+                nx = min(max(0, sx + x - x0), W - sw)
+                ny = min(max(0, sy + y - y0), H - sh)
+                self.sel = (nx, ny, sw, sh)
+            else:
+                sx, sy, sw, sh = s0
+                x1, y1 = sx + sw, sy + sh
+                if 'w' in what:
+                    sx = x
+                if 'e' in what:
+                    x1 = x
+                if 'n' in what:
+                    sy = y
+                if 's' in what:
+                    y1 = y
+                self.sel = (sx, sy, x1 - sx, y1 - sy)
+            self.update_hint()
+            self.area.queue_draw()
+            self.bar.queue_resize()
+            return True
+
+        def on_release(self, _w, ev):
+            if ev.button != 1 or not self.drag:
+                return False
+            what = self.drag[0]
+            self.drag = None
+            if what == 'new' and (not self.sel or abs(self.sel[2]) <= 3 or abs(self.sel[3]) <= 3):
+                # a click, not a drag: take the window under the pointer
+                r = self.window_at(ev.x, ev.y)
+                self.sel = r if r else None
+                if r:
+                    self.done(save=True)
+                    return True
+            if self.sel:
+                self.sel = clamp(self.sel, W, H)
+                self.mode_btns['region'].set_active(True)
+            self.update_hint()
+            self.area.queue_draw()
+            return True
+
+        # -- keys
+        def on_key(self, _w, ev):
+            k = Gdk.keyval_name(ev.keyval)
+            ctrl = ev.state & Gdk.ModifierType.CONTROL_MASK
+            if k == 'Escape':
+                self.cancel()
+            elif k in ('Return', 'KP_Enter'):
+                self.done(save=True)
+            elif k == 'space':
+                self.sel = (0, 0, W, H)
+                self.done(save=True)
+            elif ctrl and k in ('c', 'C'):
+                self.done(save=False)
+            else:
+                return False
+            return True
+
+        # -- drawing
+        def on_draw(self, _w, cr):
+            Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0)
+            cr.paint()
+            cr.set_source_rgba(0, 0, 0, 0.45)
+            cr.paint()
+            rect = clamp(self.sel, W, H) if self.sel else self.hover
+            if not rect:
+                return False
+            x, y, w, h = rect
+            cr.save()
+            cr.rectangle(x, y, w, h)
+            cr.clip()
+            Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0)
+            cr.paint()
+            cr.restore()
+            cr.set_line_width(2)
+            if self.sel:
+                cr.set_source_rgb(0.25, 0.6, 1.0)
+                cr.rectangle(x + 1, y + 1, w - 2, h - 2)
+                cr.stroke()
+                for hx in (x, x + w / 2, x + w):
+                    for hy in (y, y + h / 2, y + h):
+                        if (hx, hy) != (x + w / 2, y + h / 2):
+                            cr.rectangle(hx - 4, hy - 4, 8, 8)
+                cr.fill()
+                label = f'{w} × {h}'
+                cr.select_font_face('Sans')
+                cr.set_font_size(13)
+                ext = cr.text_extents(label)
+                lx, ly = x + 4, (y - 8 if y > 26 else y + h + 20)
+                cr.set_source_rgba(0, 0, 0, 0.7)
+                cr.rectangle(lx - 4, ly - ext.height - 5, ext.width + 10, ext.height + 10)
+                cr.fill()
+                cr.set_source_rgb(1, 1, 1)
+                cr.move_to(lx + 1, ly)
+                cr.show_text(label)
+            else:                       # window under the pointer, before any drag
+                cr.set_source_rgba(0.25, 0.6, 1.0, 0.9)
+                cr.set_dash([6, 4])
+                cr.rectangle(x + 1, y + 1, w - 2, h - 2)
+                cr.stroke()
+            return False
+
+        # -- end
+        def done(self, save):
+            rect = self.sel or (0, 0, W, H)
+            self.result = (rect, save)
+            self.close_overlay()
+
+        def cancel(self):
+            self.result = None
+            self.close_overlay()
+
+        def close_overlay(self):
+            display.get_default_seat().ungrab()
+            self.destroy()
+            Gtk.main_quit()
+
+    win = Overlay()
+    Gtk.main()
+    if win.result:
+        rect, save = win.result
+        finish(pixbuf, rect, save)
+
+
+def run_direct(which):
+    import gi
+    gi.require_version('GdkPixbuf', '2.0')
+    from gi.repository import GdkPixbuf
+    shot = grab_screen()
+    try:
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file(shot)
+    finally:
+        os.unlink(shot)
+    rect = (0, 0, pixbuf.get_width(), pixbuf.get_height())
+    if which == 'window':
+        rect = active_window_rect() or rect
+    finish(pixbuf, rect)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='zorro-shot')
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument('--region', action='store_true', help='overlay, region mode')
+    g.add_argument('--window', action='store_true', help='active window, no overlay')
+    g.add_argument('--full', action='store_true', help='whole screen, no overlay')
+    g.add_argument('--notify', nargs=2, metavar=('FILE', 'SIZE'), help=argparse.SUPPRESS)
+    a = ap.parse_args()
+    if a.notify:
+        cmd_notify(*a.notify)
+    elif a.window:
+        run_direct('window')
+    elif a.full:
+        run_direct('full')
+    else:
+        run_overlay('region')
+
+
+if __name__ == '__main__':
+    main()

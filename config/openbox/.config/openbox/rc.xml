@@ -177,7 +177,8 @@
     <!-- 'Left', 'Middle', 'Right' -->
   </dock>
   <keyboard>
-    <keybind key="Print"><action name="Execute"><command>sh -c '$HOME/.local/bin/zshot'</command></action></keybind>
+    <!-- Screenshots (apps/zorro-shot): PrtSc = overlay, Alt+PrtSc = active window -->
+    <keybind key="Print"><action name="Execute"><command>sh -c 'exec $HOME/.local/bin/zorro-shot'</command></action></keybind>
     <!-- Super+A: WhatsApp (focus if open, otherwise start) -->
     <keybind key="W-a">
       <action name="Execute">
@@ -373,10 +374,9 @@
         <menu>client-menu</menu>
       </action>
     </keybind>
-    <!-- Take a screenshot of the current window with scrot when Alt+Print are pressed -->
     <keybind key="A-Print">
       <action name="Execute">
-        <command>scrot -s</command>
+        <command>sh -c 'exec $HOME/.local/bin/zorro-shot --window'</command>
       </action>
     </keybind>
     <!-- Keybindings for window switching -->

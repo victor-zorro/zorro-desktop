@@ -1,0 +1,21 @@
+# Screenshot (zorro-shot)
+
+Screenshot overlay for the Openbox desktop. The screen is frozen first (menus and tooltips
+stay in the shot), then shown dimmed:
+
+- **drag** = region (drag the edges or corners to adjust, drag inside to move)
+- **click** = the window under the pointer
+- **Space** = whole screen · **Enter** / double-click = save · **Ctrl+C** = copy only ·
+  **Esc** / right-click = cancel
+- toolbar: Screen / Window / Region · Copy · Save · Cancel
+
+Saved to `~/Pictures/Screenshots/YYYY-MM-DD_HH-MM-SS.png` and copied to the clipboard; the
+notification has *Open* and *Show in folder*.
+
+| Key | |
+|---|---|
+| PrtSc | overlay |
+| Alt+PrtSc | active window, no overlay |
+| (Fn+PrtSc, star key) | set in the ThinkPad app |
+
+CLI: `zorro-shot [--region | --window | --full]`. Install: `./install.sh` (no sudo).

@@ -13,6 +13,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 - `apps/<name>/` — our own apps, one folder each with its own install.sh + README (kept separable):
   - `apps/zorro-dm/` — display manager, login + lock screen (zorro-greeter, theme); LightDM stays as fallback
   - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
+  - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
 
