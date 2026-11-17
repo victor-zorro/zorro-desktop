@@ -99,9 +99,9 @@ class Snow:
     see-through and spill also work without a compositor."""
 
     def __init__(self, widget, radius=12, fps=30, inner=None, enabled=None,
-                 max_parts=MAX_PARTICLES):
+                 max_parts=MAX_PARTICLES, max_spill=None):
         self.widget, self.radius, self.fps, self.inner = widget, radius, fps, inner
-        self.enabled, self.max_parts = enabled, max_parts
+        self.enabled, self.max_parts, self.max_spill = enabled, max_parts, max_spill
         self.was_on = None
         self.parts, self.timer = [], None
         self.t0 = self.last = time.monotonic()
@@ -139,6 +139,8 @@ class Snow:
         if self.inner is None:
             return
         sp = int(settings()['spill'])
+        if self.max_spill is not None:
+            sp = min(sp, self.max_spill)
         if sp != self.spill:
             self.spill = sp
             for side in ('top', 'bottom', 'start', 'end'):

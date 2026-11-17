@@ -1005,9 +1005,11 @@ def cmd_app():
     gi.require_version('Gtk', '3.0')
     from gi.repository import GLib, Gtk
 
-    def heading(text):
+    def heading(text, page=None):
+        """a bold heading; page='Title' also starts a new sub-page (sidebar entry)"""
         lb = Gtk.Label(xalign=0, margin_top=14)
         lb.set_markup(f'<b>{GLib.markup_escape_text(text)}</b>')
+        lb.zpage = page
         return lb
 
     def note(text=''):
@@ -1020,6 +1022,54 @@ def cmd_app():
         sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         sw.add(box)
         return sw, box
+
+    class Pages:
+        """one main section: short sub-pages with a sidebar on the left (no long pages),
+        plus an optional header above and footer below that all sub-pages share"""
+        def __init__(self):
+            self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE,
+                                   vexpand=True, hexpand=True)
+            self.top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            self.bottom = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_start=18,
+                                  margin_end=18, margin_bottom=12)
+            self.cur, self.n = None, 0
+
+        def new(self, title):
+            sw, box = page()
+            box.set_margin_top(6)
+            self.stack.add_titled(sw, f'p{self.n}', title)
+            self.n += 1
+            self.cur = box
+
+        def add(self, w):
+            title = getattr(w, 'zpage', None)
+            if title:
+                self.new(title)
+                if w.get_text() == title:
+                    return                  # the sidebar already says it
+            elif self.cur is None:
+                self.new('General')
+            self.cur.add(w)
+
+        def header(self, w):
+            self.top.add(w)
+
+        def footer(self, w):
+            self.bottom.add(w)
+
+        def widget(self):
+            main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+            main.add(self.top)
+            main.add(self.stack)
+            main.add(self.bottom)
+            if self.n < 2:
+                return main
+            side = Gtk.StackSidebar(stack=self.stack)
+            side.set_size_request(170, -1)
+            h = Gtk.Box()
+            h.add(side)
+            h.add(main)
+            return h
 
     def radios(options, current, on_pick):
         """vertical radio group; options: [(key, label)]"""
@@ -1036,9 +1086,10 @@ def cmd_app():
     class Win(Gtk.ApplicationWindow):
         def __init__(self, app):
             super().__init__(application=app, title='ThinkPad')
-            self.set_default_size(620, 560)
+            self.set_default_size(820, 600)
             self.set_icon_name('computer')
             stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+            self.stack = stack
             hb = Gtk.HeaderBar(show_close_button=True)
             hb.set_custom_title(Gtk.StackSwitcher(stack=stack))
             self.set_titlebar(hb)
@@ -1060,7 +1111,8 @@ def cmd_app():
                 css = Gtk.CssProvider()
                 css.load_from_data(b'''
                     window.zfx-app scrolledwindow, window.zfx-app viewport,
-                    window.zfx-app stack { background: none; }''')
+                    window.zfx-app stack, window.zfx-app stacksidebar,
+                    window.zfx-app stacksidebar list { background: none; }''')
                 Gtk.StyleContext.add_provider_for_screen(
                     self.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
                 GLib.timeout_add(300, self.follow_app_bg)
@@ -1070,8 +1122,8 @@ def cmd_app():
 
         # -- keys
         def keys_page(self):
-            sw, box = page()
-            box.add(heading('Fn keys'))
+            box = Pages()
+            box.add(heading('Fn keys', 'Fn keys'))
             grid = Gtk.Grid(column_spacing=18, row_spacing=4)
             for i, (k, what) in enumerate(KEY_TABLE):
                 kl = Gtk.Label(xalign=0)
@@ -1080,7 +1132,7 @@ def cmd_app():
                 grid.attach(Gtk.Label(label=what, xalign=0, wrap=True), 1, i, 1, 1)
             box.add(grid)
 
-            box.add(heading('Star key (F12 ★)'))
+            box.add(heading('Star key (F12 ★)', 'Star key ★'))
             c = load_conf()
             combo = Gtk.ComboBoxText()
             for k, (label, _) in STAR_ACTIONS.items():
@@ -1100,7 +1152,7 @@ def cmd_app():
             test.show()
             box.add(self.custom_box)
             box.add(note('Takes effect right away.'))
-            return sw
+            return box.widget()
 
         def on_star(self, combo):
             act = combo.get_active_id()
@@ -1109,15 +1161,21 @@ def cmd_app():
 
         # -- power
         def power_page(self):
-            sw, box = page()
+            box = Pages()
             tlp = tlp_settings()
-            box.add(heading('Battery'))
+            box.add(heading('Battery', 'Battery'))
             self.bat_label = Gtk.Label(label=battery_text(), xalign=0)
             box.add(self.bat_label)
             self.profile_label = note()
             box.add(self.profile_label)
+            full = Gtk.Button(label='Charge to 100% once', halign=Gtk.Align.START, margin_top=12,
+                              tooltip_text='Until the charger is unplugged, then back to the '
+                                           'charge limit (handy before a trip)')
+            full.connect('clicked', lambda b: self.helper(['fullcharge'], 'Charging to 100% '
+                                                          'until you unplug'))
+            box.add(full)
 
-            box.add(heading('Power mode'))
+            box.add(heading('Power mode', 'Mode & charging'))
             grid = Gtk.Grid(column_spacing=12, row_spacing=6)
             self.prof = {}
             for i, (key, label) in enumerate((('AC', 'On the charger'), ('BAT', 'On battery'))):
@@ -1145,21 +1203,15 @@ def cmd_app():
             apply = Gtk.Button(label='Apply')
             apply.get_style_context().add_class('suggested-action')
             apply.connect('clicked', self.on_power_apply)
-            full = Gtk.Button(label='Charge to 100% once',
-                              tooltip_text='Until the charger is unplugged, then back to the '
-                                           'setting above (handy before a trip)')
-            full.connect('clicked', lambda b: self.helper(['fullcharge'], 'Charging to 100% '
-                                                          'until you unplug'))
             row.add(apply)
-            row.add(full)
             box.add(row)
             self.power_msg = note()
-            box.add(self.power_msg)
+            box.footer(self.power_msg)
             if not os.path.exists(HELPER) or not shutil.which('pkexec'):
                 self.power_msg.set_text('Not installed yet: run  sudo apt install pkexec  and  '
                                         'sudo apps/zorro-thinkpad/install.sh')
             self.refresh()
-            return sw
+            return box.widget()
 
         def on_power_apply(self, _b):
             _, lo, hi = CHARGE_PRESETS[self.charge]
@@ -1194,15 +1246,15 @@ def cmd_app():
 
         # -- overlays (shared zorro-fx settings, live preview)
         def fx_page(self):
-            sw, box = page()
+            box = Pages()
             if not zorro_fx:
                 box.add(note('apps/zorro-fx is missing: overlays use a plain dark box.'))
-                return sw
+                return box.widget()
             s = dict(zorro_fx.settings())
             self.fx = s
             self.fx_save_id = None
 
-            prev = Gtk.Box(spacing=14, hexpand=True, vexpand=True)
+            prev = Gtk.Box(spacing=14)
             prev.get_style_context().add_class('zosd')
             icon = Gtk.Image.new_from_icon_name('audio-volume-medium-symbolic', Gtk.IconSize.DIALOG)
             icon.set_pixel_size(28)
@@ -1213,20 +1265,18 @@ def cmd_app():
             prev.add(Gtk.Label(label='60%'))
             outer = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
             outer.add(prev)
-            self.fx_snow = Snow(outer, radius=14, inner=prev)
+            self.fx_snow = Snow(outer, radius=14, inner=prev, max_spill=12)
             # what the box sits on: a light pattern, so see-through is visible here too
-            frame = Gtk.EventBox()
+            frame = Gtk.Box(vexpand=False)
             frame.set_app_paintable(True)
             frame.connect('draw', self.fx_checker)
-            inner = Gtk.Box(margin=22)
+            inner = Gtk.Box(margin=8)
             inner.set_center_widget(outer)
             frame.add(inner)
-            box.add(heading('Preview'))
-            box.add(frame)
-            show = Gtk.Button(label='Show on screen', halign=Gtk.Align.START,
-                              tooltip_text='The real indicator, bottom centre')
-            show.connect('clicked', lambda b: osd('audio-volume-medium-symbolic', 60))
-            box.add(show)
+            frame.set_margin_start(18)
+            frame.set_margin_end(18)
+            frame.set_margin_top(14)
+            box.header(frame)               # the preview stays visible on every sub-page
 
             def combo(key, options):
                 c = Gtk.ComboBoxText()
@@ -1248,8 +1298,6 @@ def cmd_app():
                 return sc
 
             pct = lambda v: f'{v * 100:.0f}%'
-            grid = Gtk.Grid(column_spacing=12, row_spacing=6)
-            self.fx_widgets = []
             rows = [
                 ('Pattern', combo('pattern', zorro_fx.PATTERNS)),
                 ('Colour', combo('colour', {k: v[0] for k, v in zorro_fx.COLOURS.items()})),
@@ -1268,22 +1316,32 @@ def cmd_app():
             rows.append(('This app too', appbg))
             glow = Gtk.Switch(active=s['glow'], halign=Gtk.Align.START)
             glow.connect('notify::active', lambda w, _p: self.fx_set('glow', w.get_active()))
-            for i, (label, w) in enumerate(rows):
-                grid.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-                grid.attach(w or glow, 1, i, 1, 1)
-            box.add(heading('Particles and boxes'))
-            box.add(grid)
-            box.add(note('Background, Particles and Level bar: how visible each is, '
-                         '0% = invisible, 100% = solid. Flock: move the mouse over the '
-                         'box (or its spill area) and the swarm follows it.'))
-            box.add(note('Used by the volume / brightness indicator and the screenshot bar '
-                         '(spill: indicator only). This desktop has no compositor, so what '
-                         'shows through the box and the spill area is a still image of the '
-                         'screen, taken just before the indicator appears.'))
-            reset = Gtk.Button(label='Back to defaults', halign=Gtk.Align.START, margin_top=8)
+            def grid(part):
+                g = Gtk.Grid(column_spacing=12, row_spacing=6)
+                for i, (label, w) in enumerate(part):
+                    g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
+                    g.attach(w or glow, 1, i, 1, 1)
+                return g
+            box.add(heading('Particles', 'Particles'))
+            box.add(grid(rows[:6]))
+            box.add(note('Flock: move the mouse over the box (or its spill area) and the '
+                         'swarm follows it.'))
+            box.add(heading('Box and transparency', 'Transparency'))
+            box.add(grid(rows[6:10]))
+            box.add(note('How visible each part is: 0% = invisible, 100% = solid. Spill: '
+                         'indicator only. Without a compositor, what shows through is a '
+                         'still image of the screen.'))
+            box.add(heading('Indicator and this app', 'Indicator & app'))
+            box.add(grid(rows[10:]))
+            bottom = Gtk.Box(spacing=8)
+            show = Gtk.Button(label='Show on screen', tooltip_text='The real indicator, bottom centre')
+            show.connect('clicked', lambda b: osd('audio-volume-medium-symbolic', 60))
+            reset = Gtk.Button(label='Back to defaults')
             reset.connect('clicked', self.fx_reset)
-            box.add(reset)
-            return sw
+            bottom.add(show)
+            bottom.add(reset)
+            box.footer(bottom)
+            return box.widget()
 
         def follow_app_bg(self):
             ctx = self.get_style_context()
@@ -1294,6 +1352,8 @@ def cmd_app():
 
         def fx_checker(self, w, cr):
             a = w.get_allocation()
+            cr.rectangle(0, 0, a.width, a.height)
+            cr.clip()
             cr.set_source_rgb(0.80, 0.80, 0.83)
             cr.paint()
             cr.set_source_rgb(0.62, 0.62, 0.66)
@@ -1320,7 +1380,7 @@ def cmd_app():
         def fx_reset(self, _b):
             zorro_fx.save(zorro_fx.DEFAULTS)
             zorro_fx._cache['mtime'] = -1
-            stack = self.get_child()
+            stack = self.stack
             old = stack.get_child_by_name('fx')
             stack.remove(old)
             stack.add_titled(self.fx_page(), 'fx', 'Overlays')
@@ -1328,23 +1388,30 @@ def cmd_app():
             stack.set_visible_child_name('fx')
 
         # -- hardware
+        HW_GROUPS = {'Webcam': 'Camera & sound', 'Microphone': 'Camera & sound',
+                     'Speakers': 'Camera & sound', 'Bluetooth': 'Bluetooth',
+                     'Wi-Fi': 'Network', 'Mobile data (LTE)': 'Network'}
+
         def hw_page(self):
-            sw, box = page()
-            top = Gtk.Box(spacing=8)
-            top.add(heading('Devices'))
-            again = Gtk.Button(label='Check again', halign=Gtk.Align.END, hexpand=True,
-                               valign=Gtk.Align.END)
-            again.connect('clicked', lambda b: self.hw_refresh())
-            top.add(again)
-            box.add(top)
-            self.hw_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=6)
-            box.add(self.hw_list)
+            box = Pages()
+            self.hw_lists = {}
+            for group in ('Camera & sound', 'Bluetooth', 'Network', 'Other devices'):
+                box.add(heading(group, group))
+                lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=6)
+                box.add(lst)
+                self.hw_lists[group] = lst
+            bottom = Gtk.Box(spacing=8)
             self.hw_msg = note()
-            box.add(self.hw_msg)
+            self.hw_msg.set_hexpand(True)
+            bottom.add(self.hw_msg)
+            again = Gtk.Button(label='Check again', valign=Gtk.Align.CENTER)
+            again.connect('clicked', lambda b: self.hw_refresh())
+            bottom.add(again)
+            box.footer(bottom)
             self.bt_found = []
             self.hw_busy = False
             self.hw_refresh()
-            return sw
+            return box.widget()
 
         def hw_refresh(self):
             if self.hw_busy:
@@ -1358,8 +1425,10 @@ def cmd_app():
 
         def hw_show(self, rows):
             self.hw_busy = False
-            for c in self.hw_list.get_children():
-                c.destroy()
+            for lst in self.hw_lists.values():
+                for c in lst.get_children():
+                    c.destroy()
+            group = 'Other devices'
             marks = {'ok': ('✓', '#5fd068'), 'warn': ('⚠', '#ffb84a'), 'off': ('○', '#8a8a92')}
             for icon, title, state, detail, acts in rows:
                 row = Gtk.Box(spacing=12)
@@ -1384,9 +1453,12 @@ def cmd_app():
                     b.connect('clicked', lambda _b, cb=cb: cb())
                     row.add(b)
                 if not icon:
-                    row.set_margin_start(28)
-                self.hw_list.add(row)
-            self.hw_list.show_all()
+                    row.set_margin_start(28)    # a Bluetooth device under its adapter
+                else:
+                    group = self.HW_GROUPS.get(title.strip(), 'Other devices')
+                self.hw_lists[group].add(row)
+            for lst in self.hw_lists.values():
+                lst.show_all()
             return False
 
         def hw_do(self, busy_text, fn, done_text=None):
@@ -1479,7 +1551,7 @@ def cmd_app():
 
         # -- lights
         def lights_page(self):
-            sw, box = page()
+            box = Pages()
             li = load_conf().get('lights', {})
             self.light_msg = note()
 
@@ -1490,7 +1562,7 @@ def cmd_app():
                     self.light_msg.set_text(err or '')
                 return cb
 
-            box.add(heading('Red dot on the lid: normally'))
+            box.add(heading('Red dot on the lid: normally', 'Red dot'))
             box.add(radios([(k, v[0]) for k, v in DOT_MODES.items()], li.get('dot', 'on'),
                            pick(DOT_LED, 'dot')))
             box.add(note('In standby the dot still blinks slowly (the firmware does that).'))
@@ -1517,7 +1589,7 @@ def cmd_app():
             box.add(note('Letters, digits and . , ? ! / - @ : = + & are blinked; other '
                          'characters are skipped. The text repeats with a 3 second pause.'))
 
-            box.add(heading('Red dot: activity overrides'))
+            box.add(heading('Red dot: activity overrides', 'Dot overrides'))
             ov = li.get('overrides', {})
             grid = Gtk.Grid(column_spacing=12, row_spacing=6)
             for i, (key, label) in enumerate(OVERRIDES):
@@ -1543,7 +1615,7 @@ def cmd_app():
                          'the normal one; the highest one in the list wins. Morse uses the '
                          'text above.'))
 
-            box.add(heading('Power button light'))
+            box.add(heading('Power button light', 'Other lights'))
             box.add(radios([('on', 'On'), ('off', 'Off')], li.get('power', 'on'),
                            pick(POWER_LED, 'power')))
 
@@ -1558,8 +1630,8 @@ def cmd_app():
                 update_conf('lights', kbd=level)
             box.add(radios(list(KBD_LEVELS.items()), cur, kbd))
             box.add(note('Fn + Space changes it too. The level is kept after standby and restart.'))
-            box.add(self.light_msg)
-            return sw
+            box.footer(self.light_msg)
+            return box.widget()
 
     app = Gtk.Application(application_id='org.zorro.thinkpad')
     app.connect('activate', lambda a: (a.get_active_window() or Win(a)).present())
