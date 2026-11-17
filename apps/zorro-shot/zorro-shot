@@ -411,6 +411,7 @@ def run_overlay(start_mode):
             cr.paint()
             cr.restore()
             cr.set_line_width(2)
+            cr.set_dash([])
             if self.sel:
                 cr.set_source_rgb(0.25, 0.6, 1.0)
                 cr.rectangle(x + 1, y + 1, w - 2, h - 2)
