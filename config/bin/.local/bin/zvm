@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# zvm: Debian 13 test VM in plain QEMU/KVM (for trying install.sh, login managers, ...)
+#   zvm create [--force]   download Debian 13 cloud image, cloud-init: user zorro/zorro,
+#                          passwordless sudo, ssh key; snapshot 'clean'
+#   zvm start              boot in a GTK window (UEFI, 4 cores, 4 GB, ssh on 127.0.0.1:2222)
+#   zvm ssh [cmd...]       shell / command in the VM
+#   zvm sync               copy ~/zorro-desktop working tree into the VM
+#   zvm shot [file.png]    screenshot of the VM screen
+#   zvm stop               clean shutdown
+#   zvm snap NAME          save disk snapshot (VM stopped)
+#   zvm reset [NAME]       roll back to snapshot (default: desktop, else clean)
+#   zvm list               list snapshots
+#   zvm status
+set -euo pipefail
+
+D="$HOME/vms/debian13"
+DISK="$D/disk.qcow2"
+KEY="$HOME/.ssh/zvm_ed25519"
+PORT=2222
+MON="$D/monitor.sock"
+PIDF="$D/qemu.pid"
+IMG_URL="https://cloud.debian.org/images/cloud/trixie/latest"
+IMG="debian-13-generic-amd64.qcow2"   # 'generic' has the full kernel (virtio-gpu for the GUI)
+REPO="$HOME/zorro-desktop"
+
+die() { echo "zvm: $*" >&2; exit 1; }
+running() { [[ -f $PIDF ]] && kill -0 "$(cat "$PIDF")" 2>/dev/null; }
+mon() { running || die "VM not running"; printf '%s\n' "$*" | socat - "UNIX-CONNECT:$MON" >/dev/null; }
+sshopts=(-i "$KEY" -p "$PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile="$D/known_hosts"
+         -o LogLevel=ERROR -o ConnectTimeout=3)
+vssh() { LC_ALL=C.UTF-8 LANG=C.UTF-8 ssh "${sshopts[@]}" zorro@127.0.0.1 "$@"; }
+
+wait_ssh() {
+  echo -n "zvm: waiting for ssh"
+  for _ in $(seq 120); do
+    vssh true 2>/dev/null && { echo " ok"; return; }
+    running || die "VM stopped"
+    echo -n .; sleep 2
+  done
+  die "no ssh after 4 minutes"
+}
+
+create() {
+  command -v cloud-localds >/dev/null || die "needs cloud-image-utils (sudo apt install cloud-image-utils)"
+  if [[ -f $DISK && ${1:-} != --force ]]; then die "$DISK exists (zvm create --force to start over)"; fi
+  running && die "stop the VM first"
+  mkdir -p "$D"
+  [[ -f $KEY ]] || ssh-keygen -q -t ed25519 -N '' -C zvm -f "$KEY"
+
+  echo "==> Downloading $IMG"
+  curl -fL --progress-bar -o "$D/$IMG.part" "$IMG_URL/$IMG"
+  curl -fsSL -o "$D/SHA512SUMS" "$IMG_URL/SHA512SUMS"
+  (cd "$D" && grep " $IMG\$" SHA512SUMS | sed "s/ $IMG\$/ $IMG.part/" | sha512sum -c --quiet) \
+    || die "checksum mismatch"
+  mv "$D/$IMG.part" "$DISK"
+  qemu-img resize -q "$DISK" 30G
+
+  cp /usr/share/OVMF/OVMF_VARS_4M.fd "$D/vars.fd"
+  cat > "$D/user-data" <<EOF
+#cloud-config
+hostname: zvm
+users:
+  - name: zorro
+    gecos: Zorro test
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    ssh_authorized_keys: ["$(cat "$KEY.pub")"]
+chpasswd:
+  expire: false
+  users: [{name: zorro, password: zorro, type: text}]
+ssh_pwauth: false
+EOF
+  cloud-localds "$D/seed.iso" "$D/user-data"
+  rm -f "$D/known_hosts"
+
+  echo "==> First boot (cloud-init)"
+  start
+  wait_ssh
+  vssh 'cloud-init status --wait >/dev/null; sudo apt-get update -qq; sudo apt-get install -y -qq rsync >/dev/null'
+  stop_wait
+  qemu-img snapshot -c clean "$DISK"
+  echo "zvm: ready, snapshot 'clean' saved. Next: zvm start; zvm sync; zvm ssh"
+}
+
+start() {
+  running && die "already running"
+  [[ -f $DISK ]] || die "no VM yet: zvm create"
+  local seed=()
+  [[ -f $D/seed.iso ]] && seed=(-drive "file=$D/seed.iso,media=cdrom,readonly=on")
+  rm -f "$MON"
+  setsid qemu-system-x86_64 \
+    -name zvm -machine q35,accel=kvm -cpu host -smp 4 -m 4G \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+    -drive "if=pflash,format=raw,file=$D/vars.fd" \
+    -drive "file=$DISK,if=virtio,discard=unmap" "${seed[@]}" \
+    -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:22" \
+    -device virtio-vga,xres=1600,yres=900 -display gtk,zoom-to-fit=on \
+    -device qemu-xhci -device usb-tablet \
+    -monitor "unix:$MON,server,nowait" -pidfile "$PIDF" \
+    >"$D/qemu.log" 2>&1 < /dev/null &
+  for _ in $(seq 20); do [[ -S $MON ]] && break; sleep 0.5; done
+  running || die "QEMU did not start, see $D/qemu.log"
+  echo "zvm: started (ssh: zvm ssh)"
+}
+
+stop_wait() {
+  running || return 0
+  mon system_powerdown
+  for _ in $(seq 60); do running || { echo "zvm: stopped"; return; }; sleep 1; done
+  echo "zvm: no clean shutdown after 60 s, forcing"; mon quit || true; sleep 1
+}
+
+need_stopped() { running && die "stop the VM first (zvm stop)"; [[ -f $DISK ]] || die "no VM"; }
+
+case ${1:-} in
+  create) create "${2:-}" ;;
+  start)  start ;;
+  stop)   stop_wait ;;
+  ssh)    shift; vssh "$@" ;;
+  sync)   running || die "VM not running"
+          rsync -a --delete -e "ssh ${sshopts[*]}" "$REPO/" zorro@127.0.0.1:zorro-desktop/
+          echo "zvm: synced $REPO -> zvm:~/zorro-desktop" ;;
+  shot)   f=$(realpath -m "${2:-$D/shot.png}"); mon "screendump $f -f png"; sleep 1; echo "$f" ;;
+  snap)   [[ -n ${2:-} ]] || die "usage: zvm snap NAME"; need_stopped
+          qemu-img snapshot -d "$2" "$DISK" 2>/dev/null || true
+          qemu-img snapshot -c "$2" "$DISK"; echo "zvm: snapshot '$2' saved" ;;
+  reset)  need_stopped; n=${2:-}
+          if [[ -z $n ]]; then qemu-img snapshot -l "$DISK" | grep -qw desktop && n=desktop || n=clean; fi
+          qemu-img snapshot -a "$n" "$DISK"; echo "zvm: back to snapshot '$n'" ;;
+  list)   [[ -f $DISK ]] || die "no VM"; qemu-img snapshot -l "$DISK" ;;
+  status) running && echo "running (pid $(cat "$PIDF"))" || echo "stopped" ;;
+  *)      sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

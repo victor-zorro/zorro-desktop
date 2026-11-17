@@ -10,3 +10,11 @@ network-manager-gnome
 fwupd
 # fwupd finds the EFI partition through udisks2 (a recommend, so not pulled in)
 udisks2
+# Test VMs (zvm): QEMU/KVM, UEFI firmware, cloud-init seed, file sync
+qemu-system-x86
+qemu-system-gui
+qemu-utils
+ovmf
+cloud-image-utils
+rsync
+socat
