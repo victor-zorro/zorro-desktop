@@ -292,7 +292,10 @@ def main():
             self.add(outer)
             if zorro_fx:
                 self.snow = zorro_fx.Snow(outer, radius=10000, inner=self.area, profile='orb',
-                                          fps=24)
+                                          fps=15, max_parts=1500)   # a desktop widget: light
+            # covered by windows: no drawing at all
+            self.add_events(Gdk.EventMask.VISIBILITY_NOTIFY_MASK)
+            self.connect('visibility-notify-event', self.on_visibility)
             self.layout()
             self.show_all()
             scr = self.get_screen()             # screens added / removed / resized (F7)
@@ -300,6 +303,15 @@ def main():
             scr.connect('size-changed', lambda s: self.layout())
             GLib.timeout_add(1000, self.every_second)
             threading.Thread(target=self.collect, daemon=True).start()
+
+        def on_visibility(self, _w, ev):
+            if not zorro_fx:
+                return False
+            if ev.state == Gdk.VisibilityState.FULLY_OBSCURED:
+                self.snow.stop()
+            else:
+                self.snow.start()
+            return False
 
         # -- size, place, round shape
         def layout(self):

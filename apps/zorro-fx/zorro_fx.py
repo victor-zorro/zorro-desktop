@@ -207,6 +207,8 @@ class Swarm:
         return alpha
 
     def paint(self, cr, s, W, H, t, spill, colours):
+        """grouped by colour and brightness, one cairo fill per group. (Painting one big
+        image per frame looked cheaper, but X then uploads the whole image every frame.)"""
         alpha = self.alphas(s, W, H, t, spill)
         keep = alpha > 0.01
         if not keep.any():
@@ -223,22 +225,17 @@ class Swarm:
         for a0, a1 in zip(starts.tolist(), ends.tolist()):
             k = int(key[a0])
             col, qa = colours[(k // 12) % len(colours)], ((k % 12) + 0.5) / 12
-            xs, ys, rs = x[a0:a1].tolist(), y[a0:a1].tolist(), rad[a0:a1].tolist()
+            xs, ys, rs = (x[a0:a1] - rad[a0:a1]).tolist(), (y[a0:a1] - rad[a0:a1]).tolist(), \
+                (2 * rad[a0:a1]).tolist()
             if glow:
-                zs = z[a0:a1].tolist()
                 cr.set_source_rgba(*col, qa * 0.18)
-                for xx, yy, rr, zz in zip(xs, ys, rs, zs):
+                for xx, yy, dd, zz in zip(xs, ys, rs, z[a0:a1].tolist()):
                     if zz > 0.65:
-                        cr.new_sub_path()
-                        cr.arc(xx, yy, rr * 3, 0, 6.283)
+                        cr.rectangle(xx - dd, yy - dd, dd * 3, dd * 3)
                 cr.fill()
             cr.set_source_rgba(*col, qa)
-            for xx, yy, rr in zip(xs, ys, rs):
-                if rr < 1.5:
-                    cr.rectangle(xx - rr, yy - rr, 2 * rr, 2 * rr)
-                else:
-                    cr.new_sub_path()
-                    cr.arc(xx, yy, rr, 0, 6.283)
+            for xx, yy, dd in zip(xs, ys, rs):
+                cr.rectangle(xx, yy, dd, dd)
             cr.fill()
 
 
