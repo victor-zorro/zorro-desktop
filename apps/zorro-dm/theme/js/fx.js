@@ -19,7 +19,12 @@
     // chromatic blur: the light splits into its colours and smears like through a lens
     cblur: 1, cblur_mode: 'lens',  // lens (from the centre outward), prism (sideways), glow
     bloom: 0.6,                    // soft coloured glow around the lines
+    // the iridescent background behind the animal (chromatic aberration in flowing colour)
+    background: 'deep',            // deep (dark, pools of light), waves, streaks, black
+    bg_strength: 1, bg_speed: 1, bg_aberration: 1,
+    fps: 30,                       // the wallpaper asks for less
   };
+  const BG_MODES = { waves: 0, streaks: 1, deep: 2 };
   const CBLUR_MODES = { lens: 0, prism: 1, glow: 2 };
   const cfg = Object.assign({}, DEFAULTS, window.ZORRO_LOOK || {});
   const ANIMALS = ['whale', 'vaquita', 'hammerhead', 'turtle', 'manta'];
@@ -58,7 +63,8 @@
     uniform vec2  uRes;
     uniform float uTime, uStatic, uBurst, uBars, uPower, uSeed;
     uniform float uGrain, uScratch, uDust, uScan, uVig, uFlick, uChroma, uBarsOn;
-    uniform float uCBlur, uCMode, uBloom;
+    uniform float uCBlur, uCMode, uBloom, uBgOn, uBgStrength;
+    uniform sampler2D uBg;
     uniform sampler2D uWhale;
 
     float h11(float p){ p = fract(p*.1031); p *= p+33.33; p *= p+p; return fract(p); }
@@ -123,6 +129,11 @@
         vec3 disp = acc / wsum;
         float mixk = uCMode > 1.5 ? .55 : .85;
         col = mix(col, max(col*.55, disp*1.6), clamp(uCBlur, 0., 1.) * mixk);
+      }
+      // the iridescent background shows through everywhere the animal is not
+      if (uBgOn > .5) {
+        vec3 bg = texture2D(uBg, uv).rgb * uBgStrength;
+        col = 1. - (1. - col) * (1. - clamp(bg, 0., 1.));      // screen blend
       }
       // bloom: a wide, coloured glow (red outside, cyan inside)
       if (uBloom > 0.) {
@@ -198,10 +209,47 @@
       gl_FragColor = vec4(clamp(col, 0., 1.), 1.);
     }`;
 
+  // ---------- iridescent background (own program, quarter resolution) -----
+  const BG_FS = `
+    precision highp float;
+    uniform vec2 R; uniform float T, MODE, CA;
+    float h(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+    float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+      return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y);}
+    float fbm(vec2 p){float v=0.,a=.55;for(int i=0;i<3;i++){v+=a*n(p);p=p*2.03+vec2(1.7,9.2);a*=.45;}return v;}
+    float waves(vec2 p,float t){
+      vec2 q=vec2(fbm(p+vec2(0.,t*.05)),fbm(p+vec2(5.2,1.3)-t*.04));
+      vec2 r=vec2(fbm(p+3.*q+vec2(1.7,9.2)),fbm(p+3.*q+vec2(8.3,2.8)));
+      return clamp((fbm(p+3.2*r)-.19)*5.,0.,1.);}          // measured range .2-.4
+    float streaks(vec2 p,float t){
+      return fbm(vec2(p.x*2.2+.35*sin(p.y*.9+t*.2),p.y*.10+t*.03))*1.25-.12;}
+    vec3 ramp(float v,vec3 a,vec3 b,vec3 c,vec3 d,vec3 e,vec3 f){
+      vec3 col=mix(a,b,smoothstep(.20,.42,v)); col=mix(col,c,smoothstep(.42,.55,v));
+      col=mix(col,d,smoothstep(.55,.64,v)); col=mix(col,e,smoothstep(.64,.74,v));
+      return mix(col,f,smoothstep(.74,.86,v));}
+    vec3 palW(float v){return ramp(v,vec3(.0,.0,.55),vec3(.02,.05,1.),vec3(.55,.12,.95),
+      vec3(1.,.38,.72),vec3(1.,.62,.25),vec3(.75,.95,1.));}
+    vec3 palS(float v){return ramp(v,vec3(.03,.0,.07),vec3(.05,.08,.65),vec3(.75,.0,.75),
+      vec3(.95,.0,.35),vec3(.95,.85,.88),vec3(1.,.5,.1));}
+    void main(){
+      vec2 p=(gl_FragCoord.xy-.5*R)/R.y;
+      vec3 col;
+      if(MODE>.5&&MODE<1.5){
+        vec2 d=vec2(.045*CA,0.);
+        col=vec3(palS(streaks(p+d,T)).r,palS(streaks(p,T)).g,palS(streaks(p-d,T)).b);
+      } else {
+        vec2 d=normalize(vec2(.7,.7))*.04*CA;
+        float vr=waves(p+d,T),vg=waves(p,T),vb=waves(p-d,T);
+        col=vec3(palW(vr).r,palW(vg).g,palW(vb).b);
+        if(MODE>1.5) col*=smoothstep(.38,.8,vg)*.85;
+      }
+      gl_FragColor=vec4(col,1.);}`;
+  let bgProg = null, bgU = {}, bgTex = null, bgFbo = null, bgW = 0, bgH = 0, bgLast = -1e9;
+
   let prog, U = {}, tex;
   const UNIFORMS = ['uRes','uTime','uStatic','uBurst','uBars','uPower','uSeed','uWhale',
                     'uGrain','uScratch','uDust','uScan','uVig','uFlick','uChroma','uBarsOn',
-                    'uCBlur','uCMode','uBloom'];
+                    'uCBlur','uCMode','uBloom','uBgOn','uBgStrength','uBg'];
   function initGL() {
     if (!gl) return false;
     const sh = (type, src) => {
@@ -230,6 +278,60 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.uniform1i(U.uWhale, 0);
+    gl.uniform1i(U.uBg, 1);
+    // background program + its small render target
+    bgProg = gl.createProgram();
+    gl.attachShader(bgProg, sh(gl.VERTEX_SHADER, VS));
+    gl.attachShader(bgProg, sh(gl.FRAGMENT_SHADER, BG_FS));
+    gl.linkProgram(bgProg);
+    if (!gl.getProgramParameter(bgProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(bgProg));
+    for (const n of ['R', 'T', 'MODE', 'CA']) bgU[n] = gl.getUniformLocation(bgProg, n);
+    bgTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, bgTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    bgFbo = gl.createFramebuffer();
+    gl.activeTexture(gl.TEXTURE0);
+    return true;
+  }
+
+  // render the background into its small texture (about 10 times a second)
+  function drawBackground(t, now) {
+    const mode = BG_MODES[cfg.background];
+    if (mode === undefined || !bgProg) return false;
+    const w = Math.max(64, Math.floor(W / 4)), h = Math.max(36, Math.floor(H / 4));
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, bgTex);
+    if (w !== bgW || h !== bgH) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, bgFbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, bgTex, 0);
+      bgW = w; bgH = h; bgLast = -1e9;
+    }
+    if (now - bgLast > 100) {
+      bgLast = now;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, bgFbo);
+      gl.viewport(0, 0, w, h);
+      gl.useProgram(bgProg);
+      const loc = gl.getAttribLocation(bgProg, 'p');
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      gl.uniform2f(bgU.R, w, h);
+      gl.uniform1f(bgU.T, t * Math.max(0, +cfg.bg_speed) + 40);
+      gl.uniform1f(bgU.MODE, mode);
+      gl.uniform1f(bgU.CA, +cfg.bg_aberration);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, W, H);
+      gl.useProgram(prog);
+      const l2 = gl.getAttribLocation(prog, 'p');
+      gl.enableVertexAttribArray(l2);
+      gl.vertexAttribPointer(l2, 2, gl.FLOAT, false, 0, 0);
+    }
+    gl.activeTexture(gl.TEXTURE0);
     return true;
   }
 
@@ -621,7 +723,9 @@
   let lastFrame = 0;
   function frame(now) {
     // at most 30 frames a second: the lock screen can stay up for hours
-    if (now - lastFrame < 32) { requestAnimationFrame(frame); return; }
+    if (now - lastFrame < 1000 / Math.max(1, Math.min(60, +cfg.fps || 30)) - 1) {
+      requestAnimationFrame(frame); return;
+    }
     lastFrame = now;
     if (!wc.width || !wc.height) {          // window not sized yet
       if (innerWidth) resize();
@@ -665,6 +769,9 @@
     drawScene(t, now, ss(2.9, 5.0, T));
 
     if (glOK) {
+      const bgOn = drawBackground(t, now);
+      gl.uniform1f(U.uBgOn, bgOn ? 1 : 0);
+      gl.uniform1f(U.uBgStrength, +cfg.bg_strength);
       gl.uniform2f(U.uRes, W, H);
       gl.uniform1f(U.uTime, t);
       gl.uniform1f(U.uStatic, stat);

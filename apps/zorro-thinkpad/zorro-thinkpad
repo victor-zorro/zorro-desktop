@@ -1282,7 +1282,12 @@ LOOK_DEFAULTS = {
     'snow_alpha': 1.0, 'grain': 1.0, 'scratches': 1.0, 'dust': 1.0, 'scanlines': 1.0,
     'vignette': 1.0, 'flicker': 1.0, 'chroma': 1.0, 'glitch_rate': 1.0, 'glitch_strength': 1.0,
     'bars': False, 'crt': True, 'cblur': 1.0, 'cblur_mode': 'lens', 'bloom': 0.6,
+    'background': 'deep', 'bg_strength': 1.0, 'bg_speed': 1.0, 'bg_aberration': 1.0,
 }
+LOOK_BACKGROUNDS = {'deep': 'Deep sea: dark, with pools of iridescent light',
+                    'waves': 'Iridescent waves: deep blue with magenta folds',
+                    'streaks': 'Light streaks: tall blurred bands of colour',
+                    'black': 'Black (the old look)'}
 CBLUR_MODES = {'lens': 'Lens: colours fan out from the centre', 'prism': 'Prism: sideways colour smear',
                'glow': 'Glow: soft, with a warm halo'}
 
@@ -2192,6 +2197,17 @@ def cmd_app(select=None):
                 return g
 
             x = lambda v: f'{v:.1f}×'
+            bgk = Gtk.ComboBoxText()
+            for k, label in LOOK_BACKGROUNDS.items():
+                bgk.append(k, label)
+            bgk.set_active_id(L['background'])
+            bgk.connect('changed', lambda w: setv('background', w.get_active_id()))
+            box.add(heading('Iridescent background', 'Background'))
+            box.add(grid([('Kind', bgk), ('Brightness', scale('bg_strength', 0, 3, 0.05, x)),
+                          ('Flowing speed', scale('bg_speed', 0, 5, 0.05, x)),
+                          ('Chromatic aberration', scale('bg_aberration', 0, 4, 0.05, x))]))
+            box.add(note('Flowing colour behind the animal; where colours fold, the light '
+                         'splits into a rainbow edge. Computed at low resolution: light on the GPU.'))
             animals = Gtk.ComboBoxText()
             for k, label in LOOK_ANIMALS.items():
                 animals.append(k, label)
