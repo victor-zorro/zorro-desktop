@@ -670,7 +670,7 @@ def run_app():
             add = Gtk.Button(label='+ Account')
             add.connect('clicked', self.on_add_account)
             left.add(add)
-            self.key_btn = Gtk.Button(label='Google API key…')
+            self.key_btn = Gtk.Button(label='Own Google client ID…')
             self.key_btn.connect('clicked', self.on_api_key)
             left.add(self.key_btn)
             self.key_warn = Gtk.Label(xalign=0, wrap=True, max_width_chars=30)
@@ -761,7 +761,7 @@ def run_app():
             acc = self.acc
             if not acc:
                 return
-            d = Gtk.Dialog(title=f'Google API key — {acc}', transient_for=self, modal=True)
+            d = Gtk.Dialog(title=f'Own Google client ID — {acc}', transient_for=self, modal=True)
             d.set_default_size(560, -1)
             box = d.get_content_area()
             box.set_spacing(8)
@@ -770,13 +770,13 @@ def run_app():
                 'Without its own key, this account uses rclone\'s <b>shared</b> Google key. '
                 'All rclone users share its request limit (syncs stop with “quota exceeded”), '
                 'and Google is retiring it during 2026.\n\n'
-                '<b>Make your own (free, ~5 min):</b>\n'
-                '1. Open the Google Cloud console (button below), sign in with this account, '
-                'create a project, e.g. “zorro-drive”.\n'
+                '<b>Make your own (free, ~5 min)</b> — an <b>OAuth client ID</b>, not an “API key”:\n'
+                '1. Open the Google Cloud console (button below), create a project, e.g. '
+                '“zorro-drive”, and select it.\n'
                 '2. APIs &amp; Services → Library → <b>Google Drive API</b> → Enable.\n'
-                '3. OAuth consent screen → User type <b>Internal</b> (Workspace) or External + '
-                'add yourself as test user.\n'
-                '4. Credentials → Create credentials → OAuth client ID → <b>Desktop app</b>.\n'
+                '3. Google Auth Platform → Get started: app name, your email, audience '
+                '<b>Internal</b> (Workspace) or External + yourself as test user.\n'
+                '4. Google Auth Platform → Clients → Create client → <b>Desktop app</b>.\n'
                 '5. Paste the client ID and secret here. Firefox then asks you to sign in once '
                 'more.')))
             link = Gtk.LinkButton(uri='https://console.cloud.google.com/apis/credentials',
