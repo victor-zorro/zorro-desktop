@@ -293,6 +293,8 @@ class Dial(Gtk.Window):
         names = [s['name'] for s in slices]
         groups = [[] for _ in slices]
         hidden = set(self.conf.get('hide', []))
+        if any(a['id'] == 'nemo.desktop' for a in self.all):
+            hidden.add('thunar.desktop')        # one file manager in the slices: Nemo
         for a in self.all:
             if a['id'] in hidden:
                 continue
