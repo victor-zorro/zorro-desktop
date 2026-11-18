@@ -1,10 +1,9 @@
 """hardware check rows"""
-import json
 import os
 import re
 import shutil
 from pathlib import Path
-from .base import run, spawn, sysread
+from .base import run, sysread
 
 
 # ---- hardware check -----------------------------------------------------------------------
@@ -68,7 +67,6 @@ def hardware_rows(ui):
     """the device list; ui supplies the actions. Runs in a thread (some checks are slow)."""
     rows = []
     lsusb = run('lsusb')
-    lspci = run('lspci')
 
     cams = cameras()
     rgb = [c for c in cams if not c[3]]
@@ -126,44 +124,7 @@ def hardware_rows(ui):
             rows.append((None, f'    {dname}', 'off', f'    {mac} · found nearby',
                          [('Pair & connect', lambda m=mac: ui.bt_pair(m))]))
 
-    wifi = next((l for l in run('nmcli', '-t', '-f', 'DEVICE,TYPE,STATE,CONNECTION', 'dev').splitlines()
-                 if ':wifi:' in l), None)
-    wcard = next((l.split(': ', 1)[-1] for l in lspci.splitlines() if 'Network controller' in l), '')
-    if wifi:
-        dev, _, state, conn = wifi.split(':', 3)
-        sig = next((l.split(':')[1] for l in run('nmcli', '-t', '-f', 'ACTIVE,SIGNAL', 'dev',
-                                                     'wifi').splitlines() if l.startswith('yes:')), '')
-        ok = state == 'connected'
-        rows.append(('network-wireless-symbolic', 'Wi-Fi', 'ok' if ok else 'off',
-                     f'{wcard} · driver {driver_of(f"/sys/class/net/{dev}/device")}\n'
-                     + (f'connected to {conn}, signal {sig}%' if ok else state),
-                     [('Connections…', lambda: spawn(['nm-connection-editor']))]))
-    else:
-        rows.append(('network-wireless-offline-symbolic', 'Wi-Fi', 'warn', 'No Wi-Fi adapter', []))
-
-    modem = next((l.split(': ', 1)[-1] for l in lspci.splitlines()
-                  if 'modem' in l.lower() or 'Cellular' in l), None)
-    if modem:
-        from . import pages_mobile as pm
-        detail, state = 'Set up in the Mobile tab', 'off'
-        if os.path.exists(pm.LTE):
-            ok, out = pm.lte('state', timeout=40)
-            try:
-                st = json.loads(out.strip().splitlines()[-1]) if ok else {}
-            except (ValueError, IndexError):
-                st = {}
-            if st.get('data'):
-                detail, state = f'Mobile data on ({st.get("operator", "")} {st.get("tech", "")}, {st.get("ip")})', 'ok'
-            elif st.get('registered'):
-                detail, state = f'{st.get("operator", "")} {st.get("tech", "")}, signal {st.get("signal")}%: mobile data off', 'ok'
-            elif st.get('awake'):
-                detail, state = f'Modem on, SIM: {st.get("sim") or "?"}', 'warn'
-            else:
-                detail = 'Modem asleep: start it in the Mobile tab'
-        else:
-            detail, state = 'Not installed yet: sudo apps/zorro-thinkpad/install.sh', 'warn'
-        rows.append(('network-cellular-symbolic', 'Mobile data (LTE)', state, f'{modem}\n{detail}',
-                     [('Mobile tab', lambda: ui.show_page('lte:0'))]))
+    # Wi-Fi, Ethernet, mobile data and NetBird: the Network tab (pages_network.py)
 
     # printers have their own page (Hardware → Printers, zsettings/printers.py)
 

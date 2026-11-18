@@ -11,7 +11,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, Pages, heading, note, radios
+from .ui import KEY_TABLE, Pages, heading, idle, note, radios
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -189,7 +189,7 @@ class ThinkpadPages:
                     (r.stderr.strip().splitlines() or [f'failed ({r.returncode})'])[-1]
             except (OSError, subprocess.TimeoutExpired) as e:
                 msg = f'Could not run the helper: {e}'
-            GLib.idle_add(self.helper_done, msg)
+            idle(self.helper_done, msg)
         threading.Thread(target=work, daemon=True).start()
 
     def helper_done(self, msg):
@@ -208,7 +208,7 @@ class ThinkpadPages:
         box = Pages()
         self.hw_lists = {}
         self.hw_msg = note()                # also used by the printers part, built in the loop
-        for group in ('Camera & sound', 'Bluetooth', 'Network', 'Printers', 'Other devices'):
+        for group in ('Camera & sound', 'Bluetooth', 'Printers', 'Other devices'):
             box.add(heading(group, group))
             if group == 'Printers':
                 box.add(self.printers_box())
@@ -287,7 +287,7 @@ class ThinkpadPages:
                 res = fn()
             except Exception as e:          # noqa: BLE001 - show it, keep the app alive
                 res = e
-            GLib.idle_add(lambda: then(res) and False, priority=GLib.PRIORITY_DEFAULT)
+            idle(lambda: then(res) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def pr_refresh(self):
@@ -368,7 +368,7 @@ class ThinkpadPages:
 
         def work():
             rows = hardware_rows(self)
-            GLib.idle_add(self.hw_show, rows, priority=GLib.PRIORITY_DEFAULT)
+            idle(self.hw_show, rows)
         threading.Thread(target=work, daemon=True).start()
 
     def hw_show(self, rows):
@@ -404,7 +404,7 @@ class ThinkpadPages:
                 row.set_margin_start(28)    # a Bluetooth device under its adapter
             else:
                 group = self.HW_GROUPS.get(title.strip(), 'Other devices')
-            self.hw_lists[group].add(row)
+            self.hw_lists.get(group, self.hw_lists['Other devices']).add(row)
         for lst in self.hw_lists.values():
             lst.show_all()
         return False
@@ -418,7 +418,7 @@ class ThinkpadPages:
                 res = fn()
             except Exception as e:          # noqa: BLE001 - shown to the user
                 res = f'Failed: {e}'
-            GLib.idle_add(lambda: (self.hw_msg.set_text(res or done_text or ''),
+            idle(lambda: (self.hw_msg.set_text(res or done_text or ''),
                                    self.hw_refresh()) and False)
         threading.Thread(target=work, daemon=True).start()
 
@@ -437,12 +437,12 @@ class ThinkpadPages:
             import tempfile
             fd, wav = tempfile.mkstemp(suffix='.wav', prefix='zorro-mic-', dir=RUNTIME)
             os.close(fd)
-            GLib.idle_add(self.hw_msg.set_text, '● Recording 3 seconds: say something…')
+            idle(self.hw_msg.set_text, '● Recording 3 seconds: say something…')
             p = subprocess.Popen(['pw-record', wav], stderr=subprocess.DEVNULL)
             time.sleep(3)
             p.terminate()
             p.wait()
-            GLib.idle_add(self.hw_msg.set_text, '▶ Playing it back…')
+            idle(self.hw_msg.set_text, '▶ Playing it back…')
             run('pw-play', wav, timeout=8)
             try:
                 os.unlink(wav)

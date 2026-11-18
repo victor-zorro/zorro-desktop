@@ -8,7 +8,7 @@ from pathlib import Path
 from .base import HOME, RUNTIME, load_conf, spawn, update_conf, write_atomic
 from .look import CBLUR_MODES, CUSTOM_PRESETS, DM_DIR, LOOK_ANIMALS, LOOK_BACKGROUNDS, LOOK_DEFAULTS, LOOK_FILE, _look_draft, custom_presets, theme_presets
 from .power import LOOK_HELPER
-from .ui import Pages, heading, note
+from .ui import Pages, heading, idle, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gdk, Gtk
@@ -107,7 +107,7 @@ class LookPages:
                     wc = {}
                 wc['follow_login'] = True       # the wallpaper shows the same look
                 write_atomic(wall, json.dumps(wc, indent=2) + '\n')
-            GLib.idle_add(self.theme_done, msg, ok)
+            idle(self.theme_done, msg, ok)
         threading.Thread(target=work, daemon=True).start()
 
     def theme_done(self, msg, ok):
@@ -309,7 +309,7 @@ class LookPages:
                        (r.stderr.strip().splitlines() or ['failed'])[-1])
             except (OSError, subprocess.TimeoutExpired) as e:
                 msg = f'Could not save: {e}'
-            GLib.idle_add(self.look_msg.set_text, msg)
+            idle(self.look_msg.set_text, msg)
         threading.Thread(target=work, daemon=True).start()
 
     def look_test(self):

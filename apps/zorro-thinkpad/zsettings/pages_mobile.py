@@ -1,11 +1,12 @@
 """app: Mobile tab, the built-in LTE modem (zorro-lte through pkexec)"""
 import json
 import os
+import shutil
 import subprocess
 import threading
 
 from .base import load_conf, update_conf
-from .ui import Pages, heading, note
+from .ui import Pages, heading, idle, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk  # noqa: E402
@@ -15,6 +16,8 @@ LTE = '/usr/local/lib/zorro-lte/zorro-lte'     # root-owned copy (apps/zorro-thi
 
 def lte(*args, stdin=None, timeout=180):
     """run the root-owned zorro-lte through polkit; (ok, output)"""
+    if not shutil.which('pkexec'):
+        return False, '!! pkexec is not installed: sudo apt install pkexec'
     try:
         r = subprocess.run(['pkexec', LTE, *args], input=stdin, capture_output=True, text=True,
                            timeout=timeout)
@@ -100,8 +103,11 @@ class MobilePages:
                      'off. Leave the APN empty: it is looked up for your SIM; type one only if '
                      'your provider tells you to.'))
 
+        missing = [] if shutil.which('pkexec') else ['sudo apt install pkexec']
         if not os.path.exists(LTE):
-            self.lte_status.set_text('Not installed yet: run  sudo apps/zorro-thinkpad/install.sh')
+            missing.append('sudo apps/zorro-thinkpad/install.sh')
+        if missing:
+            self.lte_status.set_text('Not installed yet, run at the laptop:\n' + '\n'.join(missing))
             for w in (self.lte_wake_btn, self.lte_pin, self.lte_data):
                 w.set_sensitive(False)
         else:
@@ -110,7 +116,7 @@ class MobilePages:
         return box
 
     def lte_tick(self):
-        if self.stack.get_visible_child_name() == 'mobile' and not self.lte_busy:
+        if self.stack.get_visible_child_name() == 'network' and not self.lte_busy:
             self.lte_refresh(quiet=True)
         return True
 
@@ -123,8 +129,7 @@ class MobilePages:
 
         def work():
             res = fn()
-            GLib.idle_add(lambda: (setattr(self, 'lte_busy', False), then(res)) and False,
-                          priority=GLib.PRIORITY_DEFAULT)
+            idle(lambda: (setattr(self, 'lte_busy', False), then(res)) and False)
         threading.Thread(target=work, daemon=True).start()
 
     def lte_run(self, busy, *args, stdin=None):

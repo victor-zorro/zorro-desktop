@@ -8,7 +8,7 @@ from .base import APPS, HOME, load_conf, osd, run, spawn, update_conf, write_ato
 from .fxshim import Snow, zorro_fx
 from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS
 from .power import load_orb, load_script
-from .ui import Pages, heading, note, radios
+from .ui import Pages, heading, idle, note, radios
 from .windows import TITLE_SIZES, apply_windows, win_conf
 import gi
 gi.require_version('Gtk', '3.0')
@@ -404,12 +404,12 @@ class DesktopPages:
                 try:
                     apply_windows()
                 except Exception as e:      # noqa: BLE001 - shown to the user
-                    GLib.idle_add(self.win_msg.set_text, f'Failed: {e}')
+                    idle(self.win_msg.set_text, f'Failed: {e}')
                 if not self.win_again:
                     break
                 self.win_again = False
             self.win_busy = False
-            GLib.idle_add(self.win_msg.set_text, 'Applied' if shutil.which('picom') or
+            idle(self.win_msg.set_text, 'Applied' if shutil.which('picom') or
                           not self.win_c['compositor'] else
                           'Title bars applied; transparency needs: sudo apt install picom')
         threading.Thread(target=work, daemon=True).start()

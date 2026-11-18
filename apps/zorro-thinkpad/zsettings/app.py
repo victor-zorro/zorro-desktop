@@ -6,6 +6,7 @@ from .keyd import style_osd
 from .pages_desktop import DesktopPages
 from .pages_look import LookPages
 from .pages_mobile import MobilePages
+from .pages_network import NetworkPages
 from .pages_thinkpad import ThinkpadPages
 from .ui import Group
 import gi
@@ -13,9 +14,10 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
 
-# ---- the app window: top tabs: Theme, Desktop, Login screen, ThinkPad, Hardware, Power, Mobile ---
+# ---- the app window: top tabs: Theme, Desktop, Login screen, Hardware, Power, Network ---
 
-class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, Gtk.ApplicationWindow):
+class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages,
+          Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
         self.timers = []
@@ -29,15 +31,18 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, Gtk.ApplicationWi
         style_osd(self.get_screen())
         self.groups = {}
 
-        tp = Group()
-        tp.section('keys', 'Keys', self.keys_page())
-        tp.section('lights', 'Lights', self.lights_page())
-        hw = Group()
+        hw = Group()                    # devices, and the ThinkPad's own keys and lights
         hw.section('hw', 'Hardware', self.hw_page())
+        hw.section('keys', 'ThinkPad', self.keys_page())
+        hw.section('lights', None, self.lights_page())
         power = Group()
         power.section('power', 'Power', self.power_page())
-        mobile = Group()
-        mobile.section('lte', 'Mobile (LTE)', self.mobile_page())
+        net = Group()                   # Wi-Fi, Ethernet, mobile data, NetBird
+        wifi, eth, nb = self.network_pages()
+        net.section('wifi', 'Wi-Fi', wifi)
+        net.section('eth', 'Ethernet', eth)
+        net.section('lte', 'Mobile (LTE)', self.mobile_page())
+        net.section('nb', 'NetBird', nb)
         desk = Group()
         desk.section('wall', 'Wallpaper', self.wall_page())
         desk.section('dial', 'Launcher', self.dial_page())
@@ -51,9 +56,8 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, Gtk.ApplicationWi
         theme = Group()
         theme.section('theme', 'Theme', self.theme_page())
         for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),
-                               ('login', 'Login screen', login), ('thinkpad', 'ThinkPad', tp),
-                               ('hardware', 'Hardware', hw), ('power', 'Power', power),
-                               ('mobile', 'Mobile', mobile)):
+                               ('login', 'Login screen', login), ('hardware', 'Hardware', hw),
+                               ('power', 'Power', power), ('network', 'Network', net)):
             stack.add_titled(g.widget(), name, title)
             self.groups[name] = g
             g.select(select)

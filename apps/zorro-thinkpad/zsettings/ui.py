@@ -26,6 +26,12 @@ def heading(text, page=None):
     lb.zpage = page
     return lb
 
+def idle(fn, *args):
+    """run fn(*args) on the main loop soon. Normal priority: at idle priority the app's own
+    particle animation could keep the loop busy and the result would never show"""
+    return GLib.idle_add(fn, *args, priority=GLib.PRIORITY_DEFAULT)
+
+
 def note(text=''):
     lb = Gtk.Label(label=text, xalign=0, wrap=True)
     lb.get_style_context().add_class('dim-label')
@@ -93,12 +99,14 @@ class Group:
         self.ids = {}
 
     def section(self, name, title, pages):
-        head = Gtk.ListBoxRow(selectable=False, activatable=False)
-        lb = Gtk.Label(xalign=0, margin_start=12, margin_top=12, margin_bottom=2)
-        lb.set_markup(f'<small><b>{GLib.markup_escape_text(title.upper())}</b></small>')
-        lb.get_style_context().add_class('dim-label')
-        head.add(lb)
-        self.side.add(head)
+        """title None: no heading of its own, the sub-pages follow the section above"""
+        if title:
+            head = Gtk.ListBoxRow(selectable=False, activatable=False)
+            lb = Gtk.Label(xalign=0, margin_start=12, margin_top=12, margin_bottom=2)
+            lb.set_markup(f'<small><b>{GLib.markup_escape_text(title.upper())}</b></small>')
+            lb.get_style_context().add_class('dim-label')
+            head.add(lb)
+            self.side.add(head)
         self.tops.add_named(pages.top, name)
         self.bottoms.add_named(pages.bottom, name)
         for i, (sub, w) in enumerate(pages.parts()):
