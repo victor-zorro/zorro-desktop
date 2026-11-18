@@ -17,6 +17,53 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
 
+def bt_session(mac, timeout=40):
+    """pair, trust and connect in one bluetoothctl session with a pairing agent (one-shot
+    commands have no agent, and the adapter must be pairable, else BlueZ refuses quietly).
+    Returns ('connected' | 'paired' | 'failed', output)."""
+    p = subprocess.Popen(['bluetoothctl'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True, bufsize=1)
+    out = []
+    import select
+
+    def send(cmd):
+        p.stdin.write(cmd + '\n')
+        p.stdin.flush()
+
+    def wait_for(words, secs):
+        end = time.time() + secs
+        while time.time() < end:
+            r, _, _ = select.select([p.stdout], [], [], 0.5)
+            if r:
+                line = p.stdout.readline()
+                if not line:
+                    break
+                out.append(line)
+                for w in words:
+                    if w in line:
+                        return w
+        return None
+    state = 'failed'
+    try:
+        for cmd in ('agent NoInputNoOutput', 'default-agent', 'pairable on'):
+            send(cmd)
+            time.sleep(0.3)
+        send(f'pair {mac}')
+        r = wait_for(['Pairing successful', 'AlreadyExists', 'Failed to pair', 'not available'], 25)
+        if r in ('Pairing successful', 'AlreadyExists'):
+            state = 'paired'
+            send(f'trust {mac}')
+            time.sleep(0.5)
+            send(f'connect {mac}')
+            if wait_for(['Connection successful', 'Failed to connect'], 15) == 'Connection successful':
+                state = 'connected'
+        send('quit')
+        p.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        p.kill()
+    return state, ''.join(out)
+
+
 class ThinkpadPages:
     """ThinkPad tab (keys, lights), Hardware tab, Power tab (a mixin of the app window)"""
 
@@ -442,14 +489,19 @@ class ThinkpadPages:
 
     def bt_pair(self, mac):
         def fn():
-            out = run('bluetoothctl', '--timeout', '25', 'pair', mac, timeout=35)
-            if 'Pairing successful' not in out and 'AlreadyExists' not in out:
-                return 'Pairing failed: ' + (out.strip().splitlines() or ['no answer'])[-1]
-            run('bluetoothctl', 'trust', mac)
-            out = run('bluetoothctl', '--timeout', '15', 'connect', mac, timeout=25)
+            ok, log = bt_session(mac)
             self.bt_found = [d for d in self.bt_found if d[0] != mac]
-            return 'Paired and connected' if 'successful' in out else 'Paired (connect failed: try Connect)'
-        self.hw_do(f'Pairing with {mac}… confirm on the device if it asks', fn)
+            if ok == 'connected':
+                return 'Paired and connected'
+            if ok == 'paired':
+                if 'profile-unavailable' in log or 'NotAvailable' in log:
+                    return ('Paired, but no audio connection: Bluetooth audio is not installed. '
+                            'Run  sudo apt install libspa-0.2-bluetooth  then Connect.')
+                return 'Paired; connecting failed: switch the device on and click Connect'
+            last = [ln for ln in log.splitlines() if 'Failed' in ln or 'not available' in ln]
+            return 'Pairing failed: ' + (last[-1].strip() if last else
+                                         'no answer. Put the device in pairing mode and try again.')
+        self.hw_do(f'Pairing with {mac}… (the device must be in pairing mode)', fn)
 
     # -- lights
     def lights_page(self):
