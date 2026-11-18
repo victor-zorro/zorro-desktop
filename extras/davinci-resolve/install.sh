@@ -19,6 +19,13 @@ apt-get install -y --no-install-recommends unzip libfuse2t64 libapr1t64 libaprut
   libglu1-mesa libxcb-cursor0 libxcb-composite0 libxcb-damage0 libxcb-xinerama0 \
   libxcb-xinput0 ocl-icd-libopencl1 rocm-opencl-icd clinfo ffmpeg
 
+# an existing Resolve (the free one when Studio comes, or an older version) goes first;
+# projects, the database and preferences live in the home folder and stay
+if [[ -x /opt/resolve/installer ]]; then
+  echo "==> removing the installed DaVinci Resolve first"
+  /opt/resolve/installer -u -y || true
+fi
+
 # on disk, not in /tmp: /tmp is in RAM here (tmpfs) and the 4.5 GB installer unpacks twice
 work=$(mktemp -d -p /var/tmp resolve.XXXXXX)
 trap 'rm -rf "$work"' EXIT
