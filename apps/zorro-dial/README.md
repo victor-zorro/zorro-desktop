@@ -7,6 +7,9 @@ The app launcher: a dial around a clock, in the Chromatic sea look.
 - **Three slices**, each an app category (by the .desktop `Categories`): Work, Media, System
   by default; names, categories and slots per ring in `~/.config/zorro-dial/config.json`
   (Zorro app → Desktop → Launcher).
+- **Drag to rearrange**: drag an app to another place in its slice, or onto another slice.
+  The order is saved (`order` and `assign` in the config); apps you never moved follow
+  after, by usage. Zorro app → Launcher → *Reset arrangement* goes back to usage only.
 - Type to search all apps, Enter starts the first match, Esc or a click outside closes,
   opening it again closes it.
 - Opens with **Super+Space**, and with a **tap of Super** via `xcape` (Super with other keys

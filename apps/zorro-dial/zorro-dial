@@ -45,6 +45,7 @@ DEFAULTS = {
     ],
     'ring_slots': [3, 4, 6],        # at most this many apps per slice on each ring
     'anchor': 'orb',                # orb: fans out from the info circle's clock; centre
+    'order': {},                    # slice name -> app ids in the order you dragged them
     'assign': {                     # app (.desktop name) -> slice name, beats the categories
         'mqttx.desktop': 'Tools', 'kitty.desktop': 'Tools', 'winbox.desktop': 'Tools',
         'localsend_app.desktop': 'Tools', 'org.localsend.localsend_app.desktop': 'Tools',
@@ -67,6 +68,20 @@ def load_conf():
     except (OSError, ValueError):
         pass
     return c
+
+
+def save_arrangement(order, assign):
+    """write the dragged order (and slice moves) into the config, keeping everything else"""
+    try:
+        user = json.loads(CONF.read_text())
+    except (OSError, ValueError):
+        user = {}
+    user['order'] = order
+    user['assign'] = {**user.get('assign', {}), **assign}
+    CONF.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONF.with_suffix('.tmp')
+    tmp.write_text(json.dumps(user, indent=2))
+    tmp.replace(CONF)
 
 
 def load_usage():
@@ -156,7 +171,9 @@ class Dial(Gtk.Window):
         self.all = apps()
         self.filter = ''
         self.hover = None
-        self.slots = []                 # (x, y, r, app) placed this frame
+        self.slots = []                 # (x, y, r, app, slice, position) placed this frame
+        self.press = None               # (app, x, y) while the mouse button is down on an app
+        self.drag = None                # (app, x, y) while an app is being dragged
         self.theme = Gtk.IconTheme.get_default()
         self.icons = {}
         disp = Gdk.Display.get_default()
@@ -179,7 +196,8 @@ class Dial(Gtk.Window):
         self.resize(g.width, g.height)
         self.connect('draw', self.paint_back)     # 1. the screen behind, dimmed
         self.area = Gtk.DrawingArea()
-        self.area.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_PRESS_MASK)
+        self.area.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_PRESS_MASK
+                             | Gdk.EventMask.BUTTON_RELEASE_MASK)
         if zorro_fx:                    # 2. particles from the overlay look, around the dial
             self.snow = zorro_fx.Snow(self.area, radius=0, profile='overlay', fps=20, max_parts=900)
             self.snow.paint_edge = lambda *a: None
@@ -187,6 +205,7 @@ class Dial(Gtk.Window):
         self.area.connect('draw', self.on_draw)   # 3. the dial
         self.area.connect('motion-notify-event', self.on_motion)
         self.area.connect('button-press-event', self.on_click)
+        self.area.connect('button-release-event', self.on_release)
         self.add(self.area)
         self.connect('key-press-event', self.on_key)
         self.layout_apps()
@@ -225,8 +244,15 @@ class Dial(Gtk.Window):
                 idx = next((i for i, s in enumerate(slices)
                             if any(c in s['categories'] for c in a['cats'])), len(slices) - 1)
             groups[idx].append(a)
-        self.groups = [sorted(g, key=lambda a: (-score(self.usage, a['id']), a['name'].lower()))
-                       for g in groups]
+        # your dragged order first, then the rest by usage (most used inward)
+        self.groups = []
+        for s, g in zip(slices, groups):
+            pinned = self.conf.get('order', {}).get(s['name'], [])
+            byid = {a['id']: a for a in g}
+            first = [byid[i] for i in pinned if i in byid]
+            rest = sorted((a for a in g if a['id'] not in pinned),
+                          key=lambda a: (-score(self.usage, a['id']), a['name'].lower()))
+            self.groups.append(first + rest)
 
     def matches(self):
         f = self.filter.lower()
@@ -345,7 +371,18 @@ class Dial(Gtk.Window):
                                                        time.strftime('%A %-d %B'))
         self.text(cr, label[:22], cx, cy + 24 * k, max(8, 10 * k), bold=False, alpha=0.9, split=1)
         am = math.radians((a0 + a1) / 2)
-        self.text(cr, 'type to search · Enter starts · Esc closes',
+        if self.drag:
+            a, x, y = self.drag
+            pb = self.icon(a, 44)
+            cr.new_path()
+            cr.arc(x, y, 40, 0, 2 * math.pi)
+            cr.set_source_rgba(*CYAN, 0.12)
+            cr.fill()
+            self.chroma_circle(cr, x, y, 40)
+            if pb:
+                Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
+                cr.paint()
+        self.text(cr, 'type to search · drag to rearrange · Enter starts · Esc closes',
                   cx + math.cos(am) * (outer + 70), cy + math.sin(am) * (outer + 70), 9,
                   bold=False, alpha=0.5, split=0)
         return False
@@ -377,13 +414,15 @@ class Dial(Gtk.Window):
             self.text(cr, s['name'].upper(), cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab,
                       9, split=1.4)
             group = list(self.groups[i])
+            pos = 0
             for k, (ri, ro) in enumerate(rings):
                 size = (44, 36, 30)[k]
                 rm = (ri + ro) / 2
                 cnt = min(self.conf['ring_slots'][k], self.fits(rm, span, size)) \
                     if self.conf.get('anchor') != 'orb' else self.fits(rm, span, size)
                 row, group = group[:cnt], group[cnt:]
-                self.place(cr, cx, cy, row, rm, start, span, size)
+                self.place(cr, cx, cy, row, rm, start, span, size, where=(i, pos))
+                pos += len(row)
 
     def draw_search(self, cr, cx, cy, rings, a0, a1):
         found = self.matches()
@@ -395,11 +434,19 @@ class Dial(Gtk.Window):
             if row:
                 self.place(cr, cx, cy, row, rm, a0, a1 - a0, size, full=cnt)
 
-    def place(self, cr, cx, cy, row, rm, start, span, size, full=None):
+    def place(self, cr, cx, cy, row, rm, start, span, size, full=None, where=None):
         cnt = full or len(row)
         for j, a in enumerate(row):
             am = math.radians(start + span * ((j + 0.5) / cnt if full else (j + 1) / (len(row) + 1)))
             x, y = cx + math.cos(am) * rm, cy + math.sin(am) * rm
+            self.slots.append((x, y, size * 0.75, a) + ((where[0], where[1] + j) if where else (None, None)))
+            if self.drag and self.drag[0] is a:              # its place, while it is dragged
+                cr.new_path()
+                cr.arc(x, y, size * 0.6, 0, 2 * math.pi)
+                cr.set_source_rgba(1, 1, 1, 0.12)
+                cr.set_line_width(1)
+                cr.stroke()
+                continue
             if self.hover is a:
                 cr.new_path()
                 cr.arc(x, y, size * 0.9, 0, 2 * math.pi)
@@ -410,22 +457,79 @@ class Dial(Gtk.Window):
             if pb:
                 Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
                 cr.paint()
-            self.slots.append((x, y, size * 0.75, a))
 
     # -- input
-    def hit(self, x, y):
-        return next((a for sx, sy, r, a in self.slots if (x - sx) ** 2 + (y - sy) ** 2 <= r * r), None)
+    def hit(self, x, y, slot=False):
+        s = next((s for s in self.slots if (x - s[0]) ** 2 + (y - s[1]) ** 2 <= s[2] * s[2]), None)
+        return s if slot else (s[3] if s else None)
+
+    def slice_at(self, x, y):
+        """index of the slice under (x, y), or None outside the fan"""
+        cx, cy, hub, a0, a1, rings = self.fan()
+        dx, dy = x - cx, y - cy
+        if not hub ** 2 <= dx * dx + dy * dy <= (rings[-1][1] + 30) ** 2:
+            return None
+        rel = (math.degrees(math.atan2(dy, dx)) - a0) % 360
+        n = len(self.conf['slices'][:6])
+        return int(rel / ((a1 - a0) / n)) if rel <= a1 - a0 else None
 
     def on_motion(self, _w, ev):
+        if self.press and not self.drag and not self.filter:
+            a, px, py = self.press
+            if (ev.x - px) ** 2 + (ev.y - py) ** 2 > 12 ** 2:
+                self.drag = (a, ev.x, ev.y)
+        if self.drag:
+            self.drag = (self.drag[0], ev.x, ev.y)
+            target = self.hit(ev.x, ev.y)
+            self.hover = target if target is not self.drag[0] else None
+            self.area.queue_draw()
+            return
         h = self.hit(ev.x, ev.y)
         if h is not self.hover:
             self.hover = h
             self.area.queue_draw()
 
+    def on_release(self, _w, ev):
+        press, drag = self.press, self.drag
+        self.press = self.drag = None
+        if ev.button != 1 or not press:
+            return
+        if not drag:                        # a click: start the app
+            if self.hit(ev.x, ev.y) is press[0]:
+                self.launch(press[0])
+            return
+        self.drop(drag[0], ev.x, ev.y)
+        self.area.queue_draw()
+
+    def drop(self, a, x, y):
+        """put the dragged app before the app it was dropped on, or at the end of the slice"""
+        slot = self.hit(x, y, slot=True)
+        if slot and slot[4] is not None:
+            gi, pos = slot[4], slot[5]
+        else:
+            gi = self.slice_at(x, y)
+            if gi is None:
+                return                      # dropped outside: nothing changes
+            pos = len(self.groups[gi])
+        src = next(i for i, g in enumerate(self.groups) if a in g)
+        old = self.groups[src].index(a)
+        self.groups[src].remove(a)
+        if src == gi and old < pos:
+            pos -= 1
+        self.groups[gi].insert(pos, a)
+        names = [s['name'] for s in self.conf['slices'][:6]]
+        order = dict(self.conf.get('order', {}))
+        for i in {src, gi}:
+            order[names[i]] = [b['id'] for b in self.groups[i]]
+        assign = {a['id']: names[gi]} if gi != src else {}
+        self.conf['order'] = order
+        self.conf['assign'].update(assign)
+        save_arrangement(order, assign)
+
     def on_click(self, _w, ev):
         a = self.hit(ev.x, ev.y)
         if a and ev.button == 1:
-            self.launch(a)
+            self.press = (a, ev.x, ev.y)    # start on release; moving it drags instead
         elif not a:
             cx, cy, hub, a0, a1, rings = self.fan()
             dx, dy = ev.x - cx, ev.y - cy

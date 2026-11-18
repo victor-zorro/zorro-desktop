@@ -424,7 +424,9 @@ class DesktopPages:
             return box
         c = dial.load_conf()
 
-        def save():
+        def save(order=None):
+            # the dial writes the dragged order itself: keep what it wrote meanwhile
+            c['order'] = dial.load_conf().get('order', {}) if order is None else order
             write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
         box.add(heading('Where the dial opens', 'Place'))
@@ -495,6 +497,13 @@ class DesktopPages:
         forget.connect('clicked', lambda b: (dial.USAGE.unlink(missing_ok=True),
                                              self.dial_msg.set_text('Usage forgotten')))
         box.add(forget)
+        reset = Gtk.Button(label='Reset arrangement (back to most used first)',
+                           halign=Gtk.Align.START)
+        reset.connect('clicked', lambda b: (save(order={}),
+                                            self.dial_msg.set_text('Arrangement reset')))
+        box.add(reset)
+        box.add(note('Drag an app in the dial to move it: within its slice, or onto another '
+                     'slice. Apps you never moved follow after, most used inward.'))
         box.add(note('Open the dial with a tap on Super (xcape) or Super+Space; '
                      'rofi stays on Super+Shift+Space.'))
         self.dial_msg = note()
