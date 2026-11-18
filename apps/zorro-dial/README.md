@@ -7,9 +7,16 @@ The app launcher: a dial around a clock, in the Chromatic sea look.
 - **Three slices**, each an app category (by the .desktop `Categories`): Work, Media, System
   by default; names, categories and slots per ring in `~/.config/zorro-dial/config.json`
   (Zorro app → Desktop → Launcher).
-- **The hub is the info circle**: its four hidden zones (battery, network, Drive, messages;
-  chosen in Zorro app → Info circle) work in the dial's centre too: hover a quarter to see
-  it, click to open what the info circle opens.
+- **The hub has six parts** (`dialmodes.py`): Apps · Music · Notes · Messages · System ·
+  Files. Hover a part: its preview in the centre; click: it stays and the fan shows it
+  (click it again or Esc: back to Apps; Super always opens on Apps). The centre of the hub
+  runs the kept part's main action (clear all messages, new note, open Nemo).
+  - Messages: dunst's history; click opens it again, right-click dismisses.
+  - System: battery / Wi-Fi / CPU / disk, switches (Wi-Fi, Bluetooth, Mobile, Airplane, Do not
+    disturb), Lock, Sleep, and Log out / Restart / Power off with a second click to confirm.
+  - Files: places, recent files, bookmarked shares (smb://…), USB, network.
+  - Notes: the Obsidian vault (pinned + recent notes); Music: the SoundCloud player (next).
+- **One gear for all settings apps** in the last slice; Zorro itself stays visible too.
 - **Drag to rearrange**: drag an app to another place in its slice, or onto another slice.
   The order is saved (`order` and `assign` in the config); apps you never moved follow
   after, by usage. Zorro app → Launcher → *Reset arrangement* goes back to usage only.
