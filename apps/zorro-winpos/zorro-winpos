@@ -7,7 +7,9 @@ when it opens again. Event driven: it waits on X (window list changes, moves, re
 state changes); nothing is polled. Started from Openbox autostart.
 
   ~/.local/state/zorro-winpos/places.json   what it remembers
-  ~/.config/zorro-winpos/config.json        {"ignore": ["SomeClass", ...]}
+  ~/.config/zorro-winpos/config.json        {"ignore": ["SomeClass", ...],
+                                             "open_on_current_desktop": true}
+New windows open on the desktop you are on (also Firefox, which would go back to its old one).
 """
 import json
 import os
@@ -24,6 +26,7 @@ except ImportError:
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'zorro-winpos'
 PLACES = STATE / 'places.json'
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-winpos' / 'config.json'
+FRESH = 3.0                          # seconds a new window may not wander to another desktop
 SAVE_AFTER = 1.5                     # seconds of quiet before writing the file
 
 
@@ -35,16 +38,20 @@ class WinPos:
         self.A = {n: a(n) for n in (
             '_NET_CLIENT_LIST', '_NET_WM_STATE', '_NET_WM_STATE_MAXIMIZED_VERT',
             '_NET_WM_STATE_MAXIMIZED_HORZ', '_NET_WM_STATE_FULLSCREEN', '_NET_WM_WINDOW_TYPE',
-            '_NET_WM_WINDOW_TYPE_NORMAL', '_NET_MOVERESIZE_WINDOW')}
+            '_NET_WM_WINDOW_TYPE_NORMAL', '_NET_MOVERESIZE_WINDOW', '_NET_CURRENT_DESKTOP',
+            '_NET_WM_DESKTOP')}
         try:
-            self.ignore = set(json.loads(CONF.read_text()).get('ignore', []))
+            conf = json.loads(CONF.read_text())
         except (OSError, ValueError):
-            self.ignore = set()
+            conf = {}
+        self.ignore = set(conf.get('ignore', []))
+        self.here = conf.get('open_on_current_desktop', True)
         try:
             self.places = json.loads(PLACES.read_text())
         except (OSError, ValueError):
             self.places = {}
         self.known = {}                  # window id -> app key, for the open windows we follow
+        self.fresh = {}                  # new window id -> when it appeared (desktop grace time)
         self.dirty_at = 0.0
         self.root.change_attributes(event_mask=X.PropertyChangeMask)
         for wid in self.clients():       # windows already open: follow, don't move them
@@ -97,12 +104,27 @@ class WinPos:
             w.change_attributes(event_mask=X.StructureNotifyMask | X.PropertyChangeMask)
             first = k not in self.known.values()
             self.known[wid] = k
+            if restore:
+                self.fresh[wid] = time.time()
+                self.to_current_desktop(w)
             if restore and first and k in self.places:
                 self.restore(w, self.places[k])
             else:
                 self.record(wid)
         except error.XError:
             self.known.pop(wid, None)
+
+    def to_current_desktop(self, w):
+        """a new window opens on the desktop you are on (Firefox restores to the desktop it
+        was last on, which pulled you back to desktop 1)"""
+        if not self.here:
+            return
+        cur = self.root.get_full_property(self.A['_NET_CURRENT_DESKTOP'], Xatom.CARDINAL)
+        on = w.get_full_property(self.A['_NET_WM_DESKTOP'], Xatom.CARDINAL)
+        if not cur or not on or on.value[0] == 0xFFFFFFFF or on.value[0] == cur.value[0]:
+            return                       # unknown, on all desktops, or already here
+        self.message(w, self.A['_NET_WM_DESKTOP'], [cur.value[0], 2])
+        self.d.flush()
 
     def restore(self, w, p):
         sw, sh = self.root.get_geometry().width, self.root.get_geometry().height
@@ -156,12 +178,19 @@ class WinPos:
                     self.follow(wid)
                 for wid in set(self.known) - now:
                     self.known.pop(wid, None)
+                for wid in set(self.fresh) - now:
+                    self.fresh.pop(wid, None)
+        elif ev.type == X.PropertyNotify and ev.atom == self.A['_NET_WM_DESKTOP']:
+            t = self.fresh.get(ev.window.id)
+            if t and time.time() - t < FRESH:      # the app moved its new window away: bring it back
+                self.to_current_desktop(ev.window)
         elif ev.type == X.PropertyNotify and ev.atom == self.A['_NET_WM_STATE']:
             self.record(ev.window.id)
         elif ev.type == X.ConfigureNotify:
             self.record(ev.window.id)
         elif ev.type == X.DestroyNotify:
             self.known.pop(ev.window.id, None)
+            self.fresh.pop(ev.window.id, None)
 
     def run(self):
         fd = self.d.fileno()
