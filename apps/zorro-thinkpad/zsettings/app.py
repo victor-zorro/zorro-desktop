@@ -5,6 +5,7 @@ from .fxshim import Snow, zorro_fx
 from .keyd import style_osd
 from .pages_desktop import DesktopPages
 from .pages_look import LookPages
+from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
 from .pages_network import NetworkPages
 from .pages_thinkpad import ThinkpadPages
@@ -14,9 +15,9 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
 
-# ---- the app window: top tabs: Theme, Desktop, Login screen, Hardware, Power, Network ---
+# ---- the app window: top tabs: Theme, Desktop, Login screen, Hardware, Audio, Power, Network ---
 
-class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages,
+class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
@@ -35,6 +36,12 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages,
         hw.section('hw', 'Hardware', self.hw_page())
         hw.section('keys', 'ThinkPad', self.keys_page())
         hw.section('lights', None, self.lights_page())
+        snd = Group()                   # outputs, inputs, per app, several at once
+        a_out, a_in, a_play, a_tog = self.audio_pages()
+        snd.section('aout', 'Audio', a_out)
+        snd.section('ain', None, a_in)
+        snd.section('aplay', None, a_play)
+        snd.section('atog', None, a_tog)
         power = Group()
         power.section('power', 'Power', self.power_page())
         net = Group()                   # Wi-Fi, Ethernet, mobile data, NetBird
@@ -57,7 +64,8 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages,
         theme.section('theme', 'Theme', self.theme_page())
         for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),
                                ('login', 'Login screen', login), ('hardware', 'Hardware', hw),
-                               ('power', 'Power', power), ('network', 'Network', net)):
+                               ('audio', 'Audio', snd), ('power', 'Power', power),
+                               ('network', 'Network', net)):
             stack.add_titled(g.widget(), name, title)
             self.groups[name] = g
             g.select(select)

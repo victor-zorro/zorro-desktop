@@ -45,26 +45,6 @@ def audio_state(which):
     return (round(float(m.group(1)) * 100) if m else None), '[MUTED]' in out, name
 
 
-def audio_devices(kind):
-    """all outputs (kind 'sinks') or inputs ('sources', without monitors):
-    [(name, description, volume %, muted, bus, is default)]"""
-    import json
-    try:
-        items = json.loads(run('pactl', '-f', 'json', 'list', kind) or '[]')
-    except ValueError:
-        return []
-    default = run('pactl', 'get-default-sink' if kind == 'sinks' else 'get-default-source').strip()
-    out = []
-    for s in items:
-        if s.get('name', '').endswith('.monitor'):
-            continue
-        vols = list((s.get('volume') or {}).values())
-        vol = vols[0].get('value_percent', '?') if vols else '?'
-        out.append((s['name'], s.get('description') or s['name'], vol, s.get('mute', False),
-                    (s.get('properties') or {}).get('device.bus', ''), s['name'] == default))
-    return out
-
-
 def bt_state():
     show = run('bluetoothctl', 'show')
     if 'Controller' not in show:
@@ -112,29 +92,7 @@ def hardware_rows(ui):
                      [('Unmute' if muted else 'Mute', ui.mic_toggle),
                       ('Test: record 3 s', ui.mic_test)]))
 
-    outs = audio_devices('sinks')
-    if not outs:
-        rows.append(('audio-speakers-symbolic', 'Sound output', 'warn', 'No sound output found', []))
-    else:
-        cur = next((o for o in outs if o[5]), outs[0])
-        rows.append(('audio-speakers-symbolic', 'Sound output', 'warn' if cur[3] else 'ok',
-                     f'Now: {cur[1]} · {"MUTED" if cur[3] else f"volume {cur[2]}"}',
-                     [('Test: left / right', ui.speaker_test)]))
-        for name, desc, vol, muted, bus, default in outs:
-            kind = {'bluetooth': 'Bluetooth', 'usb': 'USB', 'pci': 'built in'}.get(bus, bus)
-            rows.append((None, f'    {desc}', 'ok' if default else 'off',
-                         f'    {kind} · ' + ('in use' if default else 'not in use')
-                         + f' · {"muted" if muted else vol}',
-                         [] if default else [('Use', lambda n=name: ui.audio_use('sink', n))]))
-    ins = audio_devices('sources')
-    if len(ins) > 1:
-        rows.append(('audio-input-microphone-symbolic', 'Sound input', 'ok',
-                     'Now: ' + next((i[1] for i in ins if i[5]), ins[0][1]), []))
-        for name, desc, vol, muted, bus, default in ins:
-            rows.append((None, f'    {desc}', 'ok' if default else 'off',
-                         '    ' + ('in use' if default else 'not in use')
-                         + f' · {"muted" if muted else vol}',
-                         [] if default else [('Use', lambda n=name: ui.audio_use('source', n))]))
+    # sound outputs and inputs: the Audio tab (pages_audio.py)
 
     bt = bt_state()
     usb_bt = next((l.split(' ', 6)[-1] for l in lsusb.splitlines() if 'Bluetooth' in l), 'adapter')

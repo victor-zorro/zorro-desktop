@@ -61,6 +61,8 @@ a tiny `zorro-thinkpad key NAME` that sends one message over a unix socket.
 | `zsettings/awake.py` | no screen saver / lock during calls (camera or mic in use) and when apps ask (org.freedesktop.ScreenSaver) |
 | `zsettings/power.py`, `hardware.py` | TLP + battery; hardware check rows |
 | `zsettings/printers.py` | printers: installed list, network search (Bonjour + SNMP), add by address, driver choice (driverless, else a matching open-source driver) |
+| `zsettings/audio.py`, `pages_audio.py` | Audio tab: outputs/inputs (use, volume, mute), per-app output, 'Together' (several outputs at once, restored at login by keyd) |
+| `zsettings/pages_network.py` | Network tab: Wi-Fi, Ethernet (libnm), NetBird |
 | `zsettings/pages_mobile.py` | Mobile tab: modem status, SIM PIN, mobile data (zorro-lte through pkexec; root-owned copy in /usr/local/lib/zorro-lte) |
 | `zorro-lte` | the XMM7360 LTE modem: wake + FCC unlock (xmm7360/ RPC), reset, PIN, up/down, state (JSON) |
 | `zsettings/windows.py`, `look.py` | window theme, picom, kitty, GTK css; login look + presets |

@@ -301,6 +301,10 @@ def cmd_keyd():
     except GLib.Error as e:
         print(f'zorro-thinkpad keyd: no resume signal: {e.message}', file=sys.stderr)
 
+    # the 'Together' sound output, if set up in the Audio tab (PipeWire needs a moment)
+    from .audio import together_restore
+    threading.Timer(8, together_restore).start()
+
     # no screen saver or lock during calls and videos (zsettings/awake.py)
     try:
         from .awake import Awake
