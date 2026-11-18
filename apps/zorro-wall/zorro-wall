@@ -109,13 +109,23 @@ class Wall(Gtk.Window):
         self.add(self.view)
         self.add_events(Gdk.EventMask.VISIBILITY_NOTIFY_MASK)
         self.connect('visibility-notify-event', self.on_visibility)
-        self.connect('realize', lambda w: w.get_window().lower())
+        # stay under the info circle (zorro-orb): Openbox puts a window that maps late, or
+        # that is clicked, on top of its layer, which would hide the circle and its zones
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
+        for sig in ('realize', 'map-event', 'focus-in-event', 'button-press-event'):
+            self.connect(sig, self.sink)
         scr = self.get_screen()
         scr.connect('monitors-changed', lambda s: self.fit())
         scr.connect('size-changed', lambda s: self.fit())
         self.fit()
         self.show_all()
         GLib.timeout_add_seconds(5, self.check)
+
+    def sink(self, *_a):
+        gw = self.get_window()
+        if gw:
+            gw.lower()
+        return False
 
     def fit(self):
         disp = Gdk.Display.get_default()

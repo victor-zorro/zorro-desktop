@@ -272,6 +272,8 @@ def main():
             self.stick()
             self.set_keep_below(True)
             self.set_app_paintable(True)
+            # on top of the living wallpaper (both sit in the desktop layer)
+            self.connect('map-event', lambda w, e: w.get_window().raise_() or False)
             scr = self.get_screen()
             # with a compositor (picom) the window is truly see-through: the wallpaper shows
             # in the spill cloud; without one the window is cut to the circle itself
