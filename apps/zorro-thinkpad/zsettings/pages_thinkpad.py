@@ -9,6 +9,7 @@ from .base import KBD_LED, RUNTIME, STAR_ACTIONS, load_conf, run, spawn, sysread
 from .hardware import SOUNDS, hardware_rows
 from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
+from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
 from .ui import KEY_TABLE, Pages, heading, note, radios
 import gi
@@ -159,13 +160,16 @@ class ThinkpadPages:
     def hw_page(self):
         box = Pages()
         self.hw_lists = {}
-        for group in ('Camera & sound', 'Bluetooth', 'Network', 'Other devices'):
+        self.hw_msg = note()                # also used by the printers part, built in the loop
+        for group in ('Camera & sound', 'Bluetooth', 'Network', 'Printers', 'Other devices'):
             box.add(heading(group, group))
+            if group == 'Printers':
+                box.add(self.printers_box())
+                continue
             lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=6)
             box.add(lst)
             self.hw_lists[group] = lst
         bottom = Gtk.Box(spacing=8)
-        self.hw_msg = note()
         self.hw_msg.set_hexpand(True)
         bottom.add(self.hw_msg)
         again = Gtk.Button(label='Check again', valign=Gtk.Align.CENTER)
@@ -177,6 +181,139 @@ class ThinkpadPages:
         self.hw_refresh()
         return box
 
+    # -- printers (zsettings/printers.py)
+    def printers_box(self):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=6)
+        self.pr_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        outer.add(self.pr_list)
+        outer.add(heading('On the network'))
+        self.pr_found = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        outer.add(self.pr_found)
+        row = Gtk.Box(spacing=8, margin_top=4)
+        self.pr_search_btn = Gtk.Button(label='Search the network')
+        self.pr_search_btn.connect('clicked', lambda b: self.pr_search())
+        row.add(self.pr_search_btn)
+        self.pr_addr = Gtk.Entry(placeholder_text='or an address, e.g. 192.168.66.5',
+                                 width_chars=26)
+        self.pr_addr.connect('activate', lambda e: self.pr_by_address())
+        row.add(self.pr_addr)
+        b = Gtk.Button(label='Add')
+        b.connect('clicked', lambda b: self.pr_by_address())
+        row.add(b)
+        outer.add(row)
+        outer.add(note('Printers that announce themselves (Bonjour / AirPrint) are also added '
+                       'by themselves while they are on (cups-browsed). The driver is chosen '
+                       'for you: driverless when the printer can, else the matching open-source '
+                       'driver.'))
+        if not printers.available():
+            outer.set_sensitive(False)
+            outer.add(note('Printing is not installed: sudo apt install cups'))
+        else:
+            self.pr_refresh()
+        return outer
+
+    def pr_row(self, title, detail, acts, ok=True):
+        row = Gtk.Box(spacing=12)
+        row.add(Gtk.Image.new_from_icon_name('printer-symbolic', Gtk.IconSize.DND))
+        txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        head = Gtk.Label(xalign=0)
+        mark = '<span foreground="#5fd068">✓</span>' if ok else '<span foreground="#ffb84a">⚠</span>'
+        head.set_markup(f'{mark}  <b>{GLib.markup_escape_text(title)}</b>')
+        txt.add(head)
+        d = note(detail)
+        d.set_selectable(True)
+        d.set_can_focus(False)
+        txt.add(d)
+        row.add(txt)
+        for label, cb in acts:
+            b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
+            b.connect('clicked', lambda _b, cb=cb: cb())
+            row.add(b)
+        return row
+
+    def pr_bg(self, busy, fn, then):
+        """run fn() in a thread with a message; then(result) on the main loop"""
+        self.hw_msg.set_text(busy)
+
+        def work():
+            try:
+                res = fn()
+            except Exception as e:          # noqa: BLE001 - show it, keep the app alive
+                res = e
+            GLib.idle_add(lambda: then(res) and False, priority=GLib.PRIORITY_DEFAULT)
+        threading.Thread(target=work, daemon=True).start()
+
+    def pr_refresh(self):
+        def show(items):
+            for c in self.pr_list.get_children():
+                c.destroy()
+            if isinstance(items, Exception) or not items:
+                self.pr_list.add(note('No printer added yet.'))
+            for q in items if isinstance(items, list) else []:
+                where = re.sub(r'\?.*$', '', printers.unquote(q['uri'].split('://')[-1]))
+                acts = [('Test page', lambda n=q['name']: self.pr_bg(
+                            'Sending a test page…', lambda: printers.test_page(n),
+                            lambda m: self.hw_msg.set_text(m)))]
+                if not q['default']:
+                    acts.append(('Default', lambda n=q['name']: (printers.set_default(n),
+                                                                 self.pr_refresh())))
+                acts.append(('Remove', lambda n=q['name']: self.pr_bg(
+                    f'Removing {n}…', lambda: printers.remove(n),
+                    lambda _r: (self.hw_msg.set_text(f'{n} removed'), self.pr_refresh()))))
+                self.pr_list.add(self.pr_row(
+                    q['name'] + ('  (default)' if q['default'] else ''),
+                    f'{q["state"]} · {where}', acts, ok=q['state'] != 'disabled'))
+            self.pr_list.show_all()
+            return True
+        self.pr_bg('', printers.installed, show)
+
+    def pr_search(self):
+        self.pr_search_btn.set_sensitive(False)
+
+        def find():
+            return [(p, printers.driver_for(p)) for p in printers.discover()]
+
+        def show(found):
+            self.pr_search_btn.set_sensitive(True)
+            for c in self.pr_found.get_children():
+                c.destroy()
+            if isinstance(found, Exception):
+                self.hw_msg.set_text(f'Search failed: {found}')
+                return True
+            for p, (model, desc) in found:
+                where = re.sub(r'\?.*$', '', printers.unquote(p['uri'].split('://')[-1]))
+                acts = [('Add', lambda p=p: self.pr_add(p))] if model else []
+                self.pr_found.add(self.pr_row(p['model'] or where, f'{where}\n{desc}', acts,
+                                              ok=bool(model)))
+            if not found:
+                self.pr_found.add(note('No new printers found. Is it switched on?'))
+            self.pr_found.show_all()
+            self.hw_msg.set_text(f'{len(found)} printer(s) found' if found else '')
+            return True
+        self.pr_bg('Searching the network (about 10 s)…', find, show)
+
+    def pr_add(self, p):
+        def done(res):
+            ok, msg = res if isinstance(res, tuple) else (False, str(res))
+            self.hw_msg.set_text(msg)
+            if ok:
+                self.pr_refresh()
+                self.pr_search()
+            return True
+        self.pr_bg(f'Adding {p.get("model") or p["uri"]}…', lambda: printers.add(p), done)
+
+    def pr_by_address(self):
+        host = self.pr_addr.get_text()
+
+        def done(res):
+            p, err = res if isinstance(res, tuple) else (None, str(res))
+            if not p:
+                self.hw_msg.set_text(err)
+            else:
+                self.pr_add(p)
+            return True
+        self.pr_bg(f'Looking for a printer at {host}…', lambda: printers.probe_address(host), done)
+
     def hw_refresh(self):
         if self.hw_busy:
             return
@@ -184,7 +321,7 @@ class ThinkpadPages:
 
         def work():
             rows = hardware_rows(self)
-            GLib.idle_add(self.hw_show, rows)
+            GLib.idle_add(self.hw_show, rows, priority=GLib.PRIORITY_DEFAULT)
         threading.Thread(target=work, daemon=True).start()
 
     def hw_show(self, rows):

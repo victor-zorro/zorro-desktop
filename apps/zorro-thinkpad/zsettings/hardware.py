@@ -148,14 +148,7 @@ def hardware_rows(ui):
                      f'{modem}\n' + ('ModemManager installed' if mm else
                                      'Needs ModemManager: comes with the LTE tab (next step)'), []))
 
-    if shutil.which('lpstat'):
-        printers = [l.split()[1] for l in run('lpstat', '-p').splitlines() if l.startswith('printer ')]
-        rows.append(('printer-symbolic', 'Printer', 'ok' if printers else 'off',
-                     ('Printers: ' + ', '.join(printers)) if printers else 'No printer added yet',
-                     [('Add printer…', lambda: spawn(['xdg-open', 'http://localhost:631/admin']))]))
-    else:
-        rows.append(('printer-symbolic', 'Printer', 'warn',
-                     'Printing is not installed: sudo apt install cups (then Add printer here)', []))
+    # printers have their own page (Hardware → Printers, zsettings/printers.py)
 
     names = input_names()
     touch = next((n for n in names if 'Touch System' in n or 'Touchscreen' in n), None)
