@@ -118,7 +118,7 @@ def target(what, rest):
             sys.exit('zorro-music: set your SoundCloud name first ("user" in ' + str(CONF) + ')')
         return f'https://soundcloud.com/{c["user"]}/likes'
     if what == 'search':
-        return 'scsearch25:' + ' '.join(rest)
+        return 'ytdl://scsearch25:' + ' '.join(rest)     # mpv hands only ytdl:// and links to yt-dlp
     if what == 'fav':
         name = ' '.join(rest).lower()
         f = next((f for f in c['favourites'] if f.get('name', '').lower() == name), None)
