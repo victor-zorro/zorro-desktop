@@ -14,7 +14,9 @@ import json
 import math
 import os
 import signal
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -153,6 +155,20 @@ def orb_conf():
     return c
 
 
+def load_orb():
+    """the info circle's code (apps/zorro-orb): its zones and their information"""
+    import importlib.machinery
+    import importlib.util
+    p = Path(os.path.realpath(__file__)).parent.parent / 'zorro-orb' / 'zorro-orb'
+    try:
+        spec = importlib.util.spec_from_loader('zorro_orb', importlib.machinery.SourceFileLoader('zorro_orb', str(p)))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m
+    except (OSError, SyntaxError, ImportError):
+        return None
+
+
 def toggle_running():
     """already open: close it and stop (Super pressed again)"""
     try:
@@ -174,6 +190,13 @@ class Dial(Gtk.Window):
         self.slots = []                 # (x, y, r, app, slice, position) placed this frame
         self.press = None               # (app, x, y) while the mouse button is down on an app
         self.drag = None                # (app, x, y) while an app is being dragged
+        # the hub works like the info circle: four hidden zones (battery, network, ...)
+        self.orb = load_orb()
+        self.zones = self.orb.load_conf().get('zones', {}) if self.orb else {}
+        self.hub_zone = None            # 'tl' 'tr' 'bl' 'br' while the mouse is on one
+        self.zone_info = {}             # item -> (title, big, lines), fetched in the background
+        if self.orb:
+            threading.Thread(target=self.fetch_zones, daemon=True).start()
         self.theme = Gtk.IconTheme.get_default()
         self.icons = {}
         disp = Gdk.Display.get_default()
@@ -212,6 +235,24 @@ class Dial(Gtk.Window):
         self.show_all()
         GLib.idle_add(self.grab)
         GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True)
+
+    def fetch_zones(self):
+        for item in set(self.zones.values()):
+            fn = self.orb.ITEMS.get(item, (None, None))[1]
+            if fn:
+                try:
+                    self.zone_info[item] = fn()
+                except Exception:       # noqa: BLE001 - one broken item must not stop the dial
+                    self.zone_info[item] = (item, '?', [])
+        GLib.idle_add(self.area.queue_draw)
+
+    def hub_zone_at(self, x, y):
+        cx, cy, hub, *_ = self.fan()
+        dx, dy = x - cx, y - cy
+        if dx * dx + dy * dy > (hub - 4) ** 2:
+            return None
+        z = ('t' if dy < 0 else 'b') + ('l' if dx < 0 else 'r')
+        return z if self.zones.get(z, 'none') != 'none' else None
 
     @staticmethod
     def pointer():
@@ -366,10 +407,14 @@ class Dial(Gtk.Window):
         cr.fill()
         self.chroma_circle(cr, cx, cy, hub - 4)
         k = hub / 120
-        self.text(cr, time.strftime('%H:%M'), cx, cy - 10 * k, max(14, 26 * k), split=2)
-        label = self.hover['name'] if self.hover else (f'“{self.filter}”' if self.filter else
-                                                       time.strftime('%A %-d %B'))
-        self.text(cr, label[:22], cx, cy + 24 * k, max(8, 10 * k), bold=False, alpha=0.9, split=1)
+        item = self.zones.get(self.hub_zone) if self.hub_zone and not self.hover else None
+        if item:
+            self.draw_zone(cr, cx, cy, hub, k, item)
+        else:
+            self.text(cr, time.strftime('%H:%M'), cx, cy - 10 * k, max(14, 26 * k), split=2)
+            label = self.hover['name'] if self.hover else (f'“{self.filter}”' if self.filter else
+                                                           time.strftime('%A %-d %B'))
+            self.text(cr, label[:22], cx, cy + 24 * k, max(8, 10 * k), bold=False, alpha=0.9, split=1)
         am = math.radians((a0 + a1) / 2)
         if self.drag:
             a, x, y = self.drag
@@ -386,6 +431,28 @@ class Dial(Gtk.Window):
                   cx + math.cos(am) * (outer + 70), cy + math.sin(am) * (outer + 70), 9,
                   bold=False, alpha=0.5, split=0)
         return False
+
+    def draw_zone(self, cr, cx, cy, hub, k, item):
+        """a hub zone's information, laid out like the info circle; the zone's quarter of
+        the rim lights up"""
+        q = {'tr': -90, 'br': 0, 'bl': 90, 'tl': 180}[self.hub_zone]
+        for col, dr in ((RED, -1.2), (CYAN, 1.2)):
+            cr.new_path()
+            cr.arc(cx, cy, hub - 4 + dr, math.radians(q + 6), math.radians(q + 84))
+            cr.set_source_rgba(*col, 0.8)
+            cr.set_line_width(2)
+            cr.stroke()
+        title, big, lines = self.zone_info.get(item) or (item, '…', [])
+        parts = []
+        if title:
+            parts.append((title.upper(), max(7, 8 * k), True, 0.55, 1))
+        parts.append((big, (30 if len(big) <= 5 else 20 if len(big) <= 9 else 15) * k, True, 1.0, 2))
+        parts += [(ln[:26], max(8, 9.5 * k), False, 0.8, 1) for ln in lines[:3] if ln]
+        heights = [size * 1.7 for _, size, _, _, _ in parts]
+        y = cy - sum(heights) / 2
+        for (s, size, bold, a, split), h in zip(parts, heights):
+            self.text(cr, s, cx, y + h / 2, size, bold=bold, alpha=a, split=split)
+            y += h
 
     @staticmethod
     def fits(rm, span_deg, size):
@@ -485,8 +552,9 @@ class Dial(Gtk.Window):
             self.area.queue_draw()
             return
         h = self.hit(ev.x, ev.y)
-        if h is not self.hover:
-            self.hover = h
+        z = self.hub_zone_at(ev.x, ev.y)
+        if h is not self.hover or z != self.hub_zone:
+            self.hover, self.hub_zone = h, z
             self.area.queue_draw()
 
     def on_release(self, _w, ev):
@@ -528,8 +596,18 @@ class Dial(Gtk.Window):
 
     def on_click(self, _w, ev):
         a = self.hit(ev.x, ev.y)
+        z = self.hub_zone_at(ev.x, ev.y)
         if a and ev.button == 1:
             self.press = (a, ev.x, ev.y)    # start on release; moving it drags instead
+        elif z and ev.button == 1:          # a hub zone: open what the info circle opens
+            cmd = self.orb.CLICK.get(self.zones.get(z))
+            if cmd:
+                try:
+                    subprocess.Popen(cmd, start_new_session=True, stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except OSError:
+                    pass
+                self.close_dial()
         elif not a:
             cx, cy, hub, a0, a1, rings = self.fan()
             dx, dy = ev.x - cx, ev.y - cy
