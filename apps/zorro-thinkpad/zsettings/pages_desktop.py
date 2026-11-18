@@ -427,7 +427,9 @@ class DesktopPages:
 
         def save(order=None):
             # the dial writes the dragged order itself: keep what it wrote meanwhile
-            c['order'] = dial.load_conf().get('order', {}) if order is None else order
+            now = dial.load_conf()
+            c['order'] = now.get('order', {}) if order is None else order
+            c['notes_hide_vaults'] = now.get('notes_hide_vaults', [])     # set in Accounts → Obsidian
             write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
         box.add(heading('Where the dialer opens', 'Place'))

@@ -46,6 +46,7 @@ DEFAULTS = {
     ],
     'ring_slots': [3, 4, 6],        # at most this many apps per slice on each ring
     'anchor': 'orb',                # orb: fans out from the info circle's clock; centre
+    'notes_hide_vaults': [],        # Obsidian vaults left out of the Notes part (paths)
     'preview_size': 460,            # width of the file preview panel (pixels; height ~ 0.78x)
     'order': {},                    # slice name -> app ids in the order you dragged them
     'hide': [                       # not in the slices (typing still finds them)

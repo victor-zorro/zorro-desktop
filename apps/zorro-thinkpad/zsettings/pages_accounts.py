@@ -70,6 +70,35 @@ def open_in_google_window(url):
         spawn(['firefox', '--new-instance', '--class', 'GoogleApps', '--profile', str(GOOGLE_PROFILE), url])
 
 
+DIAL_CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' / 'config.json'
+
+
+def dial_conf():
+    try:
+        return json.loads(DIAL_CONF.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def set_dial_hidden(path, hidden):
+    """leave a vault out of the Dialer's Notes part (or bring it back); keeps the rest of its config"""
+    c = dial_conf()
+    hide = [p for p in c.get('notes_hide_vaults', []) if p != path] + ([path] if hidden else [])
+    c['notes_hide_vaults'] = hide
+    DIAL_CONF.parent.mkdir(parents=True, exist_ok=True)
+    tmp = DIAL_CONF.with_suffix('.tmp')
+    tmp.write_text(json.dumps(c, indent=2) + '\n')
+    tmp.replace(DIAL_CONF)
+
+
+def obsidian_vaults():
+    try:
+        vs = json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values()
+    except (OSError, ValueError):
+        return []
+    return sorted((v['path'] for v in vs if os.path.isdir(v.get('path', ''))), key=str.lower)
+
+
 def obsidian_state():
     cfg = HOME / '.config/obsidian/obsidian.json'
     try:
@@ -262,6 +291,11 @@ class AccountsPages:
         b.connect('clicked', lambda _b: self.ob_check())
         row.add(b)
         ob.add(row)
+        ob.add(heading('Vaults in the Dialer', 'Vaults'))
+        self.ob_vaults = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        ob.add(self.ob_vaults)
+        ob.add(note('The Dialer\'s Notes part shows the ticked vaults: each unfolds into its folders '
+                    'and notes; Recent, Tags and search cover them all. New vaults are ticked.'))
         ob.add(note('Log in inside Obsidian: Settings (gear, bottom left) → General → Account → '
                     'Log in, with your Obsidian account (obsidian.md). Then Settings → Core '
                     'plugins → Sync on → Sync → choose or create the remote vault, with your own '
@@ -296,4 +330,18 @@ class AccountsPages:
             text = (f'✓ Vault {s["vault"].replace(str(HOME), "~")} · {s["notes"]} notes · '
                     + ('Sync on' if s['sync'] else 'Sync not switched on yet'))
         self.ob_state.set_text(text)
+        self.ob_fill_vaults()
         return False
+
+    def ob_fill_vaults(self):
+        for c in self.ob_vaults.get_children():
+            c.destroy()
+        hide = set(dial_conf().get('notes_hide_vaults', []))
+        vs = obsidian_vaults()
+        if not vs:
+            self.ob_vaults.add(Gtk.Label(label='No vaults yet', xalign=0))
+        for path in vs:
+            cb = Gtk.CheckButton(label=path.replace(str(HOME), '~'), active=path not in hide)
+            cb.connect('toggled', lambda b, p=path: set_dial_hidden(p, not b.get_active()))
+            self.ob_vaults.add(cb)
+        self.ob_vaults.show_all()

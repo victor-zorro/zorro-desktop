@@ -509,22 +509,29 @@ class Notes(Part):
     key, title = 'notes', 'Notes'
     tree = True
 
-    def vault(self):
+    def vaults(self):
+        """every vault Obsidian knows except those unticked in the app (Accounts → Obsidian);
+        the one open in Obsidian first"""
         try:
-            vs = json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {})
+            vs = list(json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values())
         except (OSError, ValueError):
-            return None
-        best = next((v for v in vs.values() if v.get('open')), None) or next(iter(vs.values()), None)
-        return Path(best['path']) if best and os.path.isdir(best.get('path', '')) else None
+            vs = []
+        vs.sort(key=lambda v: (not v.get('open'), os.path.basename(v.get('path', '')).lower()))
+        try:
+            hide = json.loads((HOME / '.config/zorro-dial/config.json').read_text()).get('notes_hide_vaults', [])
+        except (OSError, ValueError):
+            hide = []
+        return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', '')) and v['path'] not in hide]
 
     def fetch(self):
-        self.root = self.vault()
-        self.notes = []                 # (mtime, path)
+        self.all = self.vaults()
+        self.root = self.all[0] if self.all else None      # new notes go here (the open vault)
+        self.notes = []                 # (mtime, path), every chosen vault
         self.text = {}                  # path -> text, for search and tags (read once per opening)
         self.pinned = []
-        if self.root:
-            for dp, dns, fns in os.walk(self.root):
-                dns[:] = [d for d in dns if not d.startswith('.')]
+        for root in self.all:
+            for dp, dns, fns in os.walk(root):
+                dns[:] = [d for d in dns if not d.startswith(('.', '_'))]
                 for f in fns:
                     if f.endswith('.md'):
                         p = os.path.join(dp, f)
@@ -532,30 +539,38 @@ class Notes(Part):
                             self.notes.append((os.path.getmtime(p), p))
                         except OSError:
                             pass
-            self.notes.sort(reverse=True)
-            for _, p in self.notes[:3000]:
-                try:
-                    with open(p, encoding='utf-8', errors='replace') as fh:
-                        self.text[p] = fh.read(200000)
-                except OSError:
-                    pass
             try:
-                bm = json.loads((self.root / '.obsidian/bookmarks.json').read_text()).get('items', [])
-                self.pinned = [str(self.root / b['path']) for b in bm
-                               if b.get('type') == 'file' and (self.root / b['path']).exists()]
+                bm = json.loads((root / '.obsidian/bookmarks.json').read_text()).get('items', [])
+                self.pinned += [str(root / b['path']) for b in bm
+                                if b.get('type') == 'file' and (root / b['path']).exists()]
             except (OSError, ValueError, KeyError):
-                self.pinned = []
+                pass
+        self.notes.sort(reverse=True)
+        for _, p in self.notes[:5000]:
+            try:
+                with open(p, encoding='utf-8', errors='replace') as fh:
+                    self.text[p] = fh.read(200000)
+            except OSError:
+                pass
         self.ready = True
+
+    def vault_of(self, p):
+        return next((v for v in self.all if p.startswith(str(v) + os.sep)), self.root)
+
+    def new_note(self, vault):
+        return lambda: spawn('xdg-open', 'obsidian://new?vault=' + quote(vault.name))
 
     def uri(self, p, heading=None):
         u = 'obsidian://open?path=' + quote(p)
         return u + ('%23' + quote(heading) if heading else '')
 
     def note_tile(self, p, sub=None):
-        rel = os.path.relpath(p, self.root)
+        v = self.vault_of(p)
+        rel = os.path.relpath(p, v)
+        where = os.path.dirname(rel) or (v.name if len(self.all) > 1 else 'vault')
         heads = [(len(h), txt.strip()) for h, txt in HEADING.findall(self.text.get(p, ''))][:24]
         t_ = tile('lucide:file-text', os.path.basename(p)[:-3][:26],
-                  sub if sub is not None else (os.path.dirname(rel) or 'vault'),
+                  sub if sub is not None else where,
                   lambda: spawn('xdg-open', self.uri(p)), id=p)
         if heads:
             t_['kids'] = lambda: [tile('lucide:list', ('  ' * (lv - 1) + h)[:26], f'heading {lv}',
@@ -565,7 +580,8 @@ class Notes(Part):
 
     def folder_node(self, d, name=None):
         notes = [(m, p) for m, p in self.notes if os.path.dirname(p) == str(d)]
-        subs = sorted(x for x in d.iterdir() if x.is_dir() and not x.name.startswith('.')) if d.is_dir() else []
+        subs = sorted(x for x in d.iterdir() if x.is_dir() and not x.name.startswith(('.', '_'))) \
+            if d.is_dir() else []
         count = sum(1 for _, p in self.notes if p.startswith(str(d) + os.sep))
         return tile('lucide:folder', (name or d.name)[:22], f'{count} notes', None, id=f'dir:{d}',
                     kids=lambda: [self.folder_node(x) for x in subs]
@@ -590,19 +606,29 @@ class Notes(Part):
         if not self.root:
             return [tile('lucide:file-pen', 'Open Obsidian', 'make a vault, e.g. ~/Notes',
                          lambda: spawn('obsidian'), id='open'),
-                    tile('lucide:file-text', 'Evernote move', 'the steps',
-                         lambda: spawn('xdg-open', str(APPS.parent / 'extras/evernote-to-obsidian/README.md')),
-                         id='steps')]
+                    tile('lucide:file-text', 'Evernote move', 'in the Zorro app',
+                         lambda: spawn('zorro-settings', '--page', 'ob'), id='steps')]
         now = time.time()
-        out = [tile('lucide:file-plus', 'New note', self.root.name,
-                    lambda: spawn('xdg-open', 'obsidian://new?vault=' + quote(self.root.name)), id='new')]
+        many = len(self.all) > 1
+        if many:
+            out = [tile('lucide:file-plus', 'New note', 'pick a vault', None, id='new',
+                        kids=lambda: [tile('lucide:file-plus', v.name[:22], 'new note here',
+                                           self.new_note(v), id=f'new:{v}') for v in self.all])]
+        else:
+            out = [tile('lucide:file-plus', 'New note', self.root.name, self.new_note(self.root), id='new')]
         if self.pinned:
             out.append(tile('lucide:star', 'Pinned', f'{len(self.pinned)} notes', None, id='pinned',
                             kids=lambda: [self.note_tile(p, 'pinned') for p in self.pinned]))
         out.append(tile('lucide:rotate-ccw', 'Recent', f'{len(self.notes)} notes', None, id='recent',
                         kids=lambda: [self.note_tile(p, ago(now - m)) for m, p in self.notes[:24]]))
-        folders = sorted(x for x in self.root.iterdir() if x.is_dir() and not x.name.startswith('.'))
-        out += [self.folder_node(d) for d in folders]
+        if many:                        # a vault each; it unfolds into its folders and notes
+            for v in self.all:
+                node = self.folder_node(v)
+                node['icon'], node['id'] = 'lucide:library', f'vault:{v}'
+                out.append(node)
+        else:
+            folders = sorted(x for x in self.root.iterdir() if x.is_dir() and not x.name.startswith(('.', '_')))
+            out += [self.folder_node(d) for d in folders]
         tags = self.tags()
         if tags:
             out.append(tile('lucide:list', 'Tags', f'{len(tags)} tags', None, id='tags',
@@ -638,11 +664,12 @@ class Notes(Part):
     def preview(self):
         if not getattr(self, 'root', None):
             return 'NOTES', 'Obsidian', ['no vault yet']
-        return 'NOTES', str(len(self.notes)), ['notes · centre: new note']
+        vs = f' in {len(self.all)} vaults' if len(self.all) > 1 else ''
+        return 'NOTES', str(len(self.notes)), [f'notes{vs} · centre: new note']
 
     def centre(self):
         if getattr(self, 'root', None):
-            return 'new note', lambda: spawn('xdg-open', 'obsidian://new?vault=' + quote(self.root.name))
+            return 'new note', self.new_note(self.root)
         return None
 
 
