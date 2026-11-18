@@ -22,6 +22,8 @@ gh_deb() {
 
 gh_deb emqx/MQTTX "$MQTTX_PAT"
 gh_deb localsend/localsend "$LS_PAT"
+# Obsidian (notes; synced with Obsidian Sync): official .deb, amd64 only
+[[ $ARCH == amd64 ]] && gh_deb obsidianmd/obsidian-releases 'obsidian_.*_amd64\.deb$'
 
 # --- rclone (Google Drive mount/sync) ------------------------------------
 # Official build: Debian's package is too old for reliable bisync.
