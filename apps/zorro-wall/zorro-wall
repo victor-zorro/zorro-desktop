@@ -27,7 +27,7 @@ LOGIN_LOOK = Path('/etc/zorro-dm/look.json')
 DEFAULTS = {
     'enabled': True,
     'follow_login': True,       # same animal / background / colours as the login screen
-    'fps_ac': 24, 'fps_battery': 8,
+    'fps_ac': 12, 'fps_battery': 8,
     'fps_calm': 8,              # smart frame rate: while the water is empty or nothing moves fast
     'render_scale': 0.5,        # half resolution: soft and grainy anyway, 4x less work
     'look': {},                 # own look when follow_login is off (same keys as look.json)
