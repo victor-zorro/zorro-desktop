@@ -40,6 +40,10 @@ OBSIDIAN = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'obsidian
 TOOL = HOME / '.local/bin/evernote-backup'
 STATE = '.zorro-evernote.json'          # in each vault: Evernote id -> file, and its date
 ATTACH = '_attachments'
+GENERIC = re.compile(r'(?i)(attachment|image|img|snapshot|photo|picture|screenshot|scan|untitled|'
+                     r'favicon.*|unknown|file|download|clipboard|bild|afbeelding|foto|[\w-]{40,}|'
+                     r'[0-9a-f]{16,}|img[_-]?\d+|\d+)( ?\d+)?')
+UNTITLED = re.compile(r'(?i)(untitled( note)?|geen titel|naamloos|new note|nieuwe notitie)( \d+)?')
 SYNC_LIMIT = 10                         # Obsidian Sync Plus: up to 10 remote vaults
 
 MIME_EXT = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
@@ -127,6 +131,8 @@ class Markdown:
         core = s.strip()
         if not core or '\n' in core:
             return s
+        if core.startswith(mark) and core.endswith(mark) and len(core) > 2 * len(mark):
+            return s                                      # already marked (bold in bold)
         lead, trail = s[:len(s) - len(s.lstrip())], s[len(s.rstrip()):]
         return f'{lead}{mark}{core}{mark}{trail}'
 
@@ -251,8 +257,12 @@ class Markdown:
     def convert(self, enml):
         tree = Tree()
         tree.feed(re.sub(r'<\?xml[^>]*\?>|<!DOCTYPE[^>]*>', '', enml or ''))
-        out = self.tidy(self.kids(tree.root))
-        return re.sub(r'^ +', '', out, flags=re.M) if '```' not in out and '|' not in out else out
+        out = self.tidy(self.kids(tree.root).replace('\u00a0', ' '))
+        if '```' not in out:
+            out = re.sub(r'^ +(?![-*] |\d+\. )', '', out, flags=re.M)   # stray spaces, not list indents
+            out = re.sub(r'(?<=[^\s*])\*\*\*\*(?=[^\s*])', '', out)       # **a****b** -> **ab**
+            out = re.sub(r'\*\* \*\*', ' ', out)
+        return self.tidy(out)
 
 
 def _text_of(n):
@@ -294,26 +304,47 @@ class Vault:
         except (OSError, ValueError):
             self.state = {}
         self.taken = {p.name.lower() for p in path.rglob('*.md')} if path.exists() else set()
-        self.count = {'new': 0, 'updated': 0, 'same': 0, 'kept': 0, 'files': 0}
+        self.count = {'new': 0, 'updated': 0, 'same': 0, 'kept': 0, 'files': 0, 'empty': 0}
         self.kept = []
 
-    def attachment(self, data, name, mime):
-        name = clean_name(name or '', 100)
-        stem, ext = os.path.splitext(name)
-        if not ext:
-            ext = MIME_EXT.get(mime or '', '.bin')
-            stem = stem if name != 'Untitled' else 'attachment'
+    def clear(self):
+        """--rebuild: remove what an earlier run made (only when none of it was changed since)"""
+        changed = [x['file'] for x in self.state.values() if (self.path / x['file']).exists()
+                   and abs((self.path / x['file']).stat().st_mtime - x['mtime']) > 2]
+        if changed:
+            return changed
+        if not self.dry:
+            for x in self.state.values():
+                (self.path / x['file']).unlink(missing_ok=True)
+            for f in sorted((self.path / ATTACH).glob('*')) if (self.path / ATTACH).is_dir() else []:
+                f.unlink()
+            for d in sorted((q for q in self.path.rglob('*') if q.is_dir() and '.obsidian' not in q.parts),
+                            key=lambda q: -len(q.parts)):
+                if not any(d.iterdir()):
+                    d.rmdir()
+        self.state = {}
+        self.taken = {q.name.lower() for q in self.path.rglob('*.md')} if self.path.exists() else set()
+        return []
+
+    def attachment(self, data, name, mime, title):
+        """saved as '<note title> 1.jpg', or '<note title> - <its own name>' when it has a real one"""
+        orig = clean_name(name or '', 80) if name else ''
+        stem, ext = os.path.splitext(orig)
+        ext = ext.lower() if 1 < len(ext) <= 6 else MIME_EXT.get(mime or '', '.bin')
+        base = clean_name(title, 60)
+        if stem and not GENERIC.fullmatch(stem):
+            base = f'{base} - {stem[:50]}'
         folder = self.path / ATTACH
         digest = hashlib.md5(data).hexdigest()
-        cand, k = f'{stem}{ext}', 1
+        k = 1
         while True:
+            cand = f'{base} {k}{ext}' if base == clean_name(title, 60) or k > 1 else f'{base}{ext}'
             p = folder / cand
             if not p.exists():
                 break
             if hashlib.md5(p.read_bytes()).hexdigest() == digest:
                 return cand                               # the same file is already there
             k += 1
-            cand = f'{stem} {k}{ext}'
         if not self.dry:
             folder.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
@@ -335,14 +366,23 @@ class Vault:
 
     def write(self, sub, note):
         guid = note['guid'] or hashlib.md5((note['title'] + note['created']).encode()).hexdigest()
-        p, known = self.note_file(sub, note['title'], guid)
+        plain = Markdown({}).convert(note['content'])
+        if not plain.strip() and not note['resources']:
+            self.count['empty'] += 1                     # nothing in it in Evernote either
+            return
+        title = note['title'].strip()
+        if not title or UNTITLED.fullmatch(title):      # untitled: its first line
+            first = next((ln for ln in plain.split('\n') if re.search(r'\w', ln)), '')
+            first = re.sub(r'[*_`#>\[\]()!|]|https?://\S+|^- \[.\] |^\d+\. |^- ', '', first).strip()
+            title = first[:60].strip() or f'Note {note["created"][:10]}'.strip()
+        p, known = self.note_file(sub, title, guid)
         if known and p.exists() and abs(p.stat().st_mtime - known['mtime']) > 2:
             self.count['kept'] += 1                      # changed in Obsidian since: leave it
             self.kept.append(str(p.relative_to(self.path)))
             return
         media = {}
         for r in note['resources']:
-            media[r['hash']] = self.attachment(r['data'], r['name'], r['mime'])
+            media[r['hash']] = self.attachment(r['data'], r['name'], r['mime'], p.stem)
         body = Markdown(media).convert(note['content'])
         props = ['---']
         if note['created']:
@@ -460,6 +500,8 @@ def main():
     ap.add_argument('--skip', action='append', default=[], metavar='NOTEBOOK')
     ap.add_argument('--dry-run', action='store_true', help='count only, write nothing')
     ap.add_argument('--no-export', action='store_true', help='use the .enex files already there')
+    ap.add_argument('--rebuild', action='store_true',
+                    help='remove what an earlier run made and convert again (not when you changed notes)')
     a = ap.parse_args()
     if a.list:
         print(json.dumps(notebooks(), indent=1))
@@ -481,17 +523,23 @@ def main():
     vaults = []
     for vname, books in plan.items():
         v = Vault(NOTES / vname, a.dry_run)
+        if a.rebuild:
+            changed = v.clear()
+            if changed:
+                print(f'{vname}: not rebuilt, you changed {len(changed)} notes in it (e.g. {changed[0]})')
+                continue
         for nb, f in books:
             sub = clean_name(nb) if len(books) > 1 else ''
             print(f'{nb} → ~/Notes/{vname}{"/" + sub if sub else ""}', flush=True)
             for note in notes_in(f):
                 v.write(sub, note)
         c = v.count
-        if not any(c.values()) and not v.path.exists():
+        if not any(c[k] for k in ('new', 'updated', 'same', 'kept', 'files')) and not v.path.exists():
             print('  empty: no vault made', flush=True)
             continue
         v.finish()
         kept = f', {c["kept"]} kept (you changed them in Obsidian)' if c['kept'] else ''
+        kept += f', {c["empty"]} empty ones left out' if c['empty'] else ''
         print(f'  {c["new"]} new, {c["updated"]} updated, {c["same"]} unchanged, '
               f'{c["files"]} attachments{kept}', flush=True)
         vaults.append(v.path)
