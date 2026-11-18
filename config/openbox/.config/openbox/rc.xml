@@ -461,7 +461,7 @@
     <!-- Super+E: file manager -->
     <keybind key="W-e">
       <action name="Execute">
-        <command>thunar</command>
+        <command>sh -c 'command -v nemo >/dev/null &amp;&amp; exec nemo || exec thunar'</command>
       </action>
     </keybind>
   </keyboard>

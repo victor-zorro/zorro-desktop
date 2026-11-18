@@ -71,7 +71,11 @@ xclip
 conky-std
 systemd-timesyncd
 # Files and media: file manager (+ thumbnails, trash, USB), image viewer, video player
-thunar
+# Nemo: tabs, split view (F3), network browsing; gvfs-backends: SMB/SFTP/WebDAV shares,
+# gvfs-fuse: those shares as normal paths for other apps (VLC, Resolve)
+nemo
+gvfs-backends
+gvfs-fuse
 tumbler
 ffmpegthumbnailer
 gvfs

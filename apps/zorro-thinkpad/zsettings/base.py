@@ -29,7 +29,7 @@ STAR_ACTIONS = {                            # what the star key (F12) can do
     'lock': ('Lock the screen', ['zorro-lock']),
     'drive': ('Drive app', ['zorro-drive']),
     'terminal': ('Terminal', ['x-terminal-emulator']),
-    'files': ('File manager', ['thunar']),
+    'files': ('File manager', ['xdg-open', str(Path.home())]),
     'launcher': ('App launcher (rofi)', ['rofi', '-show', 'drun']),
     'custom': ('Custom command…', None),
 }

@@ -136,16 +136,21 @@ for pkg in config/*/; do
   stow -d config -t "$HOME" "${opts[@]}" --restow "$pkg"
 done
 
-log "Default apps: Thunar (folders), Ristretto (images), VLC (video, audio)"
+log "Default apps: Nemo (folders), Ristretto (images), VLC (video, audio)"
 # xdg-mime only changes these types in ~/.config/mimeapps.list; PDF/web stay with Firefox
 declare -A DEFAULT_APPS=(
-  [thunar.desktop]="inode/directory"
+  [nemo.desktop]="inode/directory"
   [org.xfce.ristretto.desktop]="image/jpeg image/png image/gif image/webp image/bmp image/tiff image/svg+xml image/heic"
   [vlc.desktop]="video/mp4 video/x-matroska video/webm video/quicktime video/x-msvideo video/mpeg video/ogg audio/mpeg audio/flac audio/ogg audio/x-wav audio/mp4 audio/aac"
 )
 for app in "${!DEFAULT_APPS[@]}"; do
   [[ -f /usr/share/applications/$app ]] && xdg-mime default "$app" ${DEFAULT_APPS[$app]}
 done
+# Nemo can draw desktop icons over the whole screen: the living wallpaper is the desktop here
+if gsettings list-schemas 2>/dev/null | grep -qx org.nemo.desktop; then
+  gsettings set org.nemo.desktop show-desktop-icons false
+  gsettings set org.nemo.preferences show-location-entry true     # typed paths (smb://...)
+fi
 
 log "Drive app (apps/zorro-drive)"
 apps/zorro-drive/install.sh
