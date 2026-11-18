@@ -48,9 +48,23 @@ DEFAULTS = {
     'ring_slots': [3, 4, 6],        # at most this many apps per slice on each ring
     'anchor': 'orb',                # orb: fans out from the info circle's clock; centre
     'order': {},                    # slice name -> app ids in the order you dragged them
+    'hide': [                       # not in the slices (typing still finds them)
+        'thunar-settings.desktop', 'thunar-bulk-rename.desktop', 'rofi.desktop',
+        'rofi-theme-selector.desktop', 'kdesystemsettings.desktop', 'systemsettings.desktop',
+        'obconf.desktop', 'conky.desktop', 'nm-connection-editor.desktop',
+        'com.blackmagicdesign.resolve-CaptureLogs.desktop',
+        'com.blackmagicdesign.resolve-Installer.desktop',
+        'com.blackmagicdesign.resolve-Panels.desktop',
+        'com.blackmagicdesign.rawspeedtest.desktop',
+    ],
     'assign': {                     # app (.desktop name) -> slice name, beats the categories
         'mqttx.desktop': 'Tools', 'kitty.desktop': 'Tools', 'winbox.desktop': 'Tools',
         'localsend_app.desktop': 'Tools', 'org.localsend.localsend_app.desktop': 'Tools',
+        'thunar.desktop': 'Work', 'org.gnome.Nautilus.desktop': 'Work', 'nemo.desktop': 'Work',
+        'org.kde.dolphin.desktop': 'Work', 'zorro-drive.desktop': 'Work',
+        'google-apps.desktop': 'Work', 'whatsapp.desktop': 'Work',
+        'com.blackmagicdesign.resolve.desktop': 'Media',
+        'com.blackmagicdesign.rawplayer.desktop': 'Media',
     },
 }
 
@@ -190,6 +204,7 @@ class Dial(Gtk.Window):
         self.slots = []                 # (x, y, r, app, slice, position) placed this frame
         self.press = None               # (app, x, y) while the mouse button is down on an app
         self.drag = None                # (app, x, y) while an app is being dragged
+        self.expanded = None            # a full slice shown across the dial ("+N" clicked)
         # the hub works like the info circle: four hidden zones (battery, network, ...)
         self.orb = load_orb()
         self.zones = self.orb.load_conf().get('zones', {}) if self.orb else {}
@@ -277,7 +292,10 @@ class Dial(Gtk.Window):
         slices = self.conf['slices'][:6]
         names = [s['name'] for s in slices]
         groups = [[] for _ in slices]
+        hidden = set(self.conf.get('hide', []))
         for a in self.all:
+            if a['id'] in hidden:
+                continue
             pick = self.conf.get('assign', {}).get(a['id'])
             if pick in names:
                 idx = names.index(pick)
@@ -386,6 +404,8 @@ class Dial(Gtk.Window):
         self.slots = []
         if self.filter:
             self.draw_search(cr, cx, cy, rings, a0, a1)
+        elif self.expanded is not None:
+            self.draw_search(cr, cx, cy, rings, a0, a1, self.groups[self.expanded])
         else:
             self.draw_slices(cr, cx, cy, rings, a0, a1)
         outer = rings[-1][1]
@@ -413,6 +433,8 @@ class Dial(Gtk.Window):
         else:
             self.text(cr, time.strftime('%H:%M'), cx, cy - 10 * k, max(14, 26 * k), split=2)
             label = self.hover['name'] if self.hover else (f'“{self.filter}”' if self.filter else
+                                                       self.conf['slices'][self.expanded]['name']
+                                                       if self.expanded is not None else
                                                            time.strftime('%A %-d %B'))
             self.text(cr, label[:22], cx, cy + 24 * k, max(8, 10 * k), bold=False, alpha=0.9, split=1)
         am = math.radians((a0 + a1) / 2)
@@ -481,6 +503,16 @@ class Dial(Gtk.Window):
             self.text(cr, s['name'].upper(), cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab,
                       9, split=1.4)
             group = list(self.groups[i])
+            caps = []
+            for k, (ri, ro) in enumerate(rings):
+                size = (44, 36, 30)[k]
+                rm = (ri + ro) / 2
+                caps.append(min(self.conf['ring_slots'][k], self.fits(rm, span, size))
+                            if self.conf.get('anchor') != 'orb' else self.fits(rm, span, size))
+            if len(group) > sum(caps):           # never drop apps silently: "+N" shows them all
+                extra = len(group) - sum(caps) + 1
+                group = group[:sum(caps) - 1] + [{'id': f'__more__{i}', 'name': f'{extra} more',
+                                                  'icon': '', 'more': i, 'extra': extra}]
             pos = 0
             for k, (ri, ro) in enumerate(rings):
                 size = (44, 36, 30)[k]
@@ -491,8 +523,8 @@ class Dial(Gtk.Window):
                 self.place(cr, cx, cy, row, rm, start, span, size, where=(i, pos))
                 pos += len(row)
 
-    def draw_search(self, cr, cx, cy, rings, a0, a1):
-        found = self.matches()
+    def draw_search(self, cr, cx, cy, rings, a0, a1, items=None):
+        found = list(items) if items is not None else self.matches()
         for k, (ri, ro) in enumerate(rings):
             size = (44, 36, 30)[k]
             rm = (ri + ro) / 2
@@ -520,6 +552,14 @@ class Dial(Gtk.Window):
                 cr.set_source_rgba(*CYAN, 0.16)
                 cr.fill()
                 self.chroma_circle(cr, x, y, size * 0.9)
+            if 'more' in a:
+                cr.new_path()
+                cr.arc(x, y, size * 0.55, 0, 2 * math.pi)
+                cr.set_source_rgba(1, 1, 1, 0.08)
+                cr.fill()
+                self.chroma_circle(cr, x, y, size * 0.55, alpha=0.6, split=1)
+                self.text(cr, f'+{a["extra"]}', x, y, max(8, size / 4), split=1)
+                continue
             pb = self.icon(a, size)
             if pb:
                 Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
@@ -541,7 +581,8 @@ class Dial(Gtk.Window):
         return int(rel / ((a1 - a0) / n)) if rel <= a1 - a0 else None
 
     def on_motion(self, _w, ev):
-        if self.press and not self.drag and not self.filter:
+        if self.press and not self.drag and not self.filter and self.expanded is None \
+                and 'more' not in self.press[0]:
             a, px, py = self.press
             if (ev.x - px) ** 2 + (ev.y - py) ** 2 > 12 ** 2:
                 self.drag = (a, ev.x, ev.y)
@@ -564,7 +605,12 @@ class Dial(Gtk.Window):
             return
         if not drag:                        # a click: start the app
             if self.hit(ev.x, ev.y) is press[0]:
-                self.launch(press[0])
+                if 'more' in press[0]:
+                    self.expanded = press[0]['more']
+                    self.hover = None
+                    self.area.queue_draw()
+                else:
+                    self.launch(press[0])
             return
         self.drop(drag[0], ev.x, ev.y)
         self.area.queue_draw()
@@ -619,7 +665,10 @@ class Dial(Gtk.Window):
     def on_key(self, _w, ev):
         k = Gdk.keyval_name(ev.keyval) or ''
         if k == 'Escape':
-            if self.filter:
+            if self.expanded is not None and not self.filter:
+                self.expanded = None
+                self.area.queue_draw()
+            elif self.filter:
                 self.filter = ''
                 self.area.queue_draw()
             else:
@@ -641,6 +690,10 @@ class Dial(Gtk.Window):
         return True
 
     def launch(self, a):
+        if 'more' in a:                     # Enter on "+N": show the whole slice
+            self.expanded, self.hover = a['more'], None
+            self.area.queue_draw()
+            return
         record(a['id'])
         try:
             info = Gio.DesktopAppInfo.new_from_filename(a['path'])

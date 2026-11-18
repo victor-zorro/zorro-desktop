@@ -64,5 +64,6 @@
     "mark-location": "map-pin", "document-print": "printer", "call-start": "phone",
     "call-stop": "phone-off", "notification": "bell", "preferences-other": "sliders-horizontal"
   },
-  "desktop_overrides": {"blender.desktop": "blender"}
+  "desktop_overrides": {
+    "com.blackmagicdesign.resolve.desktop": "davinci-resolve","blender.desktop": "blender"}
 }
