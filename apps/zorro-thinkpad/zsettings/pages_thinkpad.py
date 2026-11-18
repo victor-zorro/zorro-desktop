@@ -487,6 +487,13 @@ class ThinkpadPages:
                 'Nothing found. Put the device in pairing mode and scan again.'
         self.hw_do('Scanning for Bluetooth devices (12 s)… put your device in pairing mode', fn)
 
+    def audio_use(self, kind, name):
+        """make this the default output / input; playing sound moves along"""
+        def fn():
+            run('pactl', f'set-default-{kind}', name)
+            return 'Sound output changed' if kind == 'sink' else 'Sound input changed'
+        self.hw_do('Switching…', fn)
+
     def bt_pair(self, mac):
         def fn():
             ok, log = bt_session(mac)

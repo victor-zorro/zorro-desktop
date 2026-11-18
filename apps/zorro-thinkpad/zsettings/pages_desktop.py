@@ -255,7 +255,8 @@ class DesktopPages:
 
     # -- hardware
     HW_GROUPS = {'Webcam': 'Camera & sound', 'Microphone': 'Camera & sound',
-                 'Speakers': 'Camera & sound', 'Bluetooth': 'Bluetooth',
+                 'Speakers': 'Camera & sound', 'Sound output': 'Camera & sound',
+                 'Sound input': 'Camera & sound', 'Bluetooth': 'Bluetooth',
                  'Wi-Fi': 'Network', 'Mobile data (LTE)': 'Network'}
 
     # -- text and colours: GTK apps, terminal, window theme, info circle
