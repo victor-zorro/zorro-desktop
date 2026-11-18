@@ -16,12 +16,15 @@ apt-get install -y --no-install-recommends unzip libfuse2t64 libapr1t64 libaprut
   libglu1-mesa libxcb-cursor0 libxcb-composite0 libxcb-damage0 libxcb-xinerama0 \
   libxcb-xinput0 ocl-icd-libopencl1 rocm-opencl-icd clinfo ffmpeg
 
-work=$(mktemp -d)
+# on disk, not in /tmp: /tmp is in RAM here (tmpfs) and the 4.5 GB installer unpacks twice
+work=$(mktemp -d -p /var/tmp resolve.XXXXXX)
 trap 'rm -rf "$work"' EXIT
+echo "==> unpacking (a few minutes)"
 unzip -q -o "$zip" -d "$work"
 run=$(ls "$work"/DaVinci_Resolve_*_Linux.run | head -n1)
 chmod +x "$run"
-SKIP_PACKAGE_CHECK=1 "$run" -i -y               # installs into /opt/resolve + menu entry
+echo "==> installing into /opt/resolve"
+TMPDIR=$work SKIP_PACKAGE_CHECK=1 "$run" -i -y  # installs into /opt/resolve + menu entry
 
 # Resolve ships old GLib copies that clash with Debian's: let it use the system ones
 mkdir -p /opt/resolve/libs/disabled
