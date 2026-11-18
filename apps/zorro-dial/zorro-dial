@@ -174,6 +174,16 @@ def orb_conf():
     return c
 
 
+def same(a, b):
+    """the same button? Tiles are made new on every redraw, so compare what they are"""
+    if a is b:
+        return True
+    if not a or not b:
+        return False
+    key = lambda x: (x.get('id'), x.get('name'), x.get('icon'), x.get('more'), x.get('gear'))
+    return key(a) == key(b)
+
+
 def toggle_running():
     """already open: close it and stop (Super pressed again)"""
     try:
@@ -554,7 +564,7 @@ class Dial(Gtk.Window):
                 x, y = cx + math.cos(am) * rm, cy + math.sin(am) * rm
                 self.slots.append((x, y, size * 0.85, t, None, None))
                 armed = self.armed and self.armed[0] == t['name'] and time.time() - self.armed[1] < 3
-                if t.get('lit') or self.hover is t or armed:
+                if t.get('lit') or same(self.hover, t) or armed:
                     cr.new_path()
                     cr.arc(x, y, size * 0.75, 0, 2 * math.pi)
                     cr.set_source_rgba(*((1, .2, .3) if armed else CYAN), 0.18 if t.get('lit') or armed else 0.1)
@@ -648,7 +658,7 @@ class Dial(Gtk.Window):
                 cr.set_line_width(1)
                 cr.stroke()
                 continue
-            if self.hover is a:
+            if same(self.hover, a):
                 cr.new_path()
                 cr.arc(x, y, size * 0.9, 0, 2 * math.pi)
                 cr.set_source_rgba(*CYAN, 0.16)
@@ -697,7 +707,7 @@ class Dial(Gtk.Window):
             return
         h = self.hit(ev.x, ev.y)
         z = self.hub_at(ev.x, ev.y)
-        if h is not self.hover or z != self.hub_hover:
+        if not same(h, self.hover) or z != self.hub_hover:
             self.hover, self.hub_hover = h, z
             self.area.queue_draw()
 
@@ -707,7 +717,7 @@ class Dial(Gtk.Window):
         if ev.button != 1 or not press:
             return
         if not drag:                        # a click: start the app
-            if self.hit(ev.x, ev.y) is press[0]:
+            if same(self.hit(ev.x, ev.y), press[0]):
                 self.activate(press[0])
             return
         self.drop(drag[0], ev.x, ev.y)

@@ -6,6 +6,7 @@ from .keyd import style_osd
 from .pages_desktop import DesktopPages
 from .pages_home import HomePages
 from .pages_look import LookPages
+from .pages_accounts import AccountsPages
 from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
 from .pages_network import NetworkPages
@@ -18,7 +19,7 @@ from gi.repository import GLib, Gtk
 
 # ---- the app window: Home (often used) + the gear: Theme, Desktop, Login screen, Hardware, Audio, Power, Network ---
 
-class Win(HomePages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
+class Win(HomePages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
@@ -60,6 +61,10 @@ class Win(HomePages, ThinkpadPages, DesktopPages, LookPages, MobilePages, Networ
         snd.section('atog', None, a_tog)
         power = Group()
         power.section('power', 'Power', self.power_page())
+        acc = Group()                   # the logins the desktop borrows: SoundCloud, Obsidian
+        sc, ob = self.accounts_pages()
+        acc.section('sc', 'Accounts', sc)
+        acc.section('ob', None, ob)
         net = Group()                   # Wi-Fi, Ethernet, mobile data, NetBird
         wifi, eth, nb = self.network_pages()
         net.section('wifi', 'Wi-Fi', wifi)
@@ -81,7 +86,7 @@ class Win(HomePages, ThinkpadPages, DesktopPages, LookPages, MobilePages, Networ
         for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),
                                ('login', 'Login screen', login), ('hardware', 'Hardware', hw),
                                ('audio', 'Audio', snd), ('power', 'Power', power),
-                               ('network', 'Network', net)):
+                               ('network', 'Network', net), ('accounts', 'Accounts', acc)):
             stack.add_titled(g.widget(), name, title)
             self.groups[name] = g
             g.select(select)

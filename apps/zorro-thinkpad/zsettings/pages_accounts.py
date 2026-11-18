@@ -1,0 +1,176 @@
+"""app: Accounts: SoundCloud (zorro-music) and Obsidian (notes, Obsidian Sync)"""
+import json
+import os
+import shutil
+import subprocess
+import threading
+from pathlib import Path
+
+from .base import APPS, HOME, run, spawn
+from .ui import Pages, heading, idle, note
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk  # noqa: E402
+
+MUSIC_CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-music' / 'config.json'
+GOOGLE_PROFILE = HOME / '.local/share/firefox-google'
+YTDLP = shutil.which('yt-dlp', path=f'{HOME}/.local/bin:{os.environ.get("PATH", "")}')
+
+
+def music_conf():
+    try:
+        return json.loads(MUSIC_CONF.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_music_conf(**kv):
+    c = music_conf()
+    c.update(kv)
+    MUSIC_CONF.parent.mkdir(parents=True, exist_ok=True)
+    MUSIC_CONF.write_text(json.dumps(c, indent=2) + '\n')
+
+
+def soundcloud_state():
+    """'ok' (signed in and accepted), 'expired' (a login cookie SoundCloud no longer accepts),
+    'none' (not signed in), 'no-ytdlp'. Only asks yt-dlp; never reads the token itself.
+    A profile page (SoundCloud's own) makes yt-dlp verify the login; a search does not."""
+    if not YTDLP:
+        return 'no-ytdlp'
+    try:
+        r = subprocess.run([YTDLP, '--cookies-from-browser', f'firefox:{GOOGLE_PROFILE}', '--flat-playlist',
+                            '--playlist-end', '1', '--simulate', 'https://soundcloud.com/soundcloud'],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return 'none'
+    err = r.stderr.lower()
+    if 'token is invalid' in err:
+        return 'expired'
+    if 'verifying login token' in (r.stdout + r.stderr).lower():
+        return 'ok'                     # a profile page checks the login; no complaint: valid
+    # no complaint: signed in when the login cookie is there
+    music = APPS / 'zorro-music' / 'zorro-music'
+    try:
+        import importlib.machinery
+        import importlib.util
+        spec = importlib.util.spec_from_loader('zm', importlib.machinery.SourceFileLoader('zm', str(music)))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return 'ok' if m.firefox_profile() else 'none'
+    except (OSError, SyntaxError, ImportError):
+        return 'none'
+
+
+def open_in_google_window(url):
+    """a page in the Google-apps Firefox window (that profile is where the player looks)"""
+    running = 'GoogleApps' in run('wmctrl', '-lx')
+    if running:
+        spawn(['firefox', '--profile', str(GOOGLE_PROFILE), '--new-tab', url])
+    else:
+        spawn(['firefox', '--new-instance', '--class', 'GoogleApps', '--profile', str(GOOGLE_PROFILE), url])
+
+
+def obsidian_state():
+    cfg = HOME / '.config/obsidian/obsidian.json'
+    try:
+        vaults = json.loads(cfg.read_text()).get('vaults', {})
+    except (OSError, ValueError):
+        vaults = {}
+    v = next((x for x in vaults.values() if x.get('open')), None) or next(iter(vaults.values()), None)
+    path = Path(v['path']) if v and v.get('path') else None
+    sync = False
+    if path:
+        try:
+            cp = json.loads((path / '.obsidian/core-plugins.json').read_text())
+            sync = bool(cp.get('sync')) if isinstance(cp, dict) else 'sync' in cp   # new / old format
+        except (OSError, ValueError):
+            sync = False
+    notes = sum(1 for _ in path.rglob('*.md')) if path and path.is_dir() else 0
+    return {'installed': bool(shutil.which('obsidian')), 'vault': str(path) if path else '',
+            'notes': notes, 'sync': sync}
+
+
+class AccountsPages:
+    """Accounts (a setup tab): SoundCloud and Obsidian - a mixin of the app window"""
+
+    def accounts_pages(self):
+        sc, ob = Pages(), Pages()
+        self.acc_msg = [note(), note()]
+        sc.footer(self.acc_msg[0])
+        ob.footer(self.acc_msg[1])
+
+        sc.add(heading('SoundCloud', 'SoundCloud'))
+        self.sc_state = Gtk.Label(xalign=0, wrap=True)
+        sc.add(self.sc_state)
+        row = Gtk.Box(spacing=8, margin_top=6)
+        b = Gtk.Button(label='Log in to SoundCloud')
+        b.get_style_context().add_class('suggested-action')
+        b.connect('clicked', lambda _b: (open_in_google_window('https://soundcloud.com/signin'),
+                                         self.acc_say(0, 'Sign in there, then click Check again')))
+        row.add(b)
+        b = Gtk.Button(label='Check again')
+        b.connect('clicked', lambda _b: self.sc_check())
+        row.add(b)
+        sc.add(row)
+        grid = Gtk.Grid(column_spacing=12, row_spacing=8, margin_top=10)
+        grid.attach(Gtk.Label(label='Your SoundCloud name', xalign=0), 0, 0, 1, 1)
+        user = Gtk.Entry(placeholder_text='the part after soundcloud.com/', width_chars=26,
+                         text=music_conf().get('user', ''))
+        user.connect('changed', lambda e: save_music_conf(user=e.get_text().strip().strip('/')))
+        grid.attach(user, 1, 0, 1, 1)
+        sc.add(grid)
+        sc.add(note('The music player borrows your SoundCloud login from the Google-apps window '
+                    '(its own Firefox profile): sign in there once and your likes and playlists '
+                    'play, in Go+ quality when you have it. No password is stored here. Without '
+                    'login: public free tracks. Your name is needed for "My likes" in the Dialer.'))
+
+        ob.add(heading('Obsidian', 'Obsidian'))
+        self.ob_state = Gtk.Label(xalign=0, wrap=True)
+        ob.add(self.ob_state)
+        row = Gtk.Box(spacing=8, margin_top=6)
+        b = Gtk.Button(label='Open Obsidian')
+        b.get_style_context().add_class('suggested-action')
+        b.connect('clicked', lambda _b: spawn(['obsidian']))
+        row.add(b)
+        b = Gtk.Button(label='Moving from Evernote: the steps')
+        b.connect('clicked', lambda _b: spawn(['xdg-open', str(APPS.parent / 'extras/evernote-to-obsidian/README.md')]))
+        row.add(b)
+        b = Gtk.Button(label='Check again')
+        b.connect('clicked', lambda _b: self.ob_check())
+        row.add(b)
+        ob.add(row)
+        ob.add(note('Log in inside Obsidian: Settings (gear, bottom left) → General → Account → '
+                    'Log in, with your Obsidian account (obsidian.md). Then Settings → Core '
+                    'plugins → Sync on → Sync → choose or create the remote vault, with your own '
+                    'encryption password. On the Android phone: the same account and vault.'))
+        idle(self.sc_check)
+        idle(self.ob_check)
+        return sc, ob
+
+    def acc_say(self, i, text):
+        self.acc_msg[i].set_text(text)
+
+    def sc_check(self):
+        self.sc_state.set_text('Checking the SoundCloud login…')
+
+        def work():
+            st = soundcloud_state()
+            idle(lambda: self.sc_state.set_text({
+                'ok': '✓ Signed in: your likes and playlists can play',
+                'expired': '⚠ The SoundCloud login has expired: log in again (button below)',
+                'none': '○ Not signed in: public free tracks only (log in below)',
+                'no-ytdlp': '⚠ yt-dlp is missing: run apps/zorro-music/install.sh'}[st]) and False)
+        threading.Thread(target=work, daemon=True).start()
+        return False
+
+    def ob_check(self):
+        s = obsidian_state()
+        if not s['installed']:
+            text = '⚠ Obsidian is not installed: run ./update-extras.sh'
+        elif not s['vault']:
+            text = '○ Installed; no vault yet. Open Obsidian and create one (e.g. ~/Notes)'
+        else:
+            text = (f'✓ Vault {s["vault"].replace(str(HOME), "~")} · {s["notes"]} notes · '
+                    + ('Sync on' if s['sync'] else 'Sync not switched on yet'))
+        self.ob_state.set_text(text)
+        return False

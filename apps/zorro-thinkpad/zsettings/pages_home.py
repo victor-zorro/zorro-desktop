@@ -212,7 +212,7 @@ class HomePages:
         e = d['eq']
         on = e['on'] and d['eq_running']
         cur = e['target'] if on else next((s['name'] for s in d['sinks'] if s['default']), '')
-        sig = ('sound', tuple((s['name'], s['volume']) for s in self.real_sinks(d)), cur, on)
+        sig = ('sound', tuple(s['name'] for s in self.real_sinks(d)), cur, on)   # not the volume: no rebuild under the mouse
         if self.home_seen.get('sound') == sig:
             return
         self.home_seen['sound'] = sig
@@ -282,14 +282,20 @@ class HomePages:
 
     # connections
     def show_conn(self, d):
-        sig = ('conn', d['wifi'], d['wifi_on'], d['cable'], d['bt_on'], tuple(d['bt_dev']), d['nb'], d['airplane'])
-        if self.home_seen.get('conn') == sig:
+        sig = ('conn', d['wifi'] and d['wifi'][0], d['wifi_on'], d['cable'], d['bt_on'], tuple(d['bt_dev']),
+               d['nb'] and d['nb'][0], d['airplane'])
+        wifi = f'Wi-Fi  {d["wifi"][0]} {d["wifi"][1]}%' if d['wifi'] else ('Wi-Fi  on' if d['wifi_on'] else 'Wi-Fi  off')
+        if self.home_seen.get('conn') == sig:            # only numbers changed: just the text
+            if getattr(self, 'wifi_pill', None):
+                self.wifi_pill.set_label(wifi)
+            if getattr(self, 'nb_pill', None) and d['nb'] and d['nb'][0]:
+                self.nb_pill.set_label(f'NetBird  {d["nb"][1]}/{d["nb"][2]}')
             return
         self.home_seen['conn'] = sig
         f = flow(2)
-        wifi = f'Wi-Fi  {d["wifi"][0]} {d["wifi"][1]}%' if d['wifi'] else ('Wi-Fi  on' if d['wifi_on'] else 'Wi-Fi  off')
-        f.add(self.pill(wifi, d['wifi_on'], lambda: self.conn_do(['nmcli', 'radio', 'wifi',
-                                                                  'off' if d['wifi_on'] else 'on'])))
+        self.wifi_pill = self.pill(wifi, d['wifi_on'], lambda: self.conn_do(['nmcli', 'radio', 'wifi',
+                                                                  'off' if d['wifi_on'] else 'on']))
+        f.add(self.wifi_pill)
         f.add(self.pill('Cable' + ('  connected' if d['cable'] else ''), d['cable'],
                         lambda: self.show_page('eth:0')))
         bt = 'Bluetooth  ' + (', '.join(x[:14] for x in d['bt_dev']) or ('on' if d['bt_on'] else 'off'))
@@ -298,8 +304,9 @@ class HomePages:
         f.add(self.pill('Mobile', False, lambda: self.show_page('lte:0')))
         if d['nb']:
             up, n, total = d['nb']
-            f.add(self.pill(f'NetBird  {n}/{total}' if up else 'NetBird  off', bool(up),
-                            lambda: self.conn_do(['netbird', 'down' if up else 'up'])))
+            self.nb_pill = self.pill(f'NetBird  {n}/{total}' if up else 'NetBird  off', bool(up),
+                                     lambda: self.conn_do(['netbird', 'down' if up else 'up']))
+            f.add(self.nb_pill)
         f.add(self.pill('Airplane', d['airplane'], self.airplane))
         self.fill(self.h_conn, [f])
 

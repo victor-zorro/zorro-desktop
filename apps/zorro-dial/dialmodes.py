@@ -425,7 +425,8 @@ class Music(Part):
     def control(self, what):
         np = self.np or {}
         if np.get('player'):
-            mpris_call(np['player'], {'toggle': 'PlayPause', 'next': 'Next', 'prev': 'Previous'}[what])
+            mpris_call(np['player'], {'toggle': 'PlayPause', 'play': 'Play', 'pause': 'Pause', 'stop': 'Stop',
+                                      'next': 'Next', 'prev': 'Previous'}[what])
         else:
             run(str(MUSIC), what)
         time.sleep(0.4)
@@ -451,10 +452,13 @@ class Music(Part):
 
     def rings(self):
         np = getattr(self, 'np', None)
+        playing = bool(np and np['playing'])
         ctl = [tile('lucide:skip-back', 'Previous', '', lambda: self.control('prev'), keep=True),
-               tile('lucide:pause' if np and np['playing'] else 'lucide:play',
-                    'Pause' if np and np['playing'] else 'Play', np['app'] if np else '',
-                    lambda: self.control('toggle'), lit=bool(np and np['playing']), keep=True),
+               tile('lucide:play', 'Play', np['app'] if np else '', lambda: self.control('play'),
+                    lit=playing, keep=True),
+               tile('lucide:pause', 'Pause', '', lambda: self.control('pause'),
+                    lit=bool(np) and not playing, keep=True),
+               tile('lucide:square', 'Stop', '', lambda: self.control('stop'), keep=True),
                tile('lucide:skip-forward', 'Next', '', lambda: self.control('next'), keep=True)]
         src = []
         conf = getattr(self, 'conf', {})

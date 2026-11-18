@@ -66,25 +66,37 @@ class NetworkPages:
         return self.nm
 
     def net_rows(self, box, rows):
-        """replace a list box's rows: [(title, detail, [(label, cb)], mark)]"""
+        """show rows [(title, detail, [(label, cb)], mark)]. Only rebuilt when the rows really
+        change; signal strength and such are updated in place, so a button is never replaced
+        under the mouse (a rebuild between press and release loses the click)"""
+        struct = [(title, tuple(lb for lb, _ in acts), mark) for title, _, acts, mark in rows]
+        box.zcbs = [[cb for _, cb in acts] for _, _, acts, _ in rows]
+        if getattr(box, 'zstruct', None) == struct:
+            for lab, (_, detail, _, _) in zip(box.zdetails, rows):
+                if lab is not None and lab.get_text() != detail:
+                    lab.set_text(detail)
+            return
+        box.zstruct, box.zdetails = struct, []
         for c in box.get_children():
             c.destroy()
-        for title, detail, acts, mark in rows:
+        for i, (title, detail, acts, mark) in enumerate(rows):
             row = Gtk.Box(spacing=12)
             txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
             head = Gtk.Label(xalign=0)
             head.set_markup(f'{mark}  <b>{GLib.markup_escape_text(title)}</b>' if mark else
                             f'<b>{GLib.markup_escape_text(title)}</b>')
             txt.add(head)
+            d = None
             if detail:
                 d = note(detail)
                 d.set_selectable(True)
                 d.set_can_focus(False)
                 txt.add(d)
+            box.zdetails.append(d)
             row.add(txt)
-            for label, cb in acts:
+            for j, (label, _cb) in enumerate(acts):
                 b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
-                b.connect('clicked', lambda _b, cb=cb: cb())
+                b.connect('clicked', lambda _b, i=i, j=j: box.zcbs[i][j]())   # the newest action
                 row.add(b)
             box.add(row)
         box.show_all()

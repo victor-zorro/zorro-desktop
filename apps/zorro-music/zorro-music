@@ -7,7 +7,7 @@ subscription has it. Not logged in: public free tracks. mpv with mpv-mpris shows
 media player (MPRIS): media keys, the Dialer's Music part and the Audio tab see it.
 
   zorro-music play URL | likes | search TEXT | fav NAME
-  zorro-music toggle | next | prev | stop
+  zorro-music play | pause | toggle | next | prev | stop
   zorro-music status            JSON: title, artist, playing, position, duration, ...
 Settings: ~/.config/zorro-music/config.json
   {"user": "your-soundcloud-name", "favourites": [{"name": "...", "url": "..."}], "volume": 80}
@@ -155,12 +155,14 @@ def main():
     elif cmd == 'toggle':
         if running():
             ipc('cycle', 'pause')
+    elif cmd in ('play', 'pause') and len(a) == 1:      # without a target: resume / pause
+        ipc('set_property', 'pause', cmd == 'pause')
     elif cmd == 'next':
         ipc('playlist-next')
     elif cmd == 'prev':
         ipc('playlist-prev')
     elif cmd == 'stop':
-        ipc('quit')
+        ipc('stop')                        # stops; mpv stays ready (idle) for the next play
     elif cmd == 'status':
         print(json.dumps(status()))
     else:
