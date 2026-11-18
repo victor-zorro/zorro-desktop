@@ -500,8 +500,9 @@ class Music(Part):
                 rr = mid + rnd.uniform(-1, 1) * amp * half
                 x = cx + math.cos(math.radians(a)) * rr
                 y = cy + math.sin(math.radians(a)) * rr
-                cr.set_source_rgba(*((0.1, 0.9, 1.0) if played else (0.85, 0.85, 0.9)),
-                                   (0.85 if played else 0.3) * rnd.uniform(0.5, 1))
+                # played: bright white; still to come: dim grey (no colour, like the other particles)
+                cr.set_source_rgba(*((0.97, 0.97, 0.97) if played else (0.62, 0.62, 0.64)),
+                                   (0.9 if played else 0.28) * rnd.uniform(0.5, 1))
                 cr.rectangle(x, y, 1.6, 1.6)
                 cr.fill()
 
