@@ -10,7 +10,7 @@ from .base import APPS, HOME, run, spawn
 from .ui import Pages, heading, idle, note
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import Gdk, Gtk  # noqa: E402
 
 MUSIC_CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-music' / 'config.json'
 GOOGLE_PROFILE = HOME / '.local/share/firefox-google'
@@ -90,6 +90,64 @@ def obsidian_state():
             'notes': notes, 'sync': sync}
 
 
+EVERNOTE_STEPS = [
+    ('1. The download tool (once). Open source; it fetches every notebook through your own '
+     'Evernote account.', ['pipx install evernote-backup']),
+    ('2. Fetch everything into ~/Evernote-export. The first command asks for your Evernote '
+     'login; nothing else leaves the laptop. Run them one after the other:',
+     ['mkdir -p ~/Evernote-export && cd ~/Evernote-export',
+      'evernote-backup init-db', 'evernote-backup sync', 'evernote-backup export enex/']),
+    ('3. In Obsidian: create the vault ~/Notes. Then Settings → Community plugins → turn on → '
+     'Browse → Importer (the official one) → Install → Enable. Open Importer → '
+     '"Evernote (.enex)" → pick all files in this folder → Import:', ['~/Evernote-export/enex']),
+    ('Notebooks become folders, tags stay, images and PDFs become attachments, and the original '
+     'dates go into each note\'s properties.', []),
+    ('4. Check: the note count per notebook (Importer shows it), a few web clippings, tables and '
+     'checklists. Encrypted Evernote notes cannot be converted: decrypt those in Evernote first.', []),
+    ('5. Sync: Settings → Sync → create a remote vault with your own encryption password → '
+     'connect. On the Android phone: the Obsidian app → Sync → the same vault.', []),
+    ('6. Keep ~/Evernote-export until everything is checked; then cancel Evernote.', []),
+]
+
+
+def copy_text(text):
+    Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
+
+
+def evernote_dialog(parent):
+    """the steps, with a Copy button per command (Obsidian's live preview makes copying hard)"""
+    dlg = Gtk.Dialog(title='Moving from Evernote to Obsidian', transient_for=parent, modal=False)
+    dlg.set_default_size(640, 620)
+    sw = Gtk.ScrolledWindow(vexpand=True)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=18)
+    status = Gtk.Label(xalign=0)
+    for text, cmds in EVERNOTE_STEPS:
+        box.add(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True, max_width_chars=70,
+                          margin_top=6))
+        for cmd in cmds:
+            row = Gtk.Box(spacing=8, margin_start=14)
+            e = Gtk.Entry(text=cmd, editable=False, hexpand=True)
+            e.get_style_context().add_class('monospace')
+            row.add(e)
+            b = Gtk.Button(label='Copy')
+            b.connect('clicked', lambda _b, c=cmd: (copy_text(c), status.set_text(f'Copied: {c}')))
+            row.add(b)
+            box.add(row)
+    sw.add(box)
+    dlg.get_content_area().add(sw)
+    foot = Gtk.Box(spacing=8, margin=12)
+    foot.pack_start(status, True, True, 0)
+    b = Gtk.Button(label='Open a terminal')
+    b.connect('clicked', lambda _b: spawn(['x-terminal-emulator'] if shutil.which('x-terminal-emulator')
+                                           else ['kitty']))
+    foot.add(b)
+    b = Gtk.Button(label='Close')
+    b.connect('clicked', lambda _b: dlg.destroy())
+    foot.add(b)
+    dlg.get_content_area().add(foot)
+    dlg.show_all()
+
+
 class AccountsPages:
     """Accounts (a setup tab): SoundCloud and Obsidian - a mixin of the app window"""
 
@@ -133,7 +191,7 @@ class AccountsPages:
         b.connect('clicked', lambda _b: spawn(['obsidian']))
         row.add(b)
         b = Gtk.Button(label='Moving from Evernote: the steps')
-        b.connect('clicked', lambda _b: spawn(['xdg-open', str(APPS.parent / 'extras/evernote-to-obsidian/README.md')]))
+        b.connect('clicked', lambda _b: evernote_dialog(self))
         row.add(b)
         b = Gtk.Button(label='Check again')
         b.connect('clicked', lambda _b: self.ob_check())
