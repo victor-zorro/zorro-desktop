@@ -96,18 +96,80 @@ EVERNOTE_STEPS = [
     ('2. Fetch everything into ~/Evernote-export. The first command asks for your Evernote '
      'login; nothing else leaves the laptop. Run them one after the other:',
      ['mkdir -p ~/Evernote-export && cd ~/Evernote-export',
-      'evernote-backup init-db', 'evernote-backup sync', 'evernote-backup export enex/']),
-    ('3. In Obsidian: create the vault ~/Notes. Then Settings → Community plugins → turn on → '
-     'Browse → Importer (the official one) → Install → Enable. Open Importer → '
-     '"Evernote (.enex)" → pick all files in this folder → Import:', ['~/Evernote-export/enex']),
-    ('Notebooks become folders, tags stay, images and PDFs become attachments, and the original '
-     'dates go into each note\'s properties.', []),
-    ('4. Check: the note count per notebook (Importer shows it), a few web clippings, tables and '
-     'checklists. Encrypted Evernote notes cannot be converted: decrypt those in Evernote first.', []),
-    ('5. Sync: Settings → Sync → create a remote vault with your own encryption password → '
-     'connect. On the Android phone: the Obsidian app → Sync → the same vault.', []),
+      'evernote-backup init-db', 'evernote-backup sync']),
+    ('VAULTS', []),
+    ('4. Check: open each vault in Obsidian (bottom left: the vault name → Manage vaults) and look '
+     'at a few web clippings, tables and checklists. Encrypted Evernote notes cannot be converted: '
+     'decrypt those in Evernote first. Pressing "Make the vaults" again later only brings in what '
+     'is new or changed in Evernote; notes you edited in Obsidian are left alone.', []),
+    ('5. Sync, per vault: Settings → Sync → create a remote vault (its own name, your own '
+     'encryption password) → connect. On the Android phone: the Obsidian app → Sync → the same '
+     'vaults. Obsidian Sync Plus takes up to 10 vaults.', []),
     ('6. Keep ~/Evernote-export until everything is checked; then cancel Evernote.', []),
 ]
+VAULTS_TOOL = APPS.parent / 'extras/evernote-to-obsidian/evernote-to-vaults'
+
+
+def vaults_panel(box):
+    """3: every notebook its own vault in ~/Notes: pick which, and their names; then make them"""
+    box.add(Gtk.Label(label='3. Make the vaults: every notebook becomes its own Obsidian vault in '
+                            '~/Notes (pictures, checklists, tables and tags included). Untick a notebook '
+                            'to leave it out; give two notebooks the same vault name to put them '
+                            'together (each in its own folder). Close Obsidian first, then it lists '
+                            'the new vaults by itself.',
+                      xalign=0, wrap=True, max_width_chars=70, margin_top=6))
+    grid = Gtk.Grid(column_spacing=10, row_spacing=4, margin_start=14)
+    box.add(grid)
+    out = Gtk.Label(xalign=0, wrap=True, selectable=True, max_width_chars=70, margin_start=14)
+    out.get_style_context().add_class('monospace')
+    rows = []
+    try:
+        books = json.loads(subprocess.run([str(VAULTS_TOOL), '--list'], capture_output=True,
+                                          text=True, timeout=20).stdout or '[]')
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        books = []
+    if not books:
+        grid.attach(Gtk.Label(label='Nothing downloaded yet: do step 2 first, then reopen this.',
+                              xalign=0), 0, 0, 1, 1)
+        return
+    grid.attach(Gtk.Label(label='Notebook', xalign=0), 0, 0, 1, 1)
+    grid.attach(Gtk.Label(label='Notes', xalign=1), 1, 0, 1, 1)
+    grid.attach(Gtk.Label(label='Vault in ~/Notes', xalign=0), 2, 0, 1, 1)
+    for i, nb in enumerate(books, 1):
+        cb = Gtk.CheckButton(label=nb['name'], active=nb['notes'] > 0)
+        grid.attach(cb, 0, i, 1, 1)
+        grid.attach(Gtk.Label(label=str(nb['notes']), xalign=1), 1, i, 1, 1)
+        e = Gtk.Entry(text=nb['vault'], width_chars=22)
+        grid.attach(e, 2, i, 1, 1)
+        rows.append((nb['name'], cb, e))
+    btn = Gtk.Button(label='Make the vaults', halign=Gtk.Align.START, margin_start=14)
+    btn.get_style_context().add_class('suggested-action')
+    box.add(btn)
+    box.add(out)
+
+    def make(_b):
+        if subprocess.run(['pgrep', '-f', 'evernote-backup sync'], capture_output=True).returncode == 0:
+            out.set_text('Evernote is still downloading (step 2): wait until it is done.')
+            return
+        args = [str(VAULTS_TOOL)]
+        for name, cb, e in rows:
+            if not cb.get_active():
+                args += ['--skip', name]
+            elif e.get_text().strip():
+                args += ['--map', f'{name}={e.get_text().strip()}']
+        btn.set_sensitive(False)
+        out.set_text('Working…')
+        lines = []
+
+        def work():
+            p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for ln in p.stdout:
+                lines.append(ln.rstrip())
+                idle(lambda t='\n'.join(lines[-14:]): out.set_text(t) and False)
+            p.wait()
+            idle(lambda: btn.set_sensitive(True) or False)
+        threading.Thread(target=work, daemon=True).start()
+    btn.connect('clicked', make)
 
 
 def copy_text(text):
@@ -122,6 +184,9 @@ def evernote_dialog(parent):
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=18)
     status = Gtk.Label(xalign=0)
     for text, cmds in EVERNOTE_STEPS:
+        if text == 'VAULTS':
+            vaults_panel(box)
+            continue
         box.add(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True, max_width_chars=70,
                           margin_top=6))
         for cmd in cmds:

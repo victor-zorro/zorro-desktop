@@ -1,0 +1,514 @@
+#!/usr/bin/python3
+"""evernote-to-vaults: every Evernote notebook becomes its own Obsidian vault in ~/Notes.
+
+Reads what evernote-backup downloaded (~/Evernote-export/en_backup.db), exports it to ENEX
+(one file per notebook) and converts that to Markdown, all on this laptop:
+  - a note becomes  ~/Notes/<vault>/<title>.md  with created / updated / tags / source in its
+    properties, and the file date set to when it was last changed in Evernote
+  - pictures, PDFs and other attachments go to  <vault>/_attachments/  and are shown in the note
+  - checkboxes, lists, tables, links, headings, bold / italic and code blocks stay
+  - the vaults are added to Obsidian's vault list (when Obsidian is closed)
+Safe to run again: notes are recognised by their Evernote id; a note you changed in Obsidian
+since is left alone (it says so).
+
+  evernote-to-vaults --list                  JSON: the notebooks, their note count, proposed vault
+  evernote-to-vaults [--map 'Notebook=Vault' ...] [--skip 'Notebook' ...] [--dry-run]
+Two notebooks mapped to the same vault each get a folder in it.
+"""
+import argparse
+import base64
+import calendar
+import hashlib
+import json
+import os
+import re
+import secrets
+import sqlite3
+import subprocess
+import sys
+import time
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+from pathlib import Path
+
+HOME = Path.home()
+EXPORT = HOME / 'Evernote-export'
+DB = EXPORT / 'en_backup.db'
+ENEX = EXPORT / 'enex'
+NOTES = HOME / 'Notes'
+OBSIDIAN = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'obsidian' / 'obsidian.json'
+TOOL = HOME / '.local/bin/evernote-backup'
+STATE = '.zorro-evernote.json'          # in each vault: Evernote id -> file, and its date
+ATTACH = '_attachments'
+SYNC_LIMIT = 10                         # Obsidian Sync Plus: up to 10 remote vaults
+
+MIME_EXT = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+            'image/svg+xml': '.svg', 'application/pdf': '.pdf', 'audio/mpeg': '.mp3', 'audio/wav': '.wav',
+            'audio/x-m4a': '.m4a', 'audio/amr': '.amr', 'video/mp4': '.mp4', 'text/plain': '.txt',
+            'text/html': '.html', 'application/zip': '.zip'}
+
+
+# -- names
+def clean_name(s, limit=120):
+    s = re.sub(r'[\\/:*?"<>|#^\[\]\x00-\x1f]', ' ', s or '').strip(' .')
+    s = re.sub(r'\s+', ' ', s)
+    return s[:limit].strip() or 'Untitled'
+
+
+def vault_name(notebook):
+    """a proposed vault name: the notebook's name ("victor-zorro's notebook" -> "Notes")"""
+    if re.fullmatch(r".+'s notebook", notebook or '', re.I):
+        return 'Notes'
+    return clean_name(notebook)
+
+
+def notebooks():
+    """the notebooks in the downloaded database, with how many notes each has"""
+    if not DB.exists():
+        return []
+    c = sqlite3.connect(f'file:{DB}?mode=ro', uri=True)
+    rows = c.execute('select n.name, n.stack, count(x.guid) from notebooks n left join notes x '
+                     'on x.notebook_guid = n.guid and x.is_active group by n.guid '
+                     'order by lower(n.name)').fetchall()
+    return [{'name': n, 'stack': s or '', 'notes': k, 'vault': vault_name(n)} for n, s, k in rows]
+
+
+# -- ENML (Evernote's HTML) -> Markdown
+VOID = {'br', 'hr', 'img', 'en-media', 'en-todo', 'input', 'meta', 'link', 'col', 'wbr', 'area'}
+SKIP = {'script', 'style', 'title', 'head', 'object', 'embed', 'iframe', 'noscript', 'svg'}
+BLOCK = {'div', 'p', 'en-note', 'section', 'article', 'center', 'header', 'footer', 'main', 'aside',
+         'nav', 'figure', 'figcaption', 'address', 'dl', 'dt', 'dd', 'form', 'fieldset', 'body', 'html'}
+
+
+class Node:
+    __slots__ = ('tag', 'attrs', 'kids')
+
+    def __init__(self, tag, attrs=None):
+        self.tag, self.attrs, self.kids = tag, dict(attrs or {}), []
+
+    def text(self):
+        return ''.join(k if isinstance(k, str) else k.text() for k in self.kids)
+
+
+class Tree(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = Node('root')
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        n = Node(tag, attrs)
+        self.stack[-1].kids.append(n)
+        if tag not in VOID:
+            self.stack.append(n)
+
+    def handle_startendtag(self, tag, attrs):
+        self.stack[-1].kids.append(Node(tag, attrs))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i].tag == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        self.stack[-1].kids.append(data)
+
+
+class Markdown:
+    def __init__(self, media):
+        self.media = media                       # hash -> attachment file name
+
+    def kids(self, n, pre=False):
+        return ''.join(self.md(k, pre) for k in n.kids)
+
+    @staticmethod
+    def wrap(s, mark):
+        core = s.strip()
+        if not core or '\n' in core:
+            return s
+        lead, trail = s[:len(s) - len(s.lstrip())], s[len(s.rstrip()):]
+        return f'{lead}{mark}{core}{mark}{trail}'
+
+    def md(self, n, pre=False):
+        if isinstance(n, str):
+            return n if pre else re.sub(r'\s+', ' ', n)
+        t = n.tag
+        style = n.attrs.get('style') or ''
+        if t in SKIP:
+            return ''
+        if t == 'br':
+            return '\n'
+        if t in ('b', 'strong'):
+            return self.wrap(self.kids(n), '**')
+        if t in ('i', 'em'):
+            return self.wrap(self.kids(n), '*')
+        if t in ('s', 'strike', 'del'):
+            return self.wrap(self.kids(n), '~~')
+        if t == 'code' and not pre:
+            c = n.text()
+            return f'`{c}`' if c.strip() and '`' not in c else c
+        if t == 'span' and 'font-weight' in style and ('bold' in style or '700' in style):
+            return self.wrap(self.kids(n), '**')
+        if t == 'a':
+            c, href = self.kids(n).strip(), (n.attrs.get('href') or '').strip()
+            if not href or href.startswith(('evernote:', 'javascript:', '#')):
+                return c
+            href = href.replace(' ', '%20').replace(')', '%29')
+            return f'<{href}>' if not c or c == href else f'[{c.replace("]", ")")}]({href})'
+        if re.fullmatch(r'h[1-6]', t):
+            c = re.sub(r'\s+', ' ', self.kids(n)).strip()
+            return f'\n\n{"#" * int(t[1])} {c}\n\n' if c else ''
+        if t == 'hr':
+            return '\n\n---\n\n'
+        if t == 'pre' or (t == 'div' and '-en-codeblock' in style):
+            body = Tree.text_of(n) if t == 'div' else n.text()
+            return f'\n\n```\n{body.strip(chr(10))}\n```\n\n'
+        if t == 'blockquote':
+            c = self.tidy(self.kids(n))
+            return '\n\n' + '\n'.join('> ' + ln if ln else '>' for ln in c.split('\n')) + '\n\n'
+        if t in ('ul', 'ol'):
+            return '\n\n' + self.list(n, t == 'ol') + '\n\n'
+        if t == 'li':                            # a stray item outside a list
+            return '\n- ' + self.tidy(self.kids(n)) + '\n'
+        if t == 'en-todo':
+            return '- [x] ' if n.attrs.get('checked') == 'true' else '- [ ] '
+        if t == 'en-media':
+            f = self.media.get(n.attrs.get('hash', ''))
+            return f'![[{f}]]' if f else ''
+        if t == 'img':
+            src = n.attrs.get('src') or ''
+            return f'![]({src})' if src.startswith('http') else ''
+        if t == 'en-crypt':
+            return '\n\n> [!warning] Encrypted in Evernote: decrypt it there and copy it over.\n\n'
+        if t == 'table':
+            return self.table(n)
+        if t == 'p':
+            return '\n\n' + self.kids(n) + '\n\n'
+        if t in BLOCK:
+            return '\n' + self.kids(n) + '\n'
+        return self.kids(n, pre)
+
+    def list(self, n, ordered, depth=0):
+        out, i = [], 0
+        for li in n.kids:
+            if isinstance(li, str) or li.tag != 'li':
+                if not isinstance(li, str) and li.tag in ('ul', 'ol'):     # a list right in a list
+                    out.append(self.indent(self.list(li, li.tag == 'ol'), '    '))
+                continue
+            i += 1
+            parts, nested = [], []
+            for k in li.kids:
+                if not isinstance(k, str) and k.tag in ('ul', 'ol'):
+                    nested.append(self.list(k, k.tag == 'ol'))
+                else:
+                    parts.append(self.md(k))
+            body = re.sub(r'\n\s*\n+', '\n', self.tidy(''.join(parts)))
+            mark = f'{i}. ' if ordered else '- '
+            if body.startswith('- ['):
+                mark, body = body[:6], body[6:]
+            lines = body.split('\n')
+            out.append(mark + lines[0] + ''.join('\n' + ' ' * len(mark) + ln for ln in lines[1:]))
+            for sub in nested:
+                out.append(self.indent(sub, '    '))
+        return '\n'.join(out)
+
+    @staticmethod
+    def indent(s, pad):
+        return '\n'.join(pad + ln if ln else ln for ln in s.split('\n'))
+
+    def table(self, n):
+        rows = []
+
+        def walk(x):
+            for k in x.kids:
+                if isinstance(k, str):
+                    continue
+                if k.tag == 'tr':
+                    cells = [self.tidy(self.kids(c)).replace('\n', '<br>').replace('|', '\\|')
+                             for c in k.kids if not isinstance(c, str) and c.tag in ('td', 'th')]
+                    if cells:
+                        rows.append(cells)
+                elif k.tag != 'table':                   # thead / tbody / tfoot (no tables in tables)
+                    walk(k)
+        walk(n)
+        if not rows:
+            return ''
+        if len(rows) == 1 and len(rows[0]) == 1:          # a layout table around one block
+            return '\n\n' + rows[0][0].replace('<br>', '\n') + '\n\n'
+        w = max(len(r) for r in rows)
+        rows = [r + [''] * (w - len(r)) for r in rows]
+        lines = ['| ' + ' | '.join(rows[0]) + ' |', '|' + ' --- |' * w]
+        lines += ['| ' + ' | '.join(r) + ' |' for r in rows[1:]]
+        return '\n\n' + '\n'.join(lines) + '\n\n'
+
+    @staticmethod
+    def tidy(s):
+        s = '\n'.join(ln.rstrip() for ln in s.split('\n'))
+        s = re.sub(r'\n{3,}', '\n\n', s)
+        return s.strip('\n ')
+
+    def convert(self, enml):
+        tree = Tree()
+        tree.feed(re.sub(r'<\?xml[^>]*\?>|<!DOCTYPE[^>]*>', '', enml or ''))
+        out = self.tidy(self.kids(tree.root))
+        return re.sub(r'^ +', '', out, flags=re.M) if '```' not in out and '|' not in out else out
+
+
+def _text_of(n):
+    """a code block's text: every div / br is a line"""
+    out = []
+    for k in n.kids:
+        if isinstance(k, str):
+            out.append(k)
+        elif k.tag == 'br':
+            out.append('\n')
+        else:
+            out.append(_text_of(k) + ('\n' if k.tag in BLOCK else ''))
+    return ''.join(out)
+
+
+Tree.text_of = staticmethod(_text_of)
+
+
+# -- one note
+def en_date(s):
+    """20201231T120000Z -> (ISO text, unix time)"""
+    try:
+        epoch = calendar.timegm(time.strptime(s, '%Y%m%dT%H%M%SZ'))     # Evernote dates are UTC
+        return time.strftime('%Y-%m-%dT%H:%M', time.localtime(epoch)), epoch
+    except (TypeError, ValueError):
+        return '', None
+
+
+def tag_name(t):
+    return re.sub(r'[^\w/-]+', '-', t.strip()).strip('-') or None
+
+
+class Vault:
+    def __init__(self, path, dry):
+        self.path, self.dry = path, dry
+        self.state_file = path / STATE
+        try:
+            self.state = json.loads(self.state_file.read_text())
+        except (OSError, ValueError):
+            self.state = {}
+        self.taken = {p.name.lower() for p in path.rglob('*.md')} if path.exists() else set()
+        self.count = {'new': 0, 'updated': 0, 'same': 0, 'kept': 0, 'files': 0}
+        self.kept = []
+
+    def attachment(self, data, name, mime):
+        name = clean_name(name or '', 100)
+        stem, ext = os.path.splitext(name)
+        if not ext:
+            ext = MIME_EXT.get(mime or '', '.bin')
+            stem = stem if name != 'Untitled' else 'attachment'
+        folder = self.path / ATTACH
+        digest = hashlib.md5(data).hexdigest()
+        cand, k = f'{stem}{ext}', 1
+        while True:
+            p = folder / cand
+            if not p.exists():
+                break
+            if hashlib.md5(p.read_bytes()).hexdigest() == digest:
+                return cand                               # the same file is already there
+            k += 1
+            cand = f'{stem} {k}{ext}'
+        if not self.dry:
+            folder.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        self.count['files'] += 1
+        return cand
+
+    def note_file(self, sub, title, guid):
+        known = self.state.get(guid)
+        if known:
+            return self.path / known['file'], known
+        base = clean_name(title)
+        cand, k = f'{base}.md', 1
+        while (str(Path(sub) / cand).lower() if sub else cand.lower()) in self.taken or \
+                cand.lower() in self.taken:
+            k += 1
+            cand = f'{base} {k}.md'
+        self.taken.add(cand.lower())
+        return self.path / sub / cand, None
+
+    def write(self, sub, note):
+        guid = note['guid'] or hashlib.md5((note['title'] + note['created']).encode()).hexdigest()
+        p, known = self.note_file(sub, note['title'], guid)
+        if known and p.exists() and abs(p.stat().st_mtime - known['mtime']) > 2:
+            self.count['kept'] += 1                      # changed in Obsidian since: leave it
+            self.kept.append(str(p.relative_to(self.path)))
+            return
+        media = {}
+        for r in note['resources']:
+            media[r['hash']] = self.attachment(r['data'], r['name'], r['mime'])
+        body = Markdown(media).convert(note['content'])
+        props = ['---']
+        if note['created']:
+            props.append(f'created: {note["created"]}')
+        if note['updated']:
+            props.append(f'updated: {note["updated"]}')
+        tags = [x for x in (tag_name(t) for t in note['tags']) if x]
+        if tags:
+            props.append('tags:')
+            props += [f'  - {t}' for t in tags]
+        if note['source']:
+            props.append(f'source: "{note["source"]}"')
+        props.append(f'evernote: {guid}')
+        props.append('---')
+        text = '\n'.join(props) + '\n\n' + body + '\n'
+        if p.exists() and p.read_text(errors='replace') == text:
+            self.count['same'] += 1
+            return
+        self.count['updated' if p.exists() else 'new'] += 1
+        if self.dry:
+            return
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+        if note['mtime']:
+            os.utime(p, (note['mtime'], note['mtime']))
+        self.state[guid] = {'file': str(p.relative_to(self.path)), 'mtime': p.stat().st_mtime}
+
+    def finish(self):
+        if self.dry:
+            return
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.state_file.write_text(json.dumps(self.state, indent=1))
+        conf = self.path / '.obsidian'
+        conf.mkdir(exist_ok=True)
+        app = conf / 'app.json'
+        try:
+            a = json.loads(app.read_text())
+        except (OSError, ValueError):
+            a = {}
+        a.setdefault('attachmentFolderPath', ATTACH)
+        app.write_text(json.dumps(a, indent=2))
+
+
+def notes_in(enex):
+    """the notes of one .enex file, one at a time (big files stay out of memory)"""
+    for _, el in ET.iterparse(enex, events=('end',)):
+        if el.tag != 'note':
+            continue
+        guid = ''
+        for meta in el.iter('note-custom-metadata'):
+            guid = meta.findtext('guid') or ''
+        guid = guid or el.findtext('guid') or ''
+        attrs = el.find('note-attributes')
+        res = []
+        for r in el.findall('resource'):
+            raw = r.findtext('data') or ''
+            try:
+                data = base64.b64decode(raw)
+            except ValueError:
+                continue
+            ra = r.find('resource-attributes')
+            res.append({'data': data, 'hash': hashlib.md5(data).hexdigest(), 'mime': r.findtext('mime'),
+                        'name': ra.findtext('file-name') if ra is not None else ''})
+        created, _ = en_date(el.findtext('created'))
+        updated, mtime = en_date(el.findtext('updated') or el.findtext('created'))
+        yield {'guid': guid, 'title': el.findtext('title') or 'Untitled', 'content': el.findtext('content') or '',
+               'created': created, 'updated': updated, 'mtime': mtime,
+               'tags': [t.text for t in el.findall('tag') if t.text],
+               'source': (attrs.findtext('source-url') if attrs is not None else '') or '',
+               'resources': res}
+        el.clear()
+
+
+# -- Obsidian's vault list
+def obsidian_running():
+    return subprocess.run(['pgrep', '-x', 'obsidian'], capture_output=True).returncode == 0
+
+
+def register(paths):
+    try:
+        conf = json.loads(OBSIDIAN.read_text())
+    except (OSError, ValueError):
+        conf = {}
+    vaults = conf.setdefault('vaults', {})
+    known = {v.get('path') for v in vaults.values()}
+    added = 0
+    for p in paths:
+        if str(p) not in known:
+            vaults[secrets.token_hex(8)] = {'path': str(p), 'ts': int(time.time() * 1000)}
+            added += 1
+    if added:
+        OBSIDIAN.parent.mkdir(parents=True, exist_ok=True)
+        OBSIDIAN.write_text(json.dumps(conf))
+    return added, len(vaults)
+
+
+# -- main
+def export():
+    if not TOOL.exists():
+        sys.exit('evernote-backup is missing: pipx install evernote-backup')
+    if subprocess.run(['pgrep', '-f', 'evernote-backup sync'], capture_output=True).returncode == 0:
+        sys.exit('evernote-backup is still downloading: wait until it is done')
+    ENEX.mkdir(parents=True, exist_ok=True)
+    r = subprocess.run([str(TOOL), 'export', '-d', str(DB), '--add-guid', '--overwrite', '--no-export-date',
+                        str(ENEX)], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit('export failed: ' + (r.stderr or r.stdout).strip()[-400:])
+
+
+def main():
+    ap = argparse.ArgumentParser(description='Evernote notebooks -> Obsidian vaults in ~/Notes')
+    ap.add_argument('--list', action='store_true', help='show the notebooks as JSON')
+    ap.add_argument('--map', action='append', default=[], metavar='NOTEBOOK=VAULT')
+    ap.add_argument('--skip', action='append', default=[], metavar='NOTEBOOK')
+    ap.add_argument('--dry-run', action='store_true', help='count only, write nothing')
+    ap.add_argument('--no-export', action='store_true', help='use the .enex files already there')
+    a = ap.parse_args()
+    if a.list:
+        print(json.dumps(notebooks(), indent=1))
+        return
+    if not DB.exists():
+        sys.exit(f'nothing downloaded yet ({DB}): run evernote-backup init-db and sync first')
+    names = dict(m.split('=', 1) for m in a.map if '=' in m)
+    if not a.no_export:
+        print('Exporting from the download…', flush=True)
+        export()
+    plan = {}                                            # vault -> [(notebook, enex file)]
+    for f in sorted(ENEX.rglob('*.enex')):
+        nb = f.stem
+        if nb in a.skip:
+            continue
+        plan.setdefault(clean_name(names.get(nb) or vault_name(nb)), []).append((nb, f))
+    if not plan:
+        sys.exit('no notebooks to convert')
+    vaults = []
+    for vname, books in plan.items():
+        v = Vault(NOTES / vname, a.dry_run)
+        for nb, f in books:
+            sub = clean_name(nb) if len(books) > 1 else ''
+            print(f'{nb} → ~/Notes/{vname}{"/" + sub if sub else ""}', flush=True)
+            for note in notes_in(f):
+                v.write(sub, note)
+        c = v.count
+        if not any(c.values()) and not v.path.exists():
+            print('  empty: no vault made', flush=True)
+            continue
+        v.finish()
+        kept = f', {c["kept"]} kept (you changed them in Obsidian)' if c['kept'] else ''
+        print(f'  {c["new"]} new, {c["updated"]} updated, {c["same"]} unchanged, '
+              f'{c["files"]} attachments{kept}', flush=True)
+        vaults.append(v.path)
+    if a.dry_run:
+        print('Dry run: nothing written.')
+        return
+    if obsidian_running():
+        print('Obsidian is open: close it and run this again to add the vaults to its list '
+              '(or in Obsidian: Open another vault → Open folder as vault).')
+        total = None
+    else:
+        added, total = register(vaults)
+        print(f'{added} vaults added to Obsidian ({total} in its list).')
+    if total and total > SYNC_LIMIT:
+        print(f'Note: Obsidian Sync takes up to {SYNC_LIMIT} vaults; you have {total}. '
+              'Map some notebooks to the same vault (--map).')
+    print('Done. Sync: open each vault in Obsidian → Settings → Sync → connect it to a new remote vault.')
+
+
+if __name__ == '__main__':
+    main()
