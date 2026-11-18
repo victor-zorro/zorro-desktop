@@ -21,7 +21,10 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
     shares, USB, Network) in the first ring; rest the mouse 0.4 s on a folder (or hold Super) and
     its contents unfold in the next ring, beside it; deeper than three levels the tree moves
     inward. Click opens (folders in Nemo), Esc goes one level back, the centre shows the path
-    and opens that folder. A mounted share (gvfs) unfolds too.
+    and opens that folder. A mounted share (gvfs) unfolds too. Rest on a **file** and a preview
+    panel shows beside the dial: photos (HEIC/WebP through ffmpeg), a video frame and its
+    length (ffmpegthumbnailer), a PDF's first page (pdftoppm), audio title/artist/length
+    (ffprobe), the first lines of text and code; moving on hides it.
   - Notes: **a tree** of the Obsidian vault. New note, Pinned (Obsidian bookmarks), Recent,
     your folders (after the Evernote move: the notebooks), Tags (inline #tags and the
     frontmatter tags Evernote's import writes). A folder unfolds into subfolders and notes,

@@ -217,6 +217,9 @@ class Dial(Gtk.Window):
         self.dwell = None               # (node, level, since): resting on something that unfolds
         self.dwell_id = None
         self.hub_key = None             # a player button in the hub centre (music)
+        self.preview = None             # the file whose preview is shown
+        self.previews = {}              # file -> preview data (None while it is made)
+        self.preview_pb = {}            # image file -> scaled picture
         for part in self.parts.values():
             threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
         self.theme = Gtk.IconTheme.get_default()
@@ -482,6 +485,7 @@ class Dial(Gtk.Window):
         self.draw_hub(cr, cx, cy, hub)
         if self.mode == 'music' and not self.filter:
             self.music_keys(cr, cx, cy, hub)
+        self.draw_preview(cr)
         am = math.radians((a0 + a1) / 2)
         if self.drag:
             a, x, y = self.drag
@@ -648,6 +652,105 @@ class Dial(Gtk.Window):
         self.dwell = None
         self.area.queue_draw()
 
+    def unfold(self, node, level):
+        """a folder opens in the next ring; a file shows its preview"""
+        if node.get('kids'):
+            self.expand(node, level)
+        elif node.get('preview'):
+            self.show_preview(node)
+
+    def show_preview(self, node):
+        self.preview, self.dwell = node, None
+        key = self.node_key(node)
+        if key not in self.previews:
+            self.previews[key] = None
+
+            def work():
+                try:
+                    data = node['preview']()
+                except Exception as e:  # noqa: BLE001 - a broken file: say so
+                    data = {'title': node['name'], 'meta': '', 'image': None, 'lines': [str(e)[:70]]}
+                self.previews[key] = data
+                GLib.idle_add(lambda: self.area.queue_draw() and False)
+            threading.Thread(target=work, daemon=True).start()
+        self.area.queue_draw()
+
+    def draw_preview(self, cr):
+        """the panel beside the dial: picture or first lines, name, size and date"""
+        if not self.preview:
+            return
+        data = self.previews.get(self.node_key(self.preview))
+        cx, cy, hub, a0, a1, rings = self.fan()
+        outer = rings[-1][1]
+        W, H = 460, 360
+        sw, sh = self.geo.width, self.geo.height
+        x = cx - outer - W - 40 if cx > sw / 2 else cx + outer + 40
+        x = max(16, min(sw - W - 16, x))
+        y = max(16, min(sh - H - 16, cy - H + 40 if cy > sh / 2 else cy - 40))
+        r = 14
+        cr.new_path()
+        cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
+        cr.arc(x + W - r, y + r, r, 1.5 * math.pi, 0)
+        cr.arc(x + W - r, y + H - r, r, 0, 0.5 * math.pi)
+        cr.arc(x + r, y + H - r, r, 0.5 * math.pi, math.pi)
+        cr.close_path()
+        cr.set_source_rgba(0.02, 0.02, 0.04, 0.93)
+        cr.fill_preserve()
+        cr.set_source_rgba(1, 1, 1, 0.1)
+        cr.set_line_width(1)
+        cr.stroke()
+        for col, dx in ((RED, -1.2), (CYAN, 1.2)):           # chromatic top edge
+            cr.move_to(x + r + dx, y + 0.5)
+            cr.line_to(x + W - r + dx, y + 0.5)
+            cr.set_source_rgba(*col, 0.6)
+            cr.stroke()
+        if data is None:
+            self.text(cr, 'making the preview…', x + W / 2, y + H / 2, 10, bold=False, alpha=0.6, split=0)
+            return
+        area_h = H - 70
+        if data.get('image'):
+            pb = self.preview_pb.get(data['image'])
+            if pb is None:
+                try:
+                    pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(data['image'], W - 28, area_h - 10, True)
+                except GLib.Error:
+                    pb = False
+                self.preview_pb[data['image']] = pb
+            if pb:
+                Gdk.cairo_set_source_pixbuf(cr, pb, x + (W - pb.get_width()) / 2, y + 14 + (area_h - 10 - pb.get_height()) / 2)
+                cr.paint()
+        elif data.get('lines'):
+            lay = PangoCairo.create_layout(cr)
+            lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans Mono 9'))
+            lay.set_width(int((W - 28) * Pango.SCALE))
+            lay.set_ellipsize(Pango.EllipsizeMode.END)
+            lay.set_text('\n'.join(data['lines']), -1)
+            cr.save()
+            cr.rectangle(x + 14, y + 14, W - 28, area_h - 8)
+            cr.clip()
+            cr.move_to(x + 14, y + 14)
+            cr.set_source_rgba(*FG, 0.85)
+            PangoCairo.show_layout(cr, lay)
+            cr.restore()
+        cr.move_to(x + 14, y + H - 50)
+        cr.line_to(x + W - 14, y + H - 50)
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        cr.stroke()
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans Bold 10'))
+        lay.set_width(int((W - 28) * Pango.SCALE))
+        lay.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        lay.set_text(data.get('title', ''), -1)
+        cr.move_to(x + 14, y + H - 42)
+        cr.set_source_rgba(*FG, 1)
+        PangoCairo.show_layout(cr, lay)
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans 8'))
+        lay.set_text(data.get('meta', ''), -1)
+        cr.move_to(x + 14, y + H - 22)
+        cr.set_source_rgba(*FG, 0.6)
+        PangoCairo.show_layout(cr, lay)
+
     def dwell_tick(self):
         if not self.dwell or not same(self.hover, self.dwell[0]):
             self.dwell, self.dwell_id = None, None
@@ -655,7 +758,7 @@ class Dial(Gtk.Window):
             return False
         if time.time() - self.dwell[2] >= self.DWELL:
             self.dwell_id = None
-            self.expand(self.dwell[0], self.dwell[1])
+            self.unfold(self.dwell[0], self.dwell[1])
             return False
         self.area.queue_draw()
         return True
@@ -729,7 +832,7 @@ class Dial(Gtk.Window):
                 if pb:
                     Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2 - 3)
                     cr.paint()
-                if t.get('kids'):
+                if t.get('kids'):              # a chevron: it unfolds (files show a preview instead)
                     ch = self.lucide('chevron-right', 10, 0.4)
                     if ch:
                         Gdk.cairo_set_source_pixbuf(cr, ch, x + size * 0.55, y - size * 0.75)
@@ -899,12 +1002,16 @@ class Dial(Gtk.Window):
             self.hover, self.hub_hover, self.hub_key = h, z, key
             self.area.queue_draw()
         part = self.parts.get(self.mode)
-        if h and h.get('kids') and part is not None and getattr(part, 'tree', False):
+        if self.preview and not same(h, self.preview):
+            self.preview = None             # moved on: the preview goes
+            self.area.queue_draw()
+        if h and (h.get('kids') or h.get('preview')) and part is not None and getattr(part, 'tree', False):
             lv = slot[4]
             path = self.path.get(self.mode, [])
-            if not (lv < len(path) and same(path[lv], h)):
+            done = same(self.preview, h) if not h.get('kids') else (lv < len(path) and same(path[lv], h))
+            if not done:
                 if ev.state & Gdk.ModifierType.MOD4_MASK:      # Super held: at once
-                    self.expand(h, lv)
+                    self.unfold(h, lv)
                 elif not (self.dwell and same(self.dwell[0], h)):
                     self.dwell = (h, lv, time.time())
                     if not self.dwell_id:

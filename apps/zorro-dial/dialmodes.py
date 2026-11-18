@@ -320,6 +320,82 @@ def folder_tile(path, name=None, icon='lucide:folder', sub=None):
                 id=str(path), kids=lambda: folder_kids(path))
 
 
+PREVIEW_DIR = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-dial-preview'
+IMAGES = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'ico', 'pnm', 'tga'}
+CONVERT = {'webp', 'heic', 'heif', 'avif', 'jxl'}
+VIDEO = {'mp4', 'mov', 'mkv', 'webm', 'avi', 'mxf', 'm4v', 'mpg', 'mpeg', 'mts', 'braw'}
+AUDIO = {'mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'aiff'}
+
+
+def human(n):
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if n < 1024 or unit == 'GB':
+            return f'{n:.0f} {unit}' if unit == 'B' else f'{n:.1f} {unit}'
+        n /= 1024
+
+
+def file_preview(path):
+    """what the Dialer shows when you rest on a file: {title, meta, image (a file), lines}"""
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError:
+        return {'title': p.name, 'meta': 'gone', 'image': None, 'lines': []}
+    ext = p.suffix.lower().lstrip('.')
+    out = {'title': p.name, 'meta': f'{human(st.st_size)} · {time.strftime("%-d %b %Y %H:%M", time.localtime(st.st_mtime))}',
+           'image': None, 'lines': []}
+    PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    png = PREVIEW_DIR / f'{abs(hash((str(p), st.st_mtime)))}.png'
+
+    def probe():
+        try:
+            return json.loads(run('ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', str(p),
+                                  timeout=10) or '{}').get('format', {})
+        except ValueError:
+            return {}
+
+    def length(fmt):
+        d = float(fmt.get('duration') or 0)
+        return f'{int(d // 3600)}:{int(d % 3600 // 60):02d}:{int(d % 60):02d}' if d >= 3600 else \
+            f'{int(d // 60)}:{int(d % 60):02d}'
+    if ext in IMAGES:
+        out['image'] = str(p)
+    elif ext in CONVERT:
+        if png.exists() or subprocess.run(['ffmpeg', '-y', '-v', 'quiet', '-i', str(p), '-frames:v', '1',
+                                           '-vf', 'scale=640:-2', str(png)], timeout=20).returncode == 0:
+            out['image'] = str(png)
+    elif ext in VIDEO:
+        fmt = probe()
+        out['meta'] += f' · {length(fmt)}' if fmt.get('duration') else ''
+        if png.exists() or subprocess.run(['ffmpegthumbnailer', '-i', str(p), '-o', str(png), '-s', '640',
+                                           '-t', '15%'], capture_output=True, timeout=30).returncode == 0:
+            out['image'] = str(png)
+    elif ext == 'pdf':
+        prefix = png.with_suffix('')
+        if not png.exists():
+            subprocess.run(['pdftoppm', '-png', '-f', '1', '-l', '1', '-scale-to', '640', '-singlefile',
+                            str(p), str(prefix)], capture_output=True, timeout=30)
+        if png.exists():
+            out['image'] = str(png)
+    elif ext in AUDIO:
+        fmt = probe()
+        tags = {k.lower(): v for k, v in (fmt.get('tags') or {}).items()}
+        out['lines'] = [x for x in (tags.get('title'), tags.get('artist'), tags.get('album')) if x]
+        out['meta'] += f' · {length(fmt)}' if fmt.get('duration') else ''
+    else:
+        try:
+            with open(p, 'rb') as fh:
+                head = fh.read(6000)
+        except OSError:
+            head = b''
+        if head and b'\0' not in head:
+            text = head.decode('utf-8', 'replace').expandtabs(4)
+            out['lines'] = [ln.rstrip()[:76] for ln in text.splitlines()[:18]]
+        else:
+            out['lines'] = [f'{ext.upper() or "a"} file']
+    return out
+
+
 def folder_kids(path, limit=60):
     """a folder's contents: folders first, then files, newest first; no hidden ones"""
     try:
@@ -336,7 +412,8 @@ def folder_kids(path, limit=60):
     files = sorted((e for e in entries if not e.is_dir(follow_symlinks=True)), key=mtime, reverse=True)
     out = [folder_tile(e.path) for e in dirs[:limit]]
     for f in files[:max(0, limit - len(out))]:
-        out.append(tile(kind_icon(f.name), f.name[:24], '', lambda p=f.path: spawn('xdg-open', p), id=f.path))
+        out.append(tile(kind_icon(f.name), f.name[:24], '', lambda p=f.path: spawn('xdg-open', p), id=f.path,
+                        preview=lambda p=f.path: file_preview(p)))
     return out
 
 
@@ -379,7 +456,8 @@ class Files(Part):
             pass
         recent.sort(reverse=True)
         self.recent = [tile(kind_icon(p), os.path.basename(p)[:24], os.path.dirname(p).replace(str(HOME), '~'),
-                            lambda p=p: spawn('xdg-open', p), id=p) for _, p in recent[:12]]
+                            lambda p=p: spawn('xdg-open', p), id=p, preview=lambda p=p: file_preview(p))
+                       for _, p in recent[:12]]
         roots.append(tile('lucide:rotate-ccw', 'Recent', f'{len(self.recent)} files', None, id='recent',
                           kids=lambda: self.recent))
         nemo = shutil.which('nemo')
