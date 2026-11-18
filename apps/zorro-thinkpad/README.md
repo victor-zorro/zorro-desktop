@@ -58,6 +58,7 @@ a tiny `zorro-thinkpad key NAME` that sends one message over a unix socket.
 | `zsettings/cli.py` | command line: `key`, `keyd`, `osd`, `morse`, `--page`, `--apply-windows` |
 | `zsettings/base.py` | settings file (atomic, locked writes), small helpers, indicator client |
 | `zsettings/keys.py`, `lights.py`, `keyd.py` | Fn key actions; red dot, LEDs, Morse; the background part |
+| `zsettings/awake.py` | no screen saver / lock during calls (camera or mic in use) and when apps ask (org.freedesktop.ScreenSaver) |
 | `zsettings/power.py`, `hardware.py` | TLP + battery; hardware check rows |
 | `zsettings/windows.py`, `look.py` | window theme, picom, kitty, GTK css; login look + presets |
 | `zsettings/fxshim.py` | loads the shared overlay look (apps/zorro-fx) with a plain fallback |

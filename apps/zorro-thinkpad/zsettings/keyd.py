@@ -268,7 +268,10 @@ def cmd_keyd():
     hw = KBD_LED / 'brightness_hw_changed'
     if hw.exists():
         fh = open(hw)
-        fh.read()
+        try:
+            fh.read()
+        except OSError:             # ENODATA until Fn+Space is first pressed after boot
+            pass
 
         def on_kbd(_fd, _cond):
             try:
@@ -297,5 +300,12 @@ def cmd_keyd():
             '/org/freedesktop/login1', None, Gio.DBusSignalFlags.NONE, on_sleep)
     except GLib.Error as e:
         print(f'zorro-thinkpad keyd: no resume signal: {e.message}', file=sys.stderr)
+
+    # no screen saver or lock during calls and videos (zsettings/awake.py)
+    try:
+        from .awake import Awake
+        Awake()                 # its D-Bus object and timer keep it alive
+    except GLib.Error as e:
+        print(f'zorro-thinkpad keyd: screen-saver inhibit unavailable: {e.message}', file=sys.stderr)
 
     Gtk.main()

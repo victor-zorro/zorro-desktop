@@ -104,6 +104,19 @@ class ThinkpadPages:
         apply.connect('clicked', self.on_power_apply)
         row.add(apply)
         box.add(row)
+
+        box.add(heading('Screen stays on', 'Screen on'))
+        calls = Gtk.Switch(halign=Gtk.Align.START,
+                           active=load_conf().get('awake_calls', True))
+        calls.connect('notify::active',
+                      lambda w, _p: update_conf(None, awake_calls=w.get_active()))
+        line = Gtk.Box(spacing=12)
+        line.add(Gtk.Label(label='During calls: while the camera or microphone is in use'))
+        line.add(calls)
+        box.add(line)
+        box.add(note('Apps that play video or hold a call (Firefox, Signal, …) also ask the '
+                     'screen to stay on; that always works. Otherwise the screen locks after '
+                     '10 minutes without input.'))
         self.power_msg = note()
         box.footer(self.power_msg)
         if not os.path.exists(HELPER) or not shutil.which('pkexec'):
