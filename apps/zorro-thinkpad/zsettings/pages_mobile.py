@@ -116,7 +116,7 @@ class MobilePages:
         return box
 
     def lte_tick(self):
-        if self.stack.get_visible_child_name() == 'network' and not self.lte_busy:
+        if self.tab_on('network') and not self.lte_busy:
             self.lte_refresh(quiet=True)
         return True
 

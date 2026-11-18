@@ -4,6 +4,7 @@ from .base import load_conf
 from .fxshim import Snow, zorro_fx
 from .keyd import style_osd
 from .pages_desktop import DesktopPages
+from .pages_home import HomePages
 from .pages_look import LookPages
 from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
@@ -15,9 +16,9 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
 
-# ---- the app window: top tabs: Theme, Desktop, Login screen, Hardware, Audio, Power, Network ---
+# ---- the app window: Home (often used) + the gear: Theme, Desktop, Login screen, Hardware, Audio, Power, Network ---
 
-class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
+class Win(HomePages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
@@ -26,8 +27,22 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, Aud
         self.set_icon_name('preferences-desktop')
         stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         self.stack = stack
+        # header: Home shows "Zorro" and the gear; all setup shows the tabs and a way back
         hb = Gtk.HeaderBar(show_close_button=True)
-        hb.set_custom_title(Gtk.StackSwitcher(stack=stack))
+        self.titles = Gtk.Stack()
+        t_home = Gtk.Label()
+        t_home.set_markup('<b>Zorro</b>')
+        self.titles.add_named(t_home, 'home')
+        self.titles.add_named(Gtk.StackSwitcher(stack=stack), 'setup')
+        hb.set_custom_title(self.titles)
+        self.back = Gtk.Button.new_from_icon_name('go-previous-symbolic', Gtk.IconSize.BUTTON)
+        self.back.set_tooltip_text('Home')
+        self.back.connect('clicked', lambda b: self.show_home())
+        hb.pack_start(self.back)
+        self.gear = Gtk.Button(label='⚙  All setup', relief=Gtk.ReliefStyle.NONE)
+        self.gear.set_tooltip_text('Everything that is set up once: theme, desktop, hardware, power, network')
+        self.gear.connect('clicked', lambda b: self.show_setup())
+        hb.pack_end(self.gear)
         self.set_titlebar(hb)
         style_osd(self.get_screen())
         self.groups = {}
@@ -36,6 +51,7 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, Aud
         hw.section('hw', 'Hardware', self.hw_page())
         hw.section('keys', 'ThinkPad', self.keys_page())
         hw.section('lights', None, self.lights_page())
+        hw.section('sys', 'System', self.sysinfo_page())
         snd = Group()                   # outputs, inputs, per app, several at once
         a_out, a_in, a_play, a_tog = self.audio_pages()
         snd.section('aout', 'Audio', a_out)
@@ -52,7 +68,7 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, Aud
         net.section('nb', 'NetBird', nb)
         desk = Group()
         desk.section('wall', 'Wallpaper', self.wall_page())
-        desk.section('dial', 'Launcher', self.dial_page())
+        desk.section('dial', 'Dialer', self.dial_page())
         desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
         desk.section('fx', 'Overlays', self.fx_page('overlay'))
         desk.section('windows', 'Windows', self.windows_page())
@@ -74,7 +90,10 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, Aud
         outer = Gtk.Box()
         stack.set_hexpand(True)
         stack.set_vexpand(True)
-        outer.add(stack)
+        self.top = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True, vexpand=True)
+        self.top.add_named(self.home_widget(), 'home')
+        self.top.add_named(stack, 'setup')
+        outer.add(self.top)
         self.add(outer)
         if zorro_fx:
             self.bg_snow = Snow(outer, radius=0, fps=24, max_parts=1500, profile='app',
@@ -88,7 +107,11 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, Aud
                 self.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             self.timers.append(GLib.timeout_add(300, self.follow_app_bg))
         self.show_all()
-        self.show_page(select)
+        if select:
+            self.show_page(select)
+        else:
+            self.show_home()
+        self.home.connect('notify::visible-child-name', lambda *a: self.sync_header())
         self.custom_box.set_visible(load_conf().get('star') == 'custom')
         self.timers.append(GLib.timeout_add_seconds(5, self.refresh))
         self.connect('destroy', self.on_destroy)
@@ -109,11 +132,39 @@ class Win(ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, Aud
                 setattr(self, name, None)
 
     def show_page(self, pid):
-        """open a sub-page by id, e.g. power:0 (sidebar + top tab)"""
+        """open a sub-page by id, e.g. power:0 (sidebar + top tab), in all setup"""
         grp = next((n for n, g in self.groups.items() if pid in g.ids), None)
         if grp:
+            self.show_setup()
             self.stack.set_visible_child_name(grp)
             self.groups[grp].select(pid)
+
+    def show_setup(self):
+        self.cam_stop()
+        self.top.set_visible_child_name('setup')
+        self.sync_header()
+
+    def show_home(self):
+        self.cam_stop()
+        self.top.set_visible_child_name('home')
+        self.home.set_visible_child_name('dash')
+        self.home_refresh()
+        self.sync_header()
+
+    def sync_header(self):
+        on_home = self.top.get_visible_child_name() == 'home'
+        dash = on_home and self.home.get_visible_child_name() == 'dash'
+        self.titles.set_visible_child_name('home' if on_home else 'setup')
+        sub = {'eq': 'Equaliser', 'cam': 'Webcam'}.get(self.home.get_visible_child_name())
+        self.titles.get_child_by_name('home').set_markup(f'<b>{sub or "Zorro"}</b>')
+        self.back.set_visible(not dash)
+        self.gear.set_visible(on_home)
+        if on_home and self.home.get_visible_child_name() != 'cam':
+            self.cam_stop()
+
+    def tab_on(self, name):
+        """is this setup tab on screen (not hidden behind Home)?"""
+        return self.top.get_visible_child_name() == 'setup' and self.stack.get_visible_child_name() == name
 
 
 def cmd_app(select=None):

@@ -73,7 +73,7 @@ class AudioPages:
             lb.set_text(text)
 
     def au_tick(self):
-        if self.stack.get_visible_child_name() == 'audio':
+        if self.tab_on('audio'):
             self.au_refresh()
         return True
 

@@ -29,3 +29,9 @@ mobile-broadband-provider-info
 # Bluetooth: BlueZ + audio over Bluetooth for PipeWire (speakers, headsets, Douk DAC)
 bluez
 libspa-0.2-bluetooth
+# Zorro app Home: webcam controls (v4l2-ctl) and the live webcam picture (GStreamer)
+v4l-utils
+gstreamer1.0-plugins-good
+gstreamer1.0-gtk3
+gir1.2-gstreamer-1.0
+gir1.2-gst-plugins-base-1.0

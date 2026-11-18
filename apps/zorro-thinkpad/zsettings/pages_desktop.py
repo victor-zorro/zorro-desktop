@@ -430,7 +430,7 @@ class DesktopPages:
             c['order'] = dial.load_conf().get('order', {}) if order is None else order
             write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
-        box.add(heading('Where the dial opens', 'Place'))
+        box.add(heading('Where the dialer opens', 'Place'))
         place = Gtk.ComboBoxText(halign=Gtk.Align.START)
         place.append('orb', 'Fanning out from the clock (info circle)')
         place.append('centre', 'A full circle in the middle of the screen')

@@ -294,6 +294,8 @@ def cmd_keyd():
     def on_sleep(_conn, _sender, _path, _iface, _signal, params):
         if not params.unpack()[0]:                      # False = just woke up
             GLib.timeout_add(1500, lambda: apply_lights() and False)
+            from .webcam import restore as cam_restore      # the camera forgets after standby
+            GLib.timeout_add(3000, lambda: cam_restore() and False)
     try:
         Gio.bus_get_sync(Gio.BusType.SYSTEM, None).signal_subscribe(
             'org.freedesktop.login1', 'org.freedesktop.login1.Manager', 'PrepareForSleep',
@@ -303,7 +305,10 @@ def cmd_keyd():
 
     # the 'Together' sound output, if set up in the Audio tab (PipeWire needs a moment)
     from .audio import together_restore
+    from . import eq, webcam
     threading.Timer(8, together_restore).start()
+    threading.Timer(9, eq.restore).start()              # the equaliser, if it was on
+    threading.Timer(3, webcam.restore).start()          # kept webcam picture settings
 
     # no screen saver or lock during calls and videos (zsettings/awake.py)
     try:

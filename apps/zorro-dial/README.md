@@ -1,6 +1,6 @@
-# zorro-dial
+# zorro-dial: the Dialer
 
-The app launcher: a dial around a clock, in the Chromatic sea look.
+The app launcher (called the Dialer): a dial around a clock, in the Chromatic sea look.
 
 - **Three rings**: the apps you start most sit on the inner ring, less used ones further out
   (usage counts with a two-week half-life: `~/.local/state/zorro-dial/usage.json`).

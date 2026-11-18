@@ -16,7 +16,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-thinkpad/` — the Zorro settings app (zorro-settings, F9) + ThinkPad keys/indicator (keyd), power, LEDs, LTE, hardware
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
   - `apps/zorro-icons/` — icon theme Zorro-Lucide: official app icons in black and white + white Lucide line icons for symbols (build-icons, mapping.json)
-  - `apps/zorro-dial/` — app launcher: a dial around a clock, 3 rings by usage × 3 category slices (Super tap / Super+Space)
+  - `apps/zorro-dial/` — the Dialer: app launcher around the clock; hub in six parts (Apps, Music, Notes, Messages, System, Files) (Super tap / Super+Space)
   - `apps/zorro-wall/` — living wallpaper: the login engine (iridescent deep sea + wireframe animal) on the desktop
   - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones
   - `apps/zorro-winpos/` — windows reopen where you left them (per app place, size, maximized)
@@ -28,7 +28,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 ## Rules
 - Every change must also land in the repo so a fresh machine gets it: package → packages/*.txt, config → config/, system file → system/ + an install line in install.sh.
 - Keep install.sh safe to rerun: no blind appends; check before adding lines.
-- Desktop is windows-only Openbox: no panel, no tray. Launcher = zorro-dial (rofi on Super+Shift+Space), info circle = zorro-orb (conky as fallback), notifications = dunst.
+- Desktop is windows-only Openbox: no panel, no tray. Launcher = the Dialer, zorro-dial (rofi on Super+Shift+Space), info circle = zorro-orb (conky as fallback), notifications = dunst.
 - Keybinds live in config/openbox/.config/openbox/rc.xml (Super = W-). Reload with `openbox --reconfigure`.
 - Scripts go in config/bin/.local/bin (on PATH). New apps go in apps/<name>/, not in config/.
 - sudo needs a password: put sudo commands in a code block for Vincent to run, don't run them yourself.

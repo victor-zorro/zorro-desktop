@@ -327,7 +327,7 @@ class NetworkPages:
         return True
 
     def net_tick(self):
-        if self.stack.get_visible_child_name() == 'network':
+        if self.tab_on('network'):
             self.net_refresh()
             self.nb_tick = getattr(self, 'nb_tick', 0) + 1
             if self.nb_tick % 3 == 1:
