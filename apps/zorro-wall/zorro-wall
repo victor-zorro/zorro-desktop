@@ -28,6 +28,7 @@ DEFAULTS = {
     'enabled': True,
     'follow_login': True,       # same animal / background / colours as the login screen
     'fps_ac': 24, 'fps_battery': 8,
+    'fps_calm': 8,              # smart frame rate: while the water is empty or nothing moves fast
     'render_scale': 0.5,        # half resolution: soft and grainy anyway, 4x less work
     'look': {},                 # own look when follow_login is off (same keys as look.json)
 }
@@ -72,6 +73,7 @@ def look(c):
         if k in base:
             out[k] = min(float(base[k]), CALM[k])
     out['fps'] = c['fps_battery'] if on_battery() else c['fps_ac']
+    out['fps_min'] = min(float(c.get('fps_calm', 8)), out['fps'])
     out['render_scale'] = c.get('render_scale', 0.5)
     return out
 

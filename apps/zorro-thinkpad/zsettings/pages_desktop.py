@@ -549,10 +549,14 @@ class DesktopPages:
         box.add(own)
         box.add(note('The login engine as the desktop: the iridescent background with the '
                      'wireframe animal and marine snow, with the TV effects toned down.'))
-        box.add(heading('Battery', 'Battery'))
+        box.add(heading('Power', 'Power'))
         box.add(grid([('Frames per second on the charger', scale('fps_ac', 2, 30, 1, lambda v: f'{v:.0f}')),
                       ('Frames per second on battery', scale('fps_battery', 1, 20, 1, lambda v: f'{v:.0f}')),
+                      ('Calm frame rate', scale('fps_calm', 1, 24, 1, lambda v: f'{v:.0f}')),
                       ('Resolution', scale('render_scale', 0.25, 1, 0.05, lambda v: f'{v * 100:.0f}%'))]))
-        box.add(note('It stops drawing while windows cover the desktop. Lower resolution is '
-                     'softer and much lighter; 50% looks the same on this grainy style.'))
+        box.add(note('Smart frame rate: full speed only while something moves fast (the animal '
+                     'crossing, a glitch, the fade-in); the calm rate while the water is empty. '
+                     'Measured on this T14: every frame costs about the same, the effects are '
+                     'nearly free. 24 fps ≈ 15% GPU + 20% of one CPU core, 8 fps about a third. '
+                     'It stops drawing while windows cover the desktop.'))
         return box

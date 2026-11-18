@@ -26,7 +26,7 @@ def custom_presets():
 
 
 WALL_DEFAULTS = {'enabled': True, 'follow_login': True, 'fps_ac': 24, 'fps_battery': 8,
-                 'render_scale': 0.5, 'look': {}}
+                 'fps_calm': 8, 'render_scale': 0.5, 'look': {}}
 LOOK_FILE = '/etc/zorro-dm/look.json'
 _look_draft = {}
 LOOK_ANIMALS = {'whale': 'Blue whale', 'vaquita': 'Vaquita (rarest porpoise)',

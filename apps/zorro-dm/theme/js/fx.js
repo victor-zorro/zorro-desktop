@@ -24,6 +24,7 @@
     background: 'deep',            // deep (dark, pools of light), waves, streaks, black
     bg_strength: 1, bg_speed: 1, bg_aberration: 1,
     fps: 30,                       // the wallpaper asks for less
+    fps_min: 10,                   // smart frame rate: this low while nothing moves fast
     render_scale: 1,               // < 1: draw smaller and let the screen scale it up
   };
   const BG_MODES = { waves: 0, streaks: 1, deep: 2 };
@@ -834,19 +835,59 @@
     burstUntil = now + ms;
     seed = Math.random() * 100;
     for (const f of listeners) f(strength, ms);
+    if (typeof wake === 'function') { lastFrame = 0; wake(); }
   }
 
-  let lastFrame = 0, paused = false;
+  // ---------- smart frame rate -------------------------------------------------
+  // Measured on the T14: the effects cost almost nothing, every frame drawn costs about
+  // the same (web engine + X server + GPU). So draw fast only while something moves fast:
+  // fades, glitches and the animal crossing the screen (about 3 screen px per frame);
+  // empty water and an animal outside the screen get fps_min (the background itself
+  // only changes ten times a second).
+  const STEP_PX = 3;
+  function animalFps(now) {
+    const p = pass;
+    if (!p || now < p.t0 || now - p.t0 > p.dur * 1000) return 0;
+    const k = (now - p.t0) / (p.dur * 1000);
+    const span = 2.6 + p.z * .9;
+    const f = CAM / (CAM + p.z);
+    const sc = Math.min(wc.width, wc.height * 1.9) / 2;
+    const toScreen = innerWidth / Math.max(1, wc.width);
+    const x = p.dir * (span - 2 * span * k) * f * sc;                  // animal canvas px
+    if (Math.abs(x) > wc.width / 2 + p.len * f * sc) return 0;        // off the screen
+    const speed = 2 * span / p.dur * f * sc * toScreen * 1.3;         // + body motion
+    return speed / STEP_PX;
+  }
+  function wantFps(now, t) {
+    const top = Math.max(1, Math.min(60, +cfg.fps || 30));
+    const low = Math.min(top, Math.max(1, +cfg.fps_min || top));
+    if (t < 2.5 || (cfg.crt && t < 4.5) || powerTarget === 0 || now < burstUntil + 300 || burst > .01)
+      return top;
+    return Math.max(low, Math.min(top, animalFps(now)));
+  }
+
+  let lastFrame = 0, paused = false, timer = 0, curFps = 0, rafPending = false;
+  function raf() {                          // one frame chain only, however often woken
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame((now) => { rafPending = false; frame(now); });
+  }
+  function wake() { clearTimeout(timer); timer = 0; if (!paused) raf(); }
+  function next(now) {                      // sleep until the next frame is due: no 60 Hz
+    const fps = wantFps(now, (now - START) / 1000);  // wake-ups when drawing at 10 fps
+    curFps = fps;
+    const wait = Math.max(0, lastFrame + 1000 / fps - performance.now() - 4);
+    clearTimeout(timer); timer = 0;
+    if (wait < 8) raf();
+    else timer = setTimeout(() => { timer = 0; raf(); }, wait);
+  }
   function frame(now) {
     if (paused) return;                     // FX.pause(false) starts it again
-    // at most 30 frames a second: the lock screen can stay up for hours
-    if (now - lastFrame < 1000 / Math.max(1, Math.min(60, +cfg.fps || 30)) - 1) {
-      requestAnimationFrame(frame); return;
-    }
+    if (now - lastFrame < 1000 / wantFps(now, (now - START) / 1000) - 1) { next(now); return; }
     lastFrame = now;
     if (!wc.width || !wc.height) {          // window not sized yet
       if (innerWidth) resize();
-      requestAnimationFrame(frame);
+      raf();
       return;
     }
     const t = (now - START) / 1000;
@@ -917,27 +958,30 @@
     } else if (powerTarget === 0 && powerCb) {
       const cb = powerCb; powerCb = null; cb();
     }
-    requestAnimationFrame(frame);
+    next(now);
   }
-  requestAnimationFrame(frame);
+  raf();
 
   window.FX = {
     burst: triggerBurst,
     onBurst: (f) => listeners.push(f),
-    powerOff(cb) { powerTarget = 0; powerStart = performance.now(); powerCb = cb; },
+    powerOff(cb) { powerTarget = 0; powerStart = performance.now(); powerCb = cb; wake(); },
     // live changes (the Zorro app's preview); a new animal swims in right away
     setLook(obj) {
       const animal = cfg.animal;
       Object.assign(cfg, obj || {});
       if (cfg.animal !== animal) { pass = null; nextPassAt = 0; firstPass = true; }
       makeSnow();
+      lastFrame = 0; wake();
     },
     // the wallpaper stops drawing while windows cover it
     pause(on) {
       if (paused === !!on) return;
       paused = !!on;
-      if (!paused) { lastFrame = 0; requestAnimationFrame(frame); }
+      clearTimeout(timer); timer = 0;
+      if (!paused) { lastFrame = 0; raf(); }
     },
+    get fps() { return curFps; },
     startedAt: START,
   };
 })();
