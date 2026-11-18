@@ -60,13 +60,15 @@ def wm_class(xid):
 
 
 def pixbufs(icon):
-    svg = THEME / f'{icon}.svg'
-    if not svg.exists():
-        return None
-    try:
-        return [GdkPixbuf.Pixbuf.new_from_file_at_size(str(svg), s, s) for s in (48, 32, 16)]
-    except GLib.Error:
-        return None
+    """the theme's icon: black-and-white official PNG, or a white line SVG"""
+    base = THEME.parent
+    for f in (base / 'apps-256' / f'{icon}.png', base / 'scalable' / f'{icon}.svg'):
+        if f.exists():
+            try:
+                return [GdkPixbuf.Pixbuf.new_from_file_at_size(str(f), s, s) for s in (48, 32, 16)]
+            except GLib.Error:
+                return None
+    return None
 
 
 def argb(pb):

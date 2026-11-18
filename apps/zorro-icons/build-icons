@@ -1,11 +1,17 @@
 #!/usr/bin/python3
-"""build-icons: the "Zorro-Lucide" icon theme, white line icons with some transparency.
+"""build-icons: the "Zorro-Lucide" icon theme: one look for every icon, slightly see-through.
 
-Made from the Lucide icons in lucide/ (ISC, see lucide/LICENSE) with mapping.json:
-standard icon names and app icons become Lucide line icons; anything not mapped falls back
-to Adwaita. Output: ~/.local/share/icons/Zorro-Lucide (GTK picks it up by name).
+  apps    : the app's own official icon, turned black and white (greyscale), so it stays
+            recognisable; --style lucide uses white Lucide line icons instead.
+            Apps without an icon file of their own (Google apps and WhatsApp in Firefox)
+            use the brand's one-colour logo from brands/ (Simple Icons, CC0).
+  symbols : volume, battery, network, ... as white Lucide line icons (lucide/, ISC),
+            names from mapping.json. Anything else falls back to Adwaita.
 
-  build-icons [--opacity 0.5]     (the Zorro app → Desktop → Text & colours runs this)
+Output: ~/.local/share/icons/Zorro-Lucide (GTK, rofi and zorro-winicons pick it up by name).
+
+  build-icons [--opacity 0.5] [--style official|lucide]
+Without options it uses the Zorro app's choices (Desktop → Text & colours).
 Also writes user overrides for apps that point at an icon file instead of a name (Blender).
 """
 import configparser
@@ -17,51 +23,180 @@ import sys
 from pathlib import Path
 
 HERE = Path(os.path.realpath(__file__)).parent
-OUT = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'icons' / 'Zorro-Lucide'
-APPS = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'applications'
+DATA = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share'))
+OUT = DATA / 'icons' / 'Zorro-Lucide'
+APPS = DATA / 'applications'
+APP_CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-thinkpad' / 'config.json'
+DESKTOP_DIRS = [APPS, Path('/usr/local/share/applications'), Path('/usr/share/applications'),
+                Path('/var/lib/flatpak/exports/share/applications')]
+ICON_DIRS = [DATA / 'icons/hicolor', Path('/usr/local/share/icons/hicolor'),
+             Path('/usr/share/icons/hicolor'), Path('/var/lib/flatpak/exports/share/icons/hicolor')]
+PIXMAPS = [Path('/usr/share/pixmaps')]
+BRANDS = {'zorro-google': 'gmail', 'zorro-whatsapp': 'whatsapp'}   # Firefox profile apps
+OURS = {'preferences-desktop', 'folder-remote', 'applets-screenshooter', 'accessories-screenshot'}
+SIZES = (256, 32)                     # PNG sizes for the official icons
 
 
-def build(opacity):
+def desktop_icons():
+    """{icon name or path: .desktop file} for every app in the menus"""
+    out = {}
+    for d in DESKTOP_DIRS:
+        for f in sorted(d.glob('*.desktop')) if d.is_dir() else []:
+            cp = configparser.ConfigParser(interpolation=None, strict=False)
+            try:
+                cp.read(f, encoding='utf-8')
+                icon = cp['Desktop Entry'].get('Icon', '').strip()
+            except (configparser.Error, KeyError, UnicodeDecodeError):
+                continue
+            if icon:
+                out.setdefault(icon, f.name)
+    return out
+
+
+def official_file(name):
+    """the app's own icon file: scalable SVG first, else the biggest PNG"""
+    if os.path.isabs(name):
+        return Path(name) if Path(name).is_file() else None
+    best, best_size = None, -1
+    for base in ICON_DIRS:
+        if not base.is_dir():
+            continue
+        for f in base.glob(f'*/apps/{name}.*'):
+            if f.suffix not in ('.svg', '.png'):
+                continue
+            size = 10 ** 6 if f.parent.parent.name == 'scalable' else \
+                int(re.match(r'(\d+)', f.parent.parent.name).group(1)) if re.match(r'\d+', f.parent.parent.name) else 0
+            if size > best_size:
+                best, best_size = f, size
+        for f in base.glob(f'apps/{name}.svg'):            # rofi puts one here
+            if best_size < 10 ** 6:
+                best, best_size = f, 10 ** 6
+    if best:
+        return best
+    for d in PIXMAPS:
+        for ext in ('.svg', '.png'):
+            if (d / f'{name}{ext}').is_file():
+                return d / f'{name}{ext}'
+    return None
+
+
+def greyscale(src, size, opacity):
+    """the icon in black and white: greyscale, contrast stretched so dark parts stay visible
+    on the dark desktop, then the shared transparency"""
+    import gi
+    gi.require_version('GdkPixbuf', '2.0')
+    from gi.repository import GdkPixbuf, GLib
+    import numpy as np
+    pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(src), size, size, True).add_alpha(False, 0, 0, 0)
+    w, h, rs = pb.get_width(), pb.get_height(), pb.get_rowstride()
+    a = np.frombuffer(pb.get_pixels(), np.uint8)[:rs * h].reshape(h, rs)[:, :w * 4].reshape(h, w, 4)
+    a = a.astype(np.float32) / 255
+    lum = a[..., 0] * .299 + a[..., 1] * .587 + a[..., 2] * .114
+    seen = a[..., 3] > .2
+    if seen.any():
+        lo, hi = np.percentile(lum[seen], 2), np.percentile(lum[seen], 98)
+        lum = np.clip((lum - lo) / max(hi - lo, .05), 0, 1)
+    lum = .3 + .7 * lum                                  # black parts become dark grey
+    out = np.zeros((size, size, 4), np.uint8)
+    y0, x0 = (size - h) // 2, (size - w) // 2
+    out[y0:y0 + h, x0:x0 + w, :3] = (lum[..., None] * 255).astype(np.uint8)
+    out[y0:y0 + h, x0:x0 + w, 3] = (a[..., 3] * opacity * 255).astype(np.uint8)
+    return GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(out.tobytes()),
+                                           GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
+
+
+def mono_svg(path, opacity):
+    """a one-colour brand logo, white with the shared transparency"""
+    svg = path.read_text()
+    return re.sub(r'<svg\b', f'<svg fill="#ffffff" fill-opacity="{opacity:.2f}"', svg, count=1)
+
+
+def lucide_svg(lucide, opacity):
+    svg = (HERE / 'lucide' / f'{lucide}.svg').read_text()
+    svg = re.sub(r'<!--.*?-->\s*', '', svg, flags=re.S)
+    return svg.replace('stroke="currentColor"', f'stroke="#ffffff" stroke-opacity="{opacity:.2f}"')
+
+
+def build(opacity, style):
     m = json.loads((HERE / 'mapping.json').read_text())
     tmp = OUT.with_name('.Zorro-Lucide.new')
     shutil.rmtree(tmp, ignore_errors=True)
     (tmp / 'scalable').mkdir(parents=True)
-    src = {}
-    for name, lucide in {**m['apps'], **m['symbols']}.items():
-        if lucide not in src:
-            svg = (HERE / 'lucide' / f'{lucide}.svg').read_text()
-            svg = re.sub(r'<!--.*?-->\s*', '', svg, flags=re.S)
-            # white, slightly see-through lines
-            svg = svg.replace('stroke="currentColor"',
-                              f'stroke="#ffffff" stroke-opacity="{opacity:.2f}"')
-            src[lucide] = svg
-        for n in (name, f'{name}-symbolic'):
-            (tmp / 'scalable' / f'{n}.svg').write_text(src[lucide])
-    (tmp / 'index.theme').write_text(
-        '[Icon Theme]\nName=Zorro-Lucide\nComment=White Lucide line icons (zorro-desktop)\n'
-        'Inherits=Adwaita,hicolor\nDirectories=scalable\n\n'
-        '[scalable]\nSize=24\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=Applications\n')
-    shutil.copy(HERE / 'lucide' / 'LICENSE', tmp / 'LICENSE-lucide')
-    shutil.rmtree(OUT, ignore_errors=True)
-    tmp.rename(OUT)
-    os.utime(OUT)                        # GTK notices the change
+    for s in SIZES:
+        (tmp / f'apps-{s}').mkdir()
+
     # apps that point at an icon file: a user copy of their .desktop with a themed name
+    file_icons = {}
     for desk, icon in m.get('desktop_overrides', {}).items():
         for d in ('/usr/share/applications', '/usr/local/share/applications'):
             f = Path(d) / desk
             if f.exists():
-                text = re.sub(r'^Icon=.*$', f'Icon={icon}', f.read_text(), flags=re.M)
+                text = f.read_text()
+                orig = re.search(r'^Icon=(.*)$', text, flags=re.M)
+                if orig and os.path.isabs(orig.group(1).strip()):
+                    file_icons[icon] = orig.group(1).strip()
                 APPS.mkdir(parents=True, exist_ok=True)
-                (APPS / desk).write_text(text)
+                (APPS / desk).write_text(re.sub(r'^Icon=.*$', f'Icon={icon}', text, flags=re.M))
                 break
-    print(f'Zorro-Lucide: {len(list((OUT / "scalable").iterdir()))} icons in {OUT}')
+
+    official = set()
+    if style == 'official':
+        names = {n for n in desktop_icons() if not os.path.isabs(n)} | set(file_icons) | set(BRANDS)
+        for name in sorted(names - OURS):
+            if name in BRANDS:
+                logo = HERE / 'brands' / f'{BRANDS[name]}.svg'
+                for n in (name, f'{name}-symbolic'):
+                    (tmp / 'scalable' / f'{n}.svg').write_text(mono_svg(logo, opacity))
+                official.add(name)
+                continue
+            src = official_file(file_icons.get(name, name))
+            if not src:
+                continue
+            try:
+                for s in SIZES:
+                    greyscale(src, s, opacity).savev(str(tmp / f'apps-{s}' / f'{name}.png'), 'png', [], [])
+                official.add(name)
+            except Exception as e:                       # a broken icon file: keep Lucide
+                print(f'build-icons: {name}: {e}', file=sys.stderr)
+
+    src = {}
+    for name, lucide in {**m['apps'], **m['symbols']}.items():
+        if name in official:
+            continue
+        src.setdefault(lucide, lucide_svg(lucide, opacity))
+        for n in (name, f'{name}-symbolic'):
+            (tmp / 'scalable' / f'{n}.svg').write_text(src[lucide])
+
+    dirs = ['scalable'] + [f'apps-{s}' for s in SIZES]
+    (tmp / 'index.theme').write_text(
+        '[Icon Theme]\nName=Zorro-Lucide\n'
+        'Comment=Black-and-white app icons and white Lucide line icons (zorro-desktop)\n'
+        f'Inherits=Adwaita,hicolor\nDirectories={",".join(dirs)}\n\n'
+        '[scalable]\nSize=24\nMinSize=8\nMaxSize=512\nType=Scalable\nContext=Applications\n\n'
+        '[apps-256]\nSize=256\nMinSize=33\nMaxSize=1024\nType=Scalable\nContext=Applications\n\n'
+        '[apps-32]\nSize=32\nMinSize=8\nMaxSize=32\nType=Scalable\nContext=Applications\n')
+    shutil.copy(HERE / 'lucide' / 'LICENSE', tmp / 'LICENSE-lucide')
+    shutil.copy(HERE / 'brands' / 'NOTICE', tmp / 'NOTICE-brands')
+    shutil.rmtree(OUT, ignore_errors=True)
+    tmp.rename(OUT)
+    os.utime(OUT)                        # GTK notices the change
+    print(f'Zorro-Lucide: {len(official)} official app icons ({style}), '
+          f'{len(list((OUT / "scalable").iterdir()))} line icons in {OUT}')
 
 
 def main():
-    opacity = 0.5
-    if '--opacity' in sys.argv:
-        opacity = min(1.0, max(0.2, float(sys.argv[sys.argv.index('--opacity') + 1])))
-    build(opacity)
+    try:
+        conf = json.loads(APP_CONF.read_text())
+    except (OSError, ValueError):
+        conf = {}
+    opacity = float(conf.get('icon_opacity', 0.5))
+    style = conf.get('icon_style', 'official')
+    a = sys.argv[1:]
+    if '--opacity' in a:
+        opacity = float(a[a.index('--opacity') + 1])
+    if '--style' in a:
+        style = a[a.index('--style') + 1]
+    build(min(1.0, max(0.2, opacity)), style if style in ('official', 'lucide') else 'official')
 
 
 if __name__ == '__main__':

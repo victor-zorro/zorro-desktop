@@ -15,7 +15,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-drive/` — Drive app: Google accounts, synced folders, online mounts (rclone)
   - `apps/zorro-thinkpad/` — the Zorro settings app (zorro-settings, F9) + ThinkPad keys/indicator (keyd), power, LEDs, LTE, hardware
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
-  - `apps/zorro-icons/` — icon theme Zorro-Lucide: white, slightly transparent Lucide line icons (build-icons, mapping.json)
+  - `apps/zorro-icons/` — icon theme Zorro-Lucide: official app icons in black and white + white Lucide line icons for symbols (build-icons, mapping.json)
   - `apps/zorro-dial/` — app launcher: a dial around a clock, 3 rings by usage × 3 category slices (Super tap / Super+Space)
   - `apps/zorro-wall/` — living wallpaper: the login engine (iridescent deep sea + wireframe animal) on the desktop
   - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones

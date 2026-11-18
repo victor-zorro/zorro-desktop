@@ -308,16 +308,25 @@ class DesktopPages:
         build = APPS / 'zorro-icons' / 'build-icons'
         self.icon_build_id = None
 
-        def icons_changed(w):
-            update_conf(None, icon_opacity=round(w.get_value(), 2))
+        style = Gtk.ComboBoxText()
+        for k, v in (('official', 'Official app icons, black and white'),
+                     ('lucide', 'White Lucide line icons')):
+            style.append(k, v)
+        style.set_active_id(load_conf().get('icon_style', 'official'))
+
+        def icons_changed(_w):
+            update_conf(None, icon_opacity=round(icon_op.get_value(), 2),
+                        icon_style=style.get_active_id() or 'official')
             if self.icon_build_id:
                 GLib.source_remove(self.icon_build_id)
             self.icon_build_id = GLib.timeout_add(700, lambda: (
-                spawn([str(build), '--opacity', str(round(w.get_value(), 2))]),
+                spawn([str(build), '--opacity', str(round(icon_op.get_value(), 2)),
+                       '--style', style.get_active_id() or 'official']),
                 setattr(self, 'icon_build_id', None)) and False)
+        style.connect('changed', icons_changed)
         icon_op.connect('value-changed', icons_changed)
         g = Gtk.Grid(column_spacing=12, row_spacing=8)
-        for i, (label, w) in enumerate((('Icons (white Lucide): visibility', icon_op),
+        for i, (label, w) in enumerate((('App icons', style), ('Icons: visibility', icon_op),
                                         ('Font', font), ('Size in apps', spin('font_size', 6, 20)),
                                         ('Size in the terminal', spin('term_size', 6, 24)),
                                         ('Text colour', colour('text')),
