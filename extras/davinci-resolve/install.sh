@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# DaVinci Resolve (free) on Debian 13. Run with sudo from your own account. Safe to rerun.
+# DaVinci Resolve or Resolve Studio on Debian 13. Run with sudo from your own account. Safe to rerun.
 # Blackmagic hands out the installer only after a form, so download it yourself first:
-#   blackmagicdesign.com/products/davinciresolve -> Download -> DaVinci Resolve (Linux)
+#   blackmagicdesign.com/support/family/davinci-resolve-and-fusion -> DaVinci Resolve Studio
+#   (Linux), or the free DaVinci Resolve. Studio asks for the licence key at its first start.
 #   into ~/Downloads, then:  sudo extras/davinci-resolve/install.sh [path/to/zip]
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "run with sudo"; exit 1; }
 user=${SUDO_USER:?run with sudo from your own account, not as root}
 home=$(getent passwd "$user" | cut -d: -f6)
-zip=${1:-$(ls -t "$home"/Downloads/DaVinci_Resolve_*_Linux.zip 2>/dev/null | grep -v Studio | head -n1 || true)}
+# Studio (paid) when its zip is there, else the free version
+zip=${1:-$(ls -t "$home"/Downloads/DaVinci_Resolve_Studio_*_Linux.zip 2>/dev/null | head -n1 || true)}
+zip=${zip:-$(ls -t "$home"/Downloads/DaVinci_Resolve_*_Linux.zip 2>/dev/null | head -n1 || true)}
 [[ -f ${zip:-} ]] || { echo "no DaVinci_Resolve_*_Linux.zip in $home/Downloads"; exit 1; }
 echo "==> $zip"
 
@@ -35,4 +38,7 @@ done
 # the GPU (OpenCL through ROCm) needs these groups; a new login makes them active
 usermod -aG render,video "$user"
 echo "DaVinci Resolve installed. Start it from the launcher (log out and in once first)."
-echo "Phone / camera video (H.264, H.265): convert first with  zresolve-convert FILE..."
+case $zip in
+  *Studio*) echo "Studio: enter your licence key at the first start (needs internet once)." ;;
+  *) echo "Phone / camera video (H.264, H.265): convert first with  zresolve-convert FILE..." ;;
+esac
