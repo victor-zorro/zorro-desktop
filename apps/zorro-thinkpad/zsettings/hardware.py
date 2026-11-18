@@ -1,4 +1,5 @@
 """hardware check rows"""
+import json
 import os
 import re
 import shutil
@@ -143,10 +144,26 @@ def hardware_rows(ui):
     modem = next((l.split(': ', 1)[-1] for l in lspci.splitlines()
                   if 'modem' in l.lower() or 'Cellular' in l), None)
     if modem:
-        mm = shutil.which('mmcli')
-        rows.append(('network-cellular-symbolic', 'Mobile data (LTE)', 'ok' if mm else 'warn',
-                     f'{modem}\n' + ('ModemManager installed' if mm else
-                                     'Needs ModemManager: comes with the LTE tab (next step)'), []))
+        from . import pages_mobile as pm
+        detail, state = 'Set up in the Mobile tab', 'off'
+        if os.path.exists(pm.LTE):
+            ok, out = pm.lte('state', timeout=40)
+            try:
+                st = json.loads(out.strip().splitlines()[-1]) if ok else {}
+            except (ValueError, IndexError):
+                st = {}
+            if st.get('data'):
+                detail, state = f'Mobile data on ({st.get("operator", "")} {st.get("tech", "")}, {st.get("ip")})', 'ok'
+            elif st.get('registered'):
+                detail, state = f'{st.get("operator", "")} {st.get("tech", "")}, signal {st.get("signal")}%: mobile data off', 'ok'
+            elif st.get('awake'):
+                detail, state = f'Modem on, SIM: {st.get("sim") or "?"}', 'warn'
+            else:
+                detail = 'Modem asleep: start it in the Mobile tab'
+        else:
+            detail, state = 'Not installed yet: sudo apps/zorro-thinkpad/install.sh', 'warn'
+        rows.append(('network-cellular-symbolic', 'Mobile data (LTE)', state, f'{modem}\n{detail}',
+                     [('Mobile tab', lambda: ui.show_page('lte:0'))]))
 
     # printers have their own page (Hardware → Printers, zsettings/printers.py)
 
