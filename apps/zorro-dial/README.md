@@ -11,7 +11,10 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
   Files. Hover a part: its preview in the centre; click: it stays and the fan shows it
   (click it again or Esc: back to Apps; Super always opens on Apps). The centre of the hub
   runs the kept part's main action (clear all messages, new note, open Nemo).
-  - Messages: dunst's history; click opens it again, right-click dismisses.
+  - Messages: **a tree** of dunst's history. All, then Signal, WhatsApp, Instagram, Email and
+    LinkedIn always in that order (web apps all notify as "Firefox": the site in the text
+    decides), other apps, Do not disturb. A source unfolds into its messages, a message into
+    Show again / Go to the app / Copy text / Dismiss. The centre of the circle clears all.
   - System: battery / Wi-Fi / CPU / disk, switches (Wi-Fi, Bluetooth, Mobile, Airplane, Do not
     disturb), Lock, Sleep, and Log out / Restart / Power off with a second click to confirm.
   - Files: **a tree**. Places (Home, Downloads, Documents, Pictures, Drive, Recent, bookmarked

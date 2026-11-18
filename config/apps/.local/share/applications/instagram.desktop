@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Instagram
+Comment=Instagram in its own Firefox window
+Exec=sh -c '$HOME/.local/bin/instagram'
+Icon=zorro-instagram
+StartupWMClass=Instagram
+Categories=Network;InstantMessaging;

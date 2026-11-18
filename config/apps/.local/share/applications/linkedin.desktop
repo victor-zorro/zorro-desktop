@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=LinkedIn
+Comment=LinkedIn in its own Firefox window
+Exec=sh -c '$HOME/.local/bin/linkedin'
+Icon=zorro-linkedin
+StartupWMClass=LinkedIn
+Categories=Network;InstantMessaging;

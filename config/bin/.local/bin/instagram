@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Instagram in its own Firefox window (class Instagram): its own profile, icon, Alt+Tab entry and notifications.
+# Already open? Pull that window to the current desktop instead of starting a second one.
+if command -v wmctrl >/dev/null && wmctrl -lx | awk '$3 ~ /\.Instagram$/ {f=1} END {exit !f}'; then
+  exec wmctrl -x -R Instagram
+fi
+P="$HOME/.local/share/firefox-instagram"
+mkdir -p "$P"
+cat > "$P/user.js" <<'PREFS'
+user_pref("browser.startup.page", 1);
+user_pref("browser.startup.homepage", "https://www.instagram.com/");
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.tabs.warnOnClose", false);
+PREFS
+exec firefox --new-instance --class Instagram --profile "$P" https://www.instagram.com/

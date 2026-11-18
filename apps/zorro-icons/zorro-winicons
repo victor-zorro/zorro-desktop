@@ -19,7 +19,8 @@ from gi.repository import GdkPixbuf, GLib  # noqa: E402
 
 THEME = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'icons/Zorro-Lucide/scalable'
 CLASS_ICON = {                  # window class -> icon name (others: from the .desktop files)
-    'GoogleApps': 'zorro-google', 'WhatsApp': 'zorro-whatsapp', 'firefox': 'firefox',
+    'GoogleApps': 'zorro-google', 'WhatsApp': 'zorro-whatsapp', 'Instagram': 'zorro-instagram',
+    'LinkedIn': 'zorro-linkedin', 'firefox': 'firefox',
     'firefox-esr': 'firefox', 'kitty': 'kitty', 'Thunar': 'org.xfce.thunar', 'vlc': 'vlc',
     'Ristretto': 'org.xfce.ristretto', 'Signal': 'signal-desktop', 'MQTTX': 'mqttx',
     'Blender': 'blender', 'Zorro-thinkpad': 'preferences-desktop', 'Zorro-drive': 'folder-remote',

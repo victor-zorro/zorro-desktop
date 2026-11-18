@@ -62,7 +62,8 @@ DEFAULTS = {
         'localsend_app.desktop': 'Tools', 'org.localsend.localsend_app.desktop': 'Tools',
         'thunar.desktop': 'Work', 'org.gnome.Nautilus.desktop': 'Work', 'nemo.desktop': 'Work',
         'org.kde.dolphin.desktop': 'Work', 'zorro-drive.desktop': 'Work',
-        'google-apps.desktop': 'Work', 'whatsapp.desktop': 'Work',
+        'google-apps.desktop': 'Work', 'whatsapp.desktop': 'Work', 'instagram.desktop': 'Work',
+        'linkedin.desktop': 'Work',
         'com.blackmagicdesign.resolve.desktop': 'Media',
         'com.blackmagicdesign.rawplayer.desktop': 'Media',
     },
@@ -676,7 +677,7 @@ class Dial(Gtk.Window):
             if len(items) > cap:                   # never dropped silently: "+N" opens the folder
                 parent = path[lv - 1] if lv > 0 else None
                 extra = len(items) - cap + 1
-                items = items[:cap - 1] + [dialmodes.tile('lucide:ellipsis', f'{extra} more', 'open the folder',
+                items = items[:cap - 1] + [dialmodes.tile('lucide:ellipsis', f'{extra} more', 'click: all',
                                                           parent and parent.get('act'), id=f'__more{lv}')]
             n = max(1, len(items))
             if parent_angle is None:
@@ -1042,14 +1043,25 @@ class Dial(Gtk.Window):
                 act = a['act']
                 if a.get('keep'):           # a switch: do it, then show the new state
                     path = self.path.get(self.mode) or []
+                    part = self.parts.get(self.mode)
+
+                    def work():
+                        act()
+                        if a.get('refresh') and part:   # the data changed (dismissed, cleared)
+                            part.fetch()
+                        GLib.idle_add(lambda: done() and False)
 
                     def done():
-                        if path:            # a tree: read that branch again (Like -> Unlike)
+                        if a.get('refresh'):
+                            del path[max(0, len(path) - a.get('up', 0)):]   # gone: back up the tree
+                            self.kids.clear()
+                            for i, n in enumerate(list(path)):
+                                self.expand(n, i)
+                        elif path:          # a tree: read that branch again (Like -> Unlike)
                             self.kids.pop(self.node_key(path[-1]), None)
                             self.expand(path[-1], len(path) - 1)
                         self.area.queue_draw()
-                    threading.Thread(target=lambda: (act(), GLib.idle_add(lambda: done() and False)),
-                                     daemon=True).start()
+                    threading.Thread(target=work, daemon=True).start()
                 else:
                     act()
                     self.close_dial()
