@@ -24,3 +24,5 @@ ovmf
 cloud-image-utils
 rsync
 socat
+# LTE modem (apps/zorro-thinkpad/zorro-lte): operator APNs by SIM network code
+mobile-broadband-provider-info

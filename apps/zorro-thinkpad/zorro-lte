@@ -5,18 +5,27 @@ The modem stays silent (and the kernel logs "iosm: msg timeout") until it is sta
 its RPC control port /dev/wwan0xmmrpc0 and Lenovo's FCC lock is answered. That part uses
 the RPC code of the xmm7360-pci project (xmm7360/, see NOTICE).
 
-  zorro-lte wake     start the modem's services, FCC unlock, radio on
-  zorro-lte status   wake, then ask over AT: SIM, operator, signal, registration
-Later: up APN / down / sms (needs a SIM).
+  zorro-lte wake       start the modem's services, FCC unlock, radio on
+  zorro-lte status     wake, then ask over AT: SIM, operator, signal, registration
+  zorro-lte up [APN]   wake, attach, connect mobile data on wwan0 (APN: from the operator
+                       database by the SIM's network code when not given)
+  zorro-lte down       mobile data off (wwan0 down)
+Wi-Fi and Ethernet stay preferred: the mobile default route has a high metric.
 """
+import ipaddress
 import os
+import re
 import select
+import subprocess
 import signal
 import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'xmm7360'))
 AT_PORTS = ['/dev/wwan0at0', '/dev/wwan0at1']
+IFACE = 'wwan0'
+METRIC = 1500                       # Wi-Fi ~600, Ethernet ~100: those win while they are up
+PROVIDERS = '/usr/share/mobile-broadband-provider-info/serviceproviders.xml'
 
 
 class Timeout(Exception):
@@ -77,9 +86,146 @@ def status():
         print(f'== {port}: {"answers" if first else "silent"}')
         if first:
             for cmd in ('ATI', 'AT+CGMR', 'AT+CFUN?', 'AT+CPIN?', 'AT+COPS?', 'AT+CSQ',
-                        'AT+CREG?', 'AT+CMGF?'):
+                        'AT+CREG?', 'AT+CEREG?', 'AT+CSPN?', 'AT+CMGF?'):
                 print(f'   {cmd:12} {at(fd, cmd)}')
+            m = re.search(r'(\d{5})\d{5,}', at(fd, 'AT+CIMI'))   # SIM id: show the network code only
+            print(f'   {"network":12} {m.group(1) if m else "?"} (MCC+MNC of the SIM)')
         os.close(fd)
+
+
+def ask(cmd, wait=6):
+    """one AT command on the first port that answers"""
+    for port in AT_PORTS:
+        try:
+            fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        try:
+            out = at(fd, cmd, wait)
+            if out:
+                return out
+        finally:
+            os.close(fd)
+    return ''
+
+
+def sim_network():
+    """MCC+MNC of the SIM (first digits of the IMSI) and the brand on the SIM (SPN)"""
+    m = re.search(r'(\d{6})\d{4,}', ask('AT+CIMI'))
+    spn = re.search(r'\+CSPN: "([^"]*)"', ask('AT+CSPN?'))
+    return (m.group(1) if m else None), (spn.group(1).strip() if spn else '')
+
+
+def apn_candidates(imsi6, spn=''):
+    """internet APNs for this SIM from mobile-broadband-provider-info, most likely first:
+    the provider named like the SIM's brand, then the network's main provider, then others"""
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(PROVIDERS).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    found = []
+    for mnc_len in (2, 3):
+        mcc, mnc = imsi6[:3], imsi6[3:3 + mnc_len]
+        for prov in root.iter('provider'):
+            gsm = prov.find('gsm')
+            if gsm is None or not any(n.get('mcc') == mcc and n.get('mnc') == mnc
+                                      for n in gsm.findall('network-id')):
+                continue
+            name = prov.findtext('name') or ''
+            rank = 0 if spn and (spn.lower() in name.lower() or name.lower() in spn.lower()) \
+                else 1 if prov.get('primary') == 'true' else 2
+            for a in gsm.findall('apn'):
+                use = a.find('usage')
+                if use is None or use.get('type') == 'internet':
+                    found.append((rank, len(found), a.get('value'), name))
+        if found:
+            break
+    out, seen = [], set()
+    for _, _, apn, name in sorted(found):
+        if apn not in seen:
+            seen.add(apn)
+            out.append((apn, name))
+    return out
+
+
+def sh(*cmd):
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode:
+        print(f'   ({" ".join(cmd)}: {r.stderr.strip()})')
+    return r.returncode == 0
+
+
+def attach(r, apn):
+    """attach with this APN; the IP address and DNS servers, or (None, None)"""
+    import rpc
+    r.execute('UtaMsCallPsAttachApnConfigReq', rpc.pack_UtaMsCallPsAttachApnConfigReq(apn),
+              is_async=True)
+    res = r.execute('UtaMsNetAttachReq', rpc.pack_UtaMsNetAttachReq(), is_async=True)
+    _, st = rpc.unpack('nn', res['body'])
+    if st == 0xffffffff:                        # not ready yet: wait for the network
+        print('   waiting for the network...')
+        while not r.attach_allowed:
+            r.pump()
+        res = r.execute('UtaMsNetAttachReq', rpc.pack_UtaMsNetAttachReq(), is_async=True)
+        _, st = rpc.unpack('nn', res['body'])
+        if st == 0xffffffff:
+            return None, None
+    return rpc.get_ip(r)
+
+
+def up(apn=None):
+    import rpc
+    r = wake()
+    if not r:
+        return False
+    time.sleep(2)
+    if apn:
+        tries = [(apn, 'given')]
+    else:
+        imsi6, spn = sim_network()
+        tries = apn_candidates(imsi6, spn)[:3] if imsi6 else []
+        print(f'== SIM network {imsi6[:5] if imsi6 else "?"}, brand {spn or "?"}; '
+              f'APNs to try: {", ".join(a for a, _ in tries) or "none known"}')
+        if not tries:
+            print('!! give the APN, e.g.  zorro-lte up internet')
+            return False
+    ip = dns = None
+    try:
+        for a, name in tries:
+            step(90)
+            print(f'   trying APN {a} ({name})')
+            ip, dns = attach(r, a)
+            if ip:
+                break
+        if not ip:
+            print('!! no IP address from the network: wrong APN? try  zorro-lte up <APN>')
+            return False
+        r.execute('UtaRPCPsConnectToDatachannelReq', rpc.pack_UtaRPCPsConnectToDatachannelReq())
+        r.execute('UtaMsCallPsConnectReq', rpc.pack_UtaMsCallPsConnectReq(), is_async=True)
+    except Timeout:
+        print('!! the modem did not answer within the time limit')
+        return False
+    finally:
+        signal.alarm(0)
+    print(f'== connected: {ip}  DNS {", ".join(str(d) for d in dns["v4"]) or "-"}')
+    sh('ip', 'addr', 'flush', 'dev', IFACE)
+    sh('ip', 'addr', 'add', f'{ipaddress.ip_address(ip)}/32', 'dev', IFACE)
+    sh('ip', 'link', 'set', IFACE, 'up')
+    sh('ip', 'route', 'replace', 'default', 'dev', IFACE, 'metric', str(METRIC))
+    if dns['v4'] and sh('resolvectl', 'dns', IFACE, *[str(d) for d in dns['v4']]):
+        sh('resolvectl', 'domain', IFACE, '~.')
+    print(f'== mobile data on {IFACE} (Wi-Fi and Ethernet stay first while they are up)')
+    return True
+
+
+def down():
+    sh('ip', 'route', 'del', 'default', 'dev', IFACE)
+    sh('ip', 'addr', 'flush', 'dev', IFACE)
+    sh('ip', 'link', 'set', IFACE, 'down')
+    sh('resolvectl', 'revert', IFACE)
+    print('== mobile data off')
+    return True
 
 
 def main():
@@ -92,6 +238,10 @@ def main():
         wake()
         time.sleep(2)
         status()
+    elif a[:1] == ['up'] and len(a) <= 2:
+        sys.exit(0 if up(a[1] if len(a) == 2 else None) else 1)
+    elif a == ['down']:
+        sys.exit(0 if down() else 1)
     else:
         print(__doc__.strip())
         sys.exit(1)
