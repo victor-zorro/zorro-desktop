@@ -90,14 +90,32 @@ def radios_soft_blocked(types=None):
     return out
 
 
-def key_airplane():
+def airplane_on():
+    """is airplane mode on? Our own switch decides (remembered until restart); only when it
+    was never used, all radios being blocked counts as on. Looking at the radios alone fails:
+    NetworkManager may keep Wi-Fi off after airplane mode, and then the key only ever turned
+    airplane mode on again."""
+    try:
+        st = json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        st = {}
+    if 'airplane' in st:
+        return bool(st['airplane'])
     states = radios_soft_blocked()
-    turn_off = not all(states)          # any radio still on -> all off
+    return bool(states) and all(states)
+
+
+def key_airplane():
+    turn_off = not airplane_on()         # off -> all radios off; on -> all back on
     try:
         rfkill_all(turn_off)
     except OSError as e:
         osd('dialog-warning-symbolic', None, f'Airplane mode: {e.strerror}')
         return
+    write_state(airplane=turn_off)
+    if not turn_off:                    # NetworkManager keeps its own Wi-Fi / mobile switch
+        run('nmcli', 'radio', 'wifi', 'on')
+        run('nmcli', 'radio', 'wwan', 'on')
     osd('airplane-mode-symbolic' if turn_off else 'network-wireless-symbolic', None,
         'Airplane mode on — all radios off' if turn_off else 'Airplane mode off')
 

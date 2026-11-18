@@ -169,7 +169,8 @@ class System(Part):
                 soft.append((r / 'soft').read_text().strip() == '1')
             except OSError:
                 pass
-        self.airplane = bool(soft) and all(soft)
+        k = thinkpad_keys()                  # the airplane switch's own state (see keys.airplane_on)
+        self.airplane = k.airplane_on() if k else bool(soft) and all(soft)
         self.ready = True
 
     def preview(self):

@@ -185,7 +185,8 @@ class HomePages:
             d['nb'] = (nb.get('management', {}).get('connected'), nb.get('peers', {}).get('connected', 0),
                        nb.get('peers', {}).get('total', 0)) if nb else None
             soft = [sysread(r / 'soft') == '1' for r in Path('/sys/class/rfkill').glob('rfkill*')]
-            d['airplane'] = bool(soft) and all(soft)
+            from .keys import airplane_on
+            d['airplane'] = airplane_on() if soft else False
             d['bat'] = sysread('/sys/class/power_supply/BAT0/capacity')
             d['bat_text'] = battery_text()
             d['profile'] = sysread('/sys/firmware/acpi/platform_profile')
