@@ -12,7 +12,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
 
-# ---- the app window: four top tabs (Theme, Desktop, Login screen, ThinkPad) ---
+# ---- the app window: top tabs: Theme, Desktop, Login screen, ThinkPad, Hardware, Power ---
 
 class Win(ThinkpadPages, DesktopPages, LookPages, Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
@@ -30,9 +30,11 @@ class Win(ThinkpadPages, DesktopPages, LookPages, Gtk.ApplicationWindow):
 
         tp = Group()
         tp.section('keys', 'Keys', self.keys_page())
-        tp.section('power', 'Power', self.power_page())
         tp.section('lights', 'Lights', self.lights_page())
-        tp.section('hw', 'Hardware', self.hw_page())
+        hw = Group()
+        hw.section('hw', 'Hardware', self.hw_page())
+        power = Group()
+        power.section('power', 'Power', self.power_page())
         desk = Group()
         desk.section('wall', 'Wallpaper', self.wall_page())
         desk.section('dial', 'Launcher', self.dial_page())
@@ -46,7 +48,8 @@ class Win(ThinkpadPages, DesktopPages, LookPages, Gtk.ApplicationWindow):
         theme = Group()
         theme.section('theme', 'Theme', self.theme_page())
         for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),
-                               ('login', 'Login screen', login), ('thinkpad', 'ThinkPad', tp)):
+                               ('login', 'Login screen', login), ('thinkpad', 'ThinkPad', tp),
+                               ('hardware', 'Hardware', hw), ('power', 'Power', power)):
             stack.add_titled(g.widget(), name, title)
             self.groups[name] = g
             g.select(select)

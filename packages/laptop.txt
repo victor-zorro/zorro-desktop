@@ -4,7 +4,7 @@ brightnessctl
 tlp
 # ThinkPad app: power settings through a small root helper (polkit)
 pkexec
-# printing (ThinkPad app → Hardware → Add printer; driverless IPP printers)
+# printing (Zorro app → Hardware → Printers)
 cups
 # Brother GDI lasers (the HL-1210W at home) cannot print driverless
 printer-driver-brlaser

@@ -1,4 +1,4 @@
-"""app: ThinkPad tab"""
+"""app: ThinkPad, Hardware and Power tabs"""
 import os
 import re
 import shutil
@@ -18,7 +18,7 @@ from gi.repository import GLib, Gtk
 
 
 class ThinkpadPages:
-    """ThinkPad tab: keys, power, lights, hardware (a mixin of the app window)"""
+    """ThinkPad tab (keys, lights), Hardware tab, Power tab (a mixin of the app window)"""
 
     # -- keys
     def keys_page(self):
