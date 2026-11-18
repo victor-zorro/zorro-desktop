@@ -19,7 +19,11 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
     its contents unfold in the next ring, beside it; deeper than three levels the tree moves
     inward. Click opens (folders in Nemo), Esc goes one level back, the centre shows the path
     and opens that folder. A mounted share (gvfs) unfolds too.
-  - Notes: the Obsidian vault (pinned + recent notes).
+  - Notes: **a tree** of the Obsidian vault. New note, Pinned (Obsidian bookmarks), Recent,
+    your folders (after the Evernote move: the notebooks), Tags (inline #tags and the
+    frontmatter tags Evernote's import writes). A folder unfolds into subfolders and notes,
+    a tag into its notes, a note into its headings (click: open at that heading). Typing
+    searches every note, title and text; Enter opens the first.
   - Music: **a tree** (apps/zorro-music, scapi.py). My likes, your top styles (from the
     likes' genres), Discover, your playlists, play a link. A style unfolds into: play my
     likes in it (shuffled), Discover (new tracks in that style), More like these, Top

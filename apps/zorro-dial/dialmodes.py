@@ -346,9 +346,16 @@ class Files(Part):
         return 'open Nemo', lambda: spawn('nemo') if shutil.which('nemo') else spawn('xdg-open', str(HOME))
 
 
-# ---- Notes: the Obsidian vault -----------------------------------------------------------
+# ---- Notes: the Obsidian vault, as a tree ---------------------------------------------------
+TAG = re.compile(r'(?:^|\s)#([A-Za-z][\w/-]{1,40})')
+HEADING = re.compile(r'^(#{1,3})\s+(.+?)\s*#*\s*$', re.M)
+
+
 class Notes(Part):
+    """a tree: new note, pinned, recent, your folders (notebooks), tags; a note unfolds into
+    its headings. Typing searches every note, title and text."""
     key, title = 'notes', 'Notes'
+    tree = True
 
     def vault(self):
         try:
@@ -360,7 +367,9 @@ class Notes(Part):
 
     def fetch(self):
         self.root = self.vault()
-        self.notes, self.pinned = [], []
+        self.notes = []                 # (mtime, path)
+        self.text = {}                  # path -> text, for search and tags (read once per opening)
+        self.pinned = []
         if self.root:
             for dp, dns, fns in os.walk(self.root):
                 dns[:] = [d for d in dns if not d.startswith('.')]
@@ -372,35 +381,112 @@ class Notes(Part):
                         except OSError:
                             pass
             self.notes.sort(reverse=True)
+            for _, p in self.notes[:3000]:
+                try:
+                    with open(p, encoding='utf-8', errors='replace') as fh:
+                        self.text[p] = fh.read(200000)
+                except OSError:
+                    pass
             try:
                 bm = json.loads((self.root / '.obsidian/bookmarks.json').read_text()).get('items', [])
-                self.pinned = [str(self.root / b['path']) for b in bm if b.get('type') == 'file'][:3]
+                self.pinned = [str(self.root / b['path']) for b in bm
+                               if b.get('type') == 'file' and (self.root / b['path']).exists()]
             except (OSError, ValueError, KeyError):
                 self.pinned = []
         self.ready = True
 
-    def open_note(self, p):
-        return lambda: spawn('xdg-open', 'obsidian://open?path=' + quote(p))
+    def uri(self, p, heading=None):
+        u = 'obsidian://open?path=' + quote(p)
+        return u + ('%23' + quote(heading) if heading else '')
 
-    def note_tile(self, p, sub):
+    def note_tile(self, p, sub=None):
         rel = os.path.relpath(p, self.root)
-        return tile('lucide:file-text', os.path.basename(p)[:-3][:24], sub or os.path.dirname(rel), self.open_note(p))
+        heads = [(len(h), txt.strip()) for h, txt in HEADING.findall(self.text.get(p, ''))][:24]
+        t_ = tile('lucide:file-text', os.path.basename(p)[:-3][:26],
+                  sub if sub is not None else (os.path.dirname(rel) or 'vault'),
+                  lambda: spawn('xdg-open', self.uri(p)), id=p)
+        if heads:
+            t_['kids'] = lambda: [tile('lucide:list', ('  ' * (lv - 1) + h)[:26], f'heading {lv}',
+                                       lambda h=h: spawn('xdg-open', self.uri(p, h)), id=f'{p}#{h}')
+                                  for lv, h in heads]
+        return t_
+
+    def folder_node(self, d, name=None):
+        notes = [(m, p) for m, p in self.notes if os.path.dirname(p) == str(d)]
+        subs = sorted(x for x in d.iterdir() if x.is_dir() and not x.name.startswith('.')) if d.is_dir() else []
+        count = sum(1 for _, p in self.notes if p.startswith(str(d) + os.sep))
+        return tile('lucide:folder', (name or d.name)[:22], f'{count} notes', None, id=f'dir:{d}',
+                    kids=lambda: [self.folder_node(x) for x in subs]
+                    + [self.note_tile(p, ago(time.time() - m)) for m, p in notes])
+
+    def tags(self):
+        count = {}
+        for p, txt in self.text.items():
+            fm = re.match(r'^---\n(.*?)\n---', txt, re.S)
+            found = set(TAG.findall(txt))
+            if fm:                      # frontmatter: tags: [a, b] or a list under tags:
+                block = re.search(r'^tags:\s*(.*(?:\n\s*-\s*.*)*)', fm.group(1), re.M)
+                if block:
+                    found |= {x.strip(' -[]"\'') for x in re.split(r'[,\n]', block.group(1)) if x.strip(' -[]"\'')}
+            for tg in found:
+                count.setdefault(tg.lower(), []).append(p)
+        return sorted(count.items(), key=lambda kv: -len(kv[1]))
+
+    def roots(self):
+        if not getattr(self, 'ready', False):
+            return [tile('lucide:ellipsis', 'Loading…', '', None, id='loading')]
+        if not self.root:
+            return [tile('lucide:file-pen', 'Open Obsidian', 'make a vault, e.g. ~/Notes',
+                         lambda: spawn('obsidian'), id='open'),
+                    tile('lucide:file-text', 'Evernote move', 'the steps',
+                         lambda: spawn('xdg-open', str(APPS.parent / 'extras/evernote-to-obsidian/README.md')),
+                         id='steps')]
+        now = time.time()
+        out = [tile('lucide:file-plus', 'New note', self.root.name,
+                    lambda: spawn('xdg-open', 'obsidian://new?vault=' + quote(self.root.name)), id='new')]
+        if self.pinned:
+            out.append(tile('lucide:star', 'Pinned', f'{len(self.pinned)} notes', None, id='pinned',
+                            kids=lambda: [self.note_tile(p, 'pinned') for p in self.pinned]))
+        out.append(tile('lucide:rotate-ccw', 'Recent', f'{len(self.notes)} notes', None, id='recent',
+                        kids=lambda: [self.note_tile(p, ago(now - m)) for m, p in self.notes[:24]]))
+        folders = sorted(x for x in self.root.iterdir() if x.is_dir() and not x.name.startswith('.'))
+        out += [self.folder_node(d) for d in folders]
+        tags = self.tags()
+        if tags:
+            out.append(tile('lucide:list', 'Tags', f'{len(tags)} tags', None, id='tags',
+                            kids=lambda: [tile('lucide:list', f'#{tg}'[:22], f'{len(ps)} notes', None,
+                                               id=f'tag:{tg}',
+                                               kids=lambda ps=ps: [self.note_tile(p) for p in
+                                                                   sorted(ps, key=lambda p: -os.path.getmtime(p))])
+                                          for tg, ps in tags[:40]]))
+        return out
+
+    def rings(self):
+        return [self.roots(), [], []]
+
+    def search_tiles(self, text):
+        """notes whose title or text has every word, titles first, newest first"""
+        words = [w.lower() for w in text.split() if w]
+        if not words or not getattr(self, 'root', None):
+            return []
+        hits = []
+        for m, p in self.notes:
+            name = os.path.basename(p).lower()
+            body = self.text.get(p, '').lower()
+            if all(w in name or w in body for w in words):
+                hits.append((not all(w in name for w in words), -m, p))
+        hits.sort()
+        return [self.note_tile(p) for _, _, p in hits[:30]]
+
+    def search(self, text):
+        found = self.search_tiles(text)
+        if found and found[0].get('act'):
+            found[0]['act']()
 
     def preview(self):
         if not getattr(self, 'root', None):
-            return 'NOTES', 'Obsidian', ['not set up yet']
-        return 'NOTES', str(len(self.notes)), ['notes · click: new']
-
-    def rings(self):
-        if not getattr(self, 'root', None):
-            return [[tile('lucide:file-pen', 'Set up Obsidian', 'extras/evernote-to-obsidian',
-                          lambda: spawn('xdg-open', str(APPS.parent / 'extras/evernote-to-obsidian/README.md')))],
-                    [], []]
-        now = time.time()
-        pins = [self.note_tile(p, 'pinned') for p in self.pinned]
-        recent = [self.note_tile(p, ago(now - t)) for t, p in self.notes if p not in self.pinned][:9]
-        return [pins + recent[:max(0, 2 - len(pins))], recent[max(0, 2 - len(pins)):][:3],
-                recent[max(0, 2 - len(pins)) + 3:][:4]]
+            return 'NOTES', 'Obsidian', ['no vault yet']
+        return 'NOTES', str(len(self.notes)), ['notes · centre: new note']
 
     def centre(self):
         if getattr(self, 'root', None):

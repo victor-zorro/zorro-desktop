@@ -440,7 +440,12 @@ class Dial(Gtk.Window):
     def on_draw(self, w, cr):
         cx, cy, hub, a0, a1, rings = self.fan()
         self.slots = []
-        if self.filter and self.mode == 'music':
+        if self.filter and self.mode == 'notes':
+            found = self.parts['notes'].search_tiles(self.filter)
+            rows = [found[:6], found[6:15], found[15:27]] if found else \
+                [[], [dialmodes.tile('lucide:search', 'No note has that', self.filter[:24], None)], []]
+            self.draw_tiles(cr, cx, cy, rings, a0, a1, rows)
+        elif self.filter and self.mode == 'music':
             self.draw_tiles(cr, cx, cy, rings, a0, a1, [[], [dialmodes.tile(
                 'lucide:search', f'SoundCloud: {self.filter}'[:30], 'Enter: play', None)], []])
         elif self.filter:
@@ -999,8 +1004,11 @@ class Dial(Gtk.Window):
                 self.area.queue_draw()
             else:
                 self.close_dial()
-        elif k in ('Return', 'KP_Enter') and self.mode == 'music' and self.filter:
-            self.parts['music'].search(self.filter)
+        elif k in ('Return', 'KP_Enter') and self.mode in ('music', 'notes') and self.filter:
+            self.parts[self.mode].search(self.filter)
+            if self.mode == 'notes':
+                self.close_dial()           # the note opens in Obsidian
+                return True
             self.filter = ''
             self.area.queue_draw()
         elif k in ('Return', 'KP_Enter'):
