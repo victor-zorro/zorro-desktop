@@ -8,6 +8,8 @@ the RPC code of the xmm7360-pci project (xmm7360/, see NOTICE).
   zorro-lte wake       start the modem's services, FCC unlock, radio on
   zorro-lte status     wake, then ask over AT: SIM, operator, signal, registration
   zorro-lte pin [--remember]   enter the SIM PIN (hidden; once per start, or stored root-only)
+  zorro-lte state      JSON for the Zorro app (does not wake the modem)
+  zorro-lte pin-stdin [--remember] / forget-pin   PIN from the app (on stdin)
   zorro-lte up [APN]   wake, attach, connect mobile data on wwan0 (APN: from the operator
                        database by the SIM's network code when not given)
   zorro-lte down       mobile data off (wwan0 down)
@@ -256,11 +258,7 @@ def pin_command(remember=False):
     if not unlock(pin):
         return False
     if remember:
-        os.makedirs(os.path.dirname(PIN_FILE), mode=0o700, exist_ok=True)
-        fd = os.open(PIN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, 'w') as f:
-            f.write(pin + '\n')
-        print(f'== PIN stored for automatic unlock (root only: {PIN_FILE})')
+        store_pin(pin)
     return True
 
 
@@ -397,6 +395,67 @@ def down():
     return True
 
 
+def state():
+    """the modem's state as JSON for the Zorro app, without waking or resetting it"""
+    import json
+    st = {'modem': bool(modem_pci()), 'ports': bool(ports()[0]), 'awake': False,
+          'sim': '', 'operator': '', 'tech': '', 'signal': None, 'registered': False,
+          'roaming': False, 'network': '', 'data': False, 'ip': '',
+          'pin_stored': os.path.exists(PIN_FILE)}
+    fd = at_port() if st['ports'] else None
+    if fd is not None:
+        st['awake'] = True
+        try:
+            m = re.search(r'\+CPIN: ([A-Z ]+)', at(fd, 'AT+CPIN?'))
+            st['sim'] = m.group(1).strip() if m else '?'
+            m = re.search(r'\+COPS: \d+,\d+,"([^"]*)"(?:,(\d+))?', at(fd, 'AT+COPS?'))
+            if m:
+                st['operator'] = m.group(1)
+                st['tech'] = {'0': '2G', '2': '3G', '3': '2G', '4': '3G', '5': '3G', '6': '3G',
+                              '7': '4G'}.get(m.group(2) or '', '')
+            m = re.search(r'\+CSQ: (\d+),', at(fd, 'AT+CSQ'))
+            if m and m.group(1) != '99':
+                st['signal'] = min(100, round(int(m.group(1)) * 100 / 31))
+            m = re.search(r'\+CEREG: \d,(\d)', at(fd, 'AT+CEREG?'))
+            st['registered'] = bool(m and m.group(1) in '15')
+            st['roaming'] = bool(m and m.group(1) == '5')
+            if st['sim'] == 'READY':
+                m = re.search(r'(\d{5})\d{5,}', at(fd, 'AT+CIMI'))
+                st['network'] = m.group(1) if m else ''
+        finally:
+            os.close(fd)
+    out = subprocess.run(['ip', '-4', '-br', 'addr', 'show', IFACE], capture_output=True,
+                         text=True).stdout.split()
+    if len(out) >= 3 and out[1] != 'DOWN':
+        st['data'], st['ip'] = True, out[2].split('/')[0]
+    print(json.dumps(st))
+
+
+def pin_from_stdin(remember):
+    """the Zorro app sends the PIN on stdin (never on the command line: ps shows that)"""
+    pin = sys.stdin.readline().strip()
+    st = sim_state()
+    if st == 'READY':
+        print('== the SIM is unlocked already')
+        return True
+    if st != 'SIM PIN':
+        print(f'!! SIM state: {st}' + (' (needs the PUK: use a phone)' if 'PUK' in st else ''))
+        return False
+    if not unlock(pin):
+        return False
+    if remember:
+        store_pin(pin)
+    return True
+
+
+def store_pin(pin):
+    os.makedirs(os.path.dirname(PIN_FILE), mode=0o700, exist_ok=True)
+    fd = os.open(PIN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        f.write(pin + '\n')
+    print('== PIN stored for automatic unlock (root only)')
+
+
 def main():
     if os.geteuid() != 0:
         sys.exit('run with sudo')
@@ -415,6 +474,16 @@ def main():
         if not wake():
             sys.exit(1)
         sys.exit(0 if pin_command('--remember' in a) else 1)
+    elif a == ['state']:
+        state()
+    elif a[:1] == ['pin-stdin'] and a[1:] in ([], ['--remember']):
+        if sim_state() == '?' and not wake():
+            sys.exit(1)
+        sys.exit(0 if pin_from_stdin('--remember' in a) else 1)
+    elif a == ['forget-pin']:
+        if os.path.exists(PIN_FILE):
+            os.remove(PIN_FILE)
+        print('== stored PIN removed')
     elif a == ['reset']:
         sys.exit(0 if reset() else 1)
     elif a == ['diag']:

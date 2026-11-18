@@ -4,6 +4,7 @@
 #               ThinkPad Extra Buttons readable for the logged-in user
 #   modules   : LED blink patterns (heartbeat, timer) for the red dot
 #   helper    : root-owned copy + polkit rule, for power mode / charge limits (pkexec)
+#   zorro-lte : root-owned copy + polkit rule, for the Mobile tab (modem, SIM PIN, data)
 # The user part (links, autostart) is install-user.sh, run by the main install.sh.
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "run with sudo"; exit 1; }
@@ -20,6 +21,11 @@ install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
     /usr/local/libexec/zorro-thinkpad-helper
 install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
     /usr/local/libexec/zorro-look-helper           # same code, only the login look
+# LTE modem tool for the Zorro app's Mobile tab: root-owned copy, run through polkit
+install -d -m755 -o root -g root /usr/local/lib/zorro-lte /usr/local/lib/zorro-lte/xmm7360
+install -m755 -o root -g root "$here/zorro-lte" /usr/local/lib/zorro-lte/zorro-lte
+install -m644 -o root -g root "$here"/xmm7360/*.py "$here/xmm7360/NOTICE" \
+    /usr/local/lib/zorro-lte/xmm7360/
 install -Dm644 "$here/org.zorro.thinkpad.policy" \
     /usr/share/polkit-1/actions/org.zorro.thinkpad.policy
 
