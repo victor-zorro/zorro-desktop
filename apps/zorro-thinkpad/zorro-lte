@@ -10,6 +10,8 @@ the RPC code of the xmm7360-pci project (xmm7360/, see NOTICE).
   zorro-lte up [APN]   wake, attach, connect mobile data on wwan0 (APN: from the operator
                        database by the SIM's network code when not given)
   zorro-lte down       mobile data off (wwan0 down)
+  zorro-lte reset      restart the modem (PCI remove + rescan); wake does it by itself
+  zorro-lte diag       PCI state, ports and the kernel's modem messages
 Wi-Fi and Ethernet stay preferred: the mobile default route has a high metric.
 """
 import ipaddress
@@ -22,7 +24,6 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'xmm7360'))
-AT_PORTS = ['/dev/wwan0at0', '/dev/wwan0at1']
 IFACE = 'wwan0'
 METRIC = 1500                       # Wi-Fi ~600, Ethernet ~100: those win while they are up
 PROVIDERS = '/usr/share/mobile-broadband-provider-info/serviceproviders.xml'
@@ -39,12 +40,85 @@ def step(seconds):
     signal.alarm(seconds)
 
 
+def ports():
+    """the modem's RPC and AT ports (the number can change after a reset)"""
+    import glob
+    rpcs = sorted(glob.glob('/dev/wwan*xmmrpc0'))
+    ats = sorted(glob.glob('/dev/wwan*at[0-9]'))
+    return (rpcs[0] if rpcs else None), ats
+
+
+def modem_pci():
+    for d in glob_dirs('/sys/bus/pci/devices/*'):
+        try:
+            if open(f'{d}/vendor').read().strip() == '0x8086' and \
+                    open(f'{d}/device').read().strip() == '0x7360':
+                return d
+        except OSError:
+            pass
+    return None
+
+
+def glob_dirs(pattern):
+    import glob
+    return sorted(glob.glob(pattern))
+
+
+def reset():
+    """take the modem off the PCI bus and find it again: the driver starts it fresh"""
+    dev = modem_pci()
+    if not dev:
+        print('!! no XMM7360 modem on the PCI bus')
+        return False
+    print(f'== resetting the modem ({os.path.basename(dev)})')
+    with open(f'{dev}/remove', 'w') as f:
+        f.write('1')
+    time.sleep(3)
+    with open('/sys/bus/pci/rescan', 'w') as f:
+        f.write('1')
+    for _ in range(60):                       # the driver needs up to ~30 s
+        time.sleep(1)
+        if ports()[0]:
+            time.sleep(5)                     # let the modem finish booting
+            print('== modem back')
+            return True
+    print('!! the modem did not come back after the reset')
+    return False
+
+
+def answers(rpc_port, seconds=8):
+    """does the modem answer on its RPC port at all?"""
+    import rpc
+    r = rpc.XMMRPC([rpc_port])
+    step(seconds)
+    try:
+        r.execute('UtaMsSmsInit')
+        return r
+    except Timeout:
+        os.close(r.fp)                  # let go of the port before a reset
+        return None
+    finally:
+        signal.alarm(0)
+
+
 def wake():
     import rpc
+    port = ports()[0]
+    if not port:
+        print('!! no modem RPC port (/dev/wwan*xmmrpc0)')
+        return None
+    r = answers(port)
+    if not r:
+        print('   the modem does not answer: reset')
+        if not reset():
+            return None
+        r = answers(ports()[0], 20)
+        if not r:
+            print('!! still no answer after the reset (see: zorro-lte diag)')
+            return None
     step(30)
     try:
-        r = rpc.XMMRPC()
-        for call in ('UtaMsSmsInit', 'UtaMsCbsInit', 'UtaMsNetOpen', 'UtaMsCallCsInit',
+        for call in ('UtaMsCbsInit', 'UtaMsNetOpen', 'UtaMsCallCsInit',
                      'UtaMsCallPsInitialize', 'UtaMsSsInit', 'UtaMsSimOpenReq'):
             step(30)
             r.execute(call)
@@ -63,6 +137,22 @@ def wake():
     return None
 
 
+def diag():
+    dev = modem_pci()
+    print(f'== PCI: {dev or "no XMM7360 found"}')
+    if dev:
+        drv = os.path.realpath(f'{dev}/driver') if os.path.exists(f'{dev}/driver') else 'none'
+        print(f'   driver {os.path.basename(drv)}, power '
+              f'{open(f"{dev}/power/runtime_status").read().strip()}')
+    rpc_port, ats = ports()
+    print(f'== ports: {rpc_port}, {", ".join(ats) or "no AT ports"}')
+    log = subprocess.run(['dmesg'], capture_output=True, text=True).stdout.splitlines()
+    lines = [ln for ln in log if re.search(r'iosm|wwan|7360', ln, re.I)]
+    print('== kernel messages (last 25):')
+    for ln in lines[-25:]:
+        print('   ' + ln)
+
+
 def at(fd, cmd, wait=4.0):
     os.write(fd, (cmd + '\r').encode())
     out, end = b'', time.time() + wait
@@ -76,7 +166,7 @@ def at(fd, cmd, wait=4.0):
 
 
 def status():
-    for port in AT_PORTS:
+    for port in ports()[1]:
         try:
             fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         except OSError as e:
@@ -95,7 +185,7 @@ def status():
 
 def ask(cmd, wait=6):
     """one AT command on the first port that answers"""
-    for port in AT_PORTS:
+    for port in ports()[1]:
         try:
             fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         except OSError:
@@ -242,6 +332,10 @@ def main():
         sys.exit(0 if up(a[1] if len(a) == 2 else None) else 1)
     elif a == ['down']:
         sys.exit(0 if down() else 1)
+    elif a == ['reset']:
+        sys.exit(0 if reset() else 1)
+    elif a == ['diag']:
+        diag()
     else:
         print(__doc__.strip())
         sys.exit(1)
