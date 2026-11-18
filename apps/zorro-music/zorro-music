@@ -7,6 +7,9 @@ subscription has it. Not logged in: public free tracks. mpv with mpv-mpris shows
 media player (MPRIS): media keys, the Dialer's Music part and the Audio tab see it.
 
   zorro-music play URL | likes | search TEXT | fav NAME
+  zorro-music queue URL URL ...   play these in this order
+  zorro-music next-up URL         play this right after the current track
+  zorro-music like ID | unlike ID like a SoundCloud track as you (scapi.py)
   zorro-music play | pause | toggle | next | prev | stop
   zorro-music status            JSON: title, artist, playing, position, duration, ...
 Settings: ~/.config/zorro-music/config.json
@@ -152,6 +155,25 @@ def main():
             sys.exit('zorro-music: mpv did not start')
         ipc('loadfile', target(a[1], a[2:]), 'replace')
         ipc('set_property', 'pause', False)
+    elif cmd == 'queue' and len(a) >= 2:              # a list of links: play them in this order
+        if not start():
+            sys.exit('zorro-music: mpv did not start')
+        lst = SOCK.with_name('zorro-music-queue.m3u')
+        lst.write_text('#EXTM3U\n' + '\n'.join(a[1:]) + '\n')
+        ipc('loadlist', str(lst), 'replace')
+        ipc('set_property', 'pause', False)
+    elif cmd == 'next-up' and len(a) == 2:            # play this right after the current track
+        if not start():
+            sys.exit('zorro-music: mpv did not start')
+        if ipc('get_property', 'idle-active'):
+            ipc('loadfile', a[1], 'replace')
+        else:
+            ipc('loadfile', a[1], 'insert-next')
+    elif cmd in ('like', 'unlike') and len(a) == 2:
+        sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent))
+        import scapi
+        ok = scapi.like(int(a[1]), cmd == 'like')
+        print('done' if ok else 'not signed in')
     elif cmd == 'toggle':
         if running():
             ipc('cycle', 'pause')

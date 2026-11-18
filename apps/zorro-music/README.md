@@ -9,8 +9,12 @@ SoundCloud (and any link yt-dlp knows) through one small mpv in the background; 
   when your subscription has it. **Not logged in**: public free tracks.
 - mpv with **mpv-mpris** is a normal media player for the desktop: media keys, the Dialer
   (Music part), the Audio tab (per-app output) all see it.
-- `zorro-music play URL | likes | search TEXT | fav NAME`, `toggle | next | prev | stop`,
-  `status` (JSON).
+- `zorro-music play URL | likes | search TEXT | fav NAME`, `queue URL…`, `next-up URL`,
+  `like ID | unlike ID`, `play | pause | toggle | next | prev | stop`, `status` (JSON).
+- `scapi.py`: SoundCloud's own web API as the website uses it, with your login (the token is
+  read from that Firefox profile when needed, kept in memory only, sent only to SoundCloud):
+  your likes (cached 6 h in ~/.cache/zorro-music, no token there), styles, discover per
+  style, related tracks, your playlists, like / unlike.
 - Settings `~/.config/zorro-music/config.json`:
   `{"user": "your-soundcloud-name", "favourites": [{"name": "Morning", "url": "https://soundcloud.com/..."}], "volume": 80}`
 

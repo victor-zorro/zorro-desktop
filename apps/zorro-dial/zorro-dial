@@ -215,6 +215,7 @@ class Dial(Gtk.Window):
         self.kids = {}                  # node id -> its children (None while loading)
         self.dwell = None               # (node, level, since): resting on something that unfolds
         self.dwell_id = None
+        self.hub_key = None             # a player button in the hub centre (music)
         for part in self.parts.values():
             threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
         self.theme = Gtk.IconTheme.get_default()
@@ -445,7 +446,10 @@ class Dial(Gtk.Window):
         elif self.filter:
             self.draw_search(cr, cx, cy, rings, a0, a1)
         elif self.mode != 'apps' and getattr(self.parts[self.mode], 'tree', False):
-            self.draw_tree(cr, cx, cy, rings, a0, a1, self.parts[self.mode])
+            part = self.parts[self.mode]
+            if hasattr(part, 'draw_rim'):
+                part.draw_rim(self, cr, cx, cy, rings, a0, a1)
+            self.draw_tree(cr, cx, cy, rings, a0, a1, part)
         elif self.mode != 'apps':
             part = self.parts[self.mode]
             if hasattr(part, 'draw'):
@@ -470,6 +474,8 @@ class Dial(Gtk.Window):
             cr.stroke()
             cr.restore()
         self.draw_hub(cr, cx, cy, hub)
+        if self.mode == 'music' and not self.filter:
+            self.music_keys(cr, cx, cy, hub)
         am = math.radians((a0 + a1) / 2)
         if self.drag:
             a, x, y = self.drag
@@ -484,7 +490,7 @@ class Dial(Gtk.Window):
                 cr.paint()
         self.text(cr, 'type to search · drag to rearrange · Enter starts · Esc closes'
                   if self.mode == 'apps' else
-                  'rest on a folder: it opens in the next ring · hold Super: at once · Esc: one back'
+                  'rest on something: it opens in the next ring · hold Super: at once · Esc: one back'
                   if getattr(self.parts.get(self.mode), 'tree', False) else
                   'click a part of the circle: it stays · Esc: back to apps',
                   cx + math.cos(am) * (outer + 115), cy + math.sin(am) * (outer + 115), 9,
@@ -565,8 +571,38 @@ class Dial(Gtk.Window):
         self.text_block(cr, cx, cy, [(time.strftime('%H:%M'), max(14, 26 * k), True, 1),
                                      (label[:22], max(8, 10 * k), False, 0.9)])
 
+    MUSIC_KEYS = (('skip-back', 'prev', -42), ('play', 'toggle', -14), ('square', 'stop', 14),
+                  ('skip-forward', 'next', 42))
+
+    def music_keys(self, cr, cx, cy, hub):
+        """previous / play-pause / stop / next in the centre of the circle"""
+        np = getattr(self.parts['music'], 'np', None)
+        y = cy + hub * 0.33
+        for icon, what, dx in self.MUSIC_KEYS:
+            if what == 'toggle' and np and np.get('playing'):
+                icon = 'pause'
+            hov = self.hub_key == what
+            if hov:
+                cr.new_path()
+                cr.arc(cx + dx, y, 12, 0, 2 * math.pi)
+                cr.set_source_rgba(*CYAN, 0.18)
+                cr.fill()
+            pb = self.lucide(icon, 16, 0.95 if hov else 0.6)
+            if pb:
+                Gdk.cairo_set_source_pixbuf(cr, pb, cx + dx - 8, y - 8)
+                cr.paint()
+
+    def music_key_at(self, x, y):
+        if self.mode != 'music':
+            return None
+        cx, cy, hub, *_ = self.fan()
+        return next((w for _, w, dx in self.MUSIC_KEYS
+                     if (x - cx - dx) ** 2 + (y - cy - hub * 0.33) ** 2 <= 13 ** 2), None)
+
     def text_block(self, cr, cx, cy, block):
         heights = [size * 1.8 for _, size, _, _ in block]
+        if self.mode == 'music' and not self.filter:
+            cy -= 14                    # room for the player buttons underneath
         y = cy - sum(heights) / 2
         for (s, size, bold, a), h in zip(block, heights):
             self.text(cr, s, cx, y + h / 2, max(7, size), bold=bold, alpha=a, split=1.6 if bold else 0.8)
@@ -629,7 +665,7 @@ class Dial(Gtk.Window):
             rm = (ri + ro) / 2
             size = (30, 27, 25)[k]
             # room per item: the first ring is icons only (a name on hover), the others have names
-            step = math.degrees((44 if k == 0 else 66) / rm)
+            step = math.degrees((44 if k == 0 else 74) / rm)
             cap = max(2, int((a1 - a0 - 4) / step))
             items = list(items)
             if len(items) > cap:                   # never dropped silently: "+N" opens the folder
@@ -693,7 +729,8 @@ class Dial(Gtk.Window):
                         Gdk.cairo_set_source_pixbuf(cr, ch, x + size * 0.55, y - size * 0.75)
                         cr.paint()
                 if k > 0 or is_open or hov:
-                    self.text(cr, t['name'][:18], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
+                    name = t['name'] if (is_open or hov) else (t['name'][:13] + '…' if len(t['name']) > 14 else t['name'])
+                    self.text(cr, name[:22], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
                               alpha=0.9, split=0.8 if is_open else 0)
             parent_angle, parent_r = next_angle, rm
 
@@ -851,8 +888,9 @@ class Dial(Gtk.Window):
         slot = self.hit(ev.x, ev.y, slot=True)
         h = slot[3] if slot else None
         z = self.hub_at(ev.x, ev.y)
-        if not same(h, self.hover) or z != self.hub_hover:
-            self.hover, self.hub_hover = h, z
+        key = self.music_key_at(ev.x, ev.y)
+        if not same(h, self.hover) or z != self.hub_hover or key != self.hub_key:
+            self.hover, self.hub_hover, self.hub_key = h, z, key
             self.area.queue_draw()
         part = self.parts.get(self.mode)
         if h and h.get('kids') and part is not None and getattr(part, 'tree', False):
@@ -914,6 +952,10 @@ class Dial(Gtk.Window):
                                              GLib.idle_add(self.area.queue_draw)), daemon=True).start()
         elif a and ev.button == 1:
             self.press = (a, ev.x, ev.y)    # start on release; moving it drags instead
+        elif z == 'centre' and ev.button == 1 and self.music_key_at(ev.x, ev.y):
+            what = self.music_key_at(ev.x, ev.y)
+            threading.Thread(target=lambda: (self.parts['music'].control(what),
+                                             GLib.idle_add(self.area.queue_draw)), daemon=True).start()
         elif z and ev.button == 1:
             if z == 'centre' and self.path.get(self.mode) and self.path[self.mode][-1].get('act'):
                 self.path[self.mode][-1]['act']()           # open where you are in the tree
@@ -991,7 +1033,14 @@ class Dial(Gtk.Window):
             elif a.get('act'):
                 act = a['act']
                 if a.get('keep'):           # a switch: do it, then show the new state
-                    threading.Thread(target=lambda: (act(), GLib.idle_add(self.area.queue_draw)),
+                    path = self.path.get(self.mode) or []
+
+                    def done():
+                        if path:            # a tree: read that branch again (Like -> Unlike)
+                            self.kids.pop(self.node_key(path[-1]), None)
+                            self.expand(path[-1], len(path) - 1)
+                        self.area.queue_draw()
+                    threading.Thread(target=lambda: (act(), GLib.idle_add(lambda: done() and False)),
                                      daemon=True).start()
                 else:
                     act()

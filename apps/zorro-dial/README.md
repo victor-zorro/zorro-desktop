@@ -19,7 +19,13 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
     its contents unfold in the next ring, beside it; deeper than three levels the tree moves
     inward. Click opens (folders in Nemo), Esc goes one level back, the centre shows the path
     and opens that folder. A mounted share (gvfs) unfolds too.
-  - Notes: the Obsidian vault (pinned + recent notes); Music: the SoundCloud player (next).
+  - Notes: the Obsidian vault (pinned + recent notes).
+  - Music: **a tree** (apps/zorro-music, scapi.py). My likes, your top styles (from the
+    likes' genres), Discover, your playlists, play a link. A style unfolds into: play my
+    likes in it (shuffled), Discover (new tracks in that style), More like these, Top
+    artists, your liked tracks. A track unfolds into Play / Play next / Like-Unlike.
+    Previous / play-pause / stop / next sit in the centre of the circle; the playing
+    track is a white particle band along the outer edge.
 - **One gear for all settings apps** in the last slice; Zorro itself stays visible too.
 - **Drag to rearrange**: drag an app to another place in its slice, or onto another slice.
   The order is saved (`order` and `assign` in the config); apps you never moved follow
