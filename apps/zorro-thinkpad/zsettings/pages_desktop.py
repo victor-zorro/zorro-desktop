@@ -494,6 +494,24 @@ class DesktopPages:
             g.attach(Gtk.Label(label=f'{label}: apps per slice', xalign=0), 0, k, 1, 1)
             g.attach(sp, 1, k, 1, 1)
         box.add(g)
+        box.add(heading('File previews', 'Previews'))
+        size = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 300, 1100, 20)
+        size.set_value(c.get('preview_size', 460))
+        size.set_hexpand(True)
+        size.set_size_request(380, -1)
+        size.set_halign(Gtk.Align.START)
+        size.connect('format-value', lambda _s, v: f'{int(v)} × {int(v * 0.78)}')
+        for v, label in ((360, 'small'), (460, 'normal'), (700, 'large'), (1000, 'huge')):
+            size.add_mark(v, Gtk.PositionType.BOTTOM, label)
+
+        def resized(w):
+            c['preview_size'] = int(w.get_value())
+            save()
+        size.connect('value-changed', resized)
+        box.add(size)
+        box.add(note('How big the picture, first page or text shows when you rest on a file in '
+                     'the Dialer\'s Files part. Takes effect the next time the Dialer opens.'))
+
         forget = Gtk.Button(label='Forget which apps I use', halign=Gtk.Align.START, margin_top=8)
         forget.connect('clicked', lambda b: (dial.USAGE.unlink(missing_ok=True),
                                              self.dial_msg.set_text('Usage forgotten')))

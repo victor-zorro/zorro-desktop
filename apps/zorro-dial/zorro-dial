@@ -46,6 +46,7 @@ DEFAULTS = {
     ],
     'ring_slots': [3, 4, 6],        # at most this many apps per slice on each ring
     'anchor': 'orb',                # orb: fans out from the info circle's clock; centre
+    'preview_size': 460,            # width of the file preview panel (pixels; height ~ 0.78x)
     'order': {},                    # slice name -> app ids in the order you dragged them
     'hide': [                       # not in the slices (typing still finds them)
         'thunar-settings.desktop', 'thunar-bulk-rename.desktop', 'rofi.desktop',
@@ -682,8 +683,13 @@ class Dial(Gtk.Window):
         data = self.previews.get(self.node_key(self.preview))
         cx, cy, hub, a0, a1, rings = self.fan()
         outer = rings[-1][1]
-        W, H = 460, 360
         sw, sh = self.geo.width, self.geo.height
+        try:
+            W = int(self.conf.get('preview_size', 460))
+        except (TypeError, ValueError):
+            W = 460
+        W = max(280, min(W, sw - 32))
+        H = min(int(W * 0.78), sh - 32)
         x = cx - outer - W - 40 if cx > sw / 2 else cx + outer + 40
         x = max(16, min(sw - W - 16, x))
         y = max(16, min(sh - H - 16, cy - H + 40 if cy > sh / 2 else cy - 40))
@@ -721,7 +727,7 @@ class Dial(Gtk.Window):
                 cr.paint()
         elif data.get('lines'):
             lay = PangoCairo.create_layout(cr)
-            lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans Mono 9'))
+            lay.set_font_description(Pango.FontDescription.from_string(f'DejaVu Sans Mono {max(8, min(12, round(W / 52)))}'))
             lay.set_width(int((W - 28) * Pango.SCALE))
             lay.set_ellipsize(Pango.EllipsizeMode.END)
             lay.set_text('\n'.join(data['lines']), -1)

@@ -324,6 +324,7 @@ PREVIEW_DIR = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-dial-prev
 IMAGES = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'ico', 'pnm', 'tga'}
 CONVERT = {'webp', 'heic', 'heif', 'avif', 'jxl'}
 VIDEO = {'mp4', 'mov', 'mkv', 'webm', 'avi', 'mxf', 'm4v', 'mpg', 'mpeg', 'mts', 'braw'}
+THUMB = 1280                        # preview pictures are made this wide (the panel scales them)
 AUDIO = {'mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'aiff'}
 
 
@@ -345,7 +346,7 @@ def file_preview(path):
     out = {'title': p.name, 'meta': f'{human(st.st_size)} · {time.strftime("%-d %b %Y %H:%M", time.localtime(st.st_mtime))}',
            'image': None, 'lines': []}
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    png = PREVIEW_DIR / f'{abs(hash((str(p), st.st_mtime)))}.png'
+    png = PREVIEW_DIR / f'{abs(hash((str(p), st.st_mtime, THUMB)))}.png'
 
     def probe():
         try:
@@ -362,18 +363,18 @@ def file_preview(path):
         out['image'] = str(p)
     elif ext in CONVERT:
         if png.exists() or subprocess.run(['ffmpeg', '-y', '-v', 'quiet', '-i', str(p), '-frames:v', '1',
-                                           '-vf', 'scale=640:-2', str(png)], timeout=20).returncode == 0:
+                                           '-vf', f'scale={THUMB}:-2', str(png)], timeout=20).returncode == 0:
             out['image'] = str(png)
     elif ext in VIDEO:
         fmt = probe()
         out['meta'] += f' · {length(fmt)}' if fmt.get('duration') else ''
-        if png.exists() or subprocess.run(['ffmpegthumbnailer', '-i', str(p), '-o', str(png), '-s', '640',
+        if png.exists() or subprocess.run(['ffmpegthumbnailer', '-i', str(p), '-o', str(png), '-s', str(THUMB),
                                            '-t', '15%'], capture_output=True, timeout=30).returncode == 0:
             out['image'] = str(png)
     elif ext == 'pdf':
         prefix = png.with_suffix('')
         if not png.exists():
-            subprocess.run(['pdftoppm', '-png', '-f', '1', '-l', '1', '-scale-to', '640', '-singlefile',
+            subprocess.run(['pdftoppm', '-png', '-f', '1', '-l', '1', '-scale-to', str(THUMB), '-singlefile',
                             str(p), str(prefix)], capture_output=True, timeout=30)
         if png.exists():
             out['image'] = str(png)
@@ -385,12 +386,12 @@ def file_preview(path):
     else:
         try:
             with open(p, 'rb') as fh:
-                head = fh.read(6000)
+                head = fh.read(12000)
         except OSError:
             head = b''
         if head and b'\0' not in head:
             text = head.decode('utf-8', 'replace').expandtabs(4)
-            out['lines'] = [ln.rstrip()[:76] for ln in text.splitlines()[:18]]
+            out['lines'] = [ln.rstrip()[:160] for ln in text.splitlines()[:60]]   # the panel clips
         else:
             out['lines'] = [f'{ext.upper() or "a"} file']
     return out
