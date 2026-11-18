@@ -7,6 +7,7 @@ the RPC code of the xmm7360-pci project (xmm7360/, see NOTICE).
 
   zorro-lte wake       start the modem's services, FCC unlock, radio on
   zorro-lte status     wake, then ask over AT: SIM, operator, signal, registration
+  zorro-lte pin [--remember]   enter the SIM PIN (hidden; once per start, or stored root-only)
   zorro-lte up [APN]   wake, attach, connect mobile data on wwan0 (APN: from the operator
                        database by the SIM's network code when not given)
   zorro-lte down       mobile data off (wwan0 down)
@@ -27,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'xm
 IFACE = 'wwan0'
 METRIC = 1500                       # Wi-Fi ~600, Ethernet ~100: those win while they are up
 PROVIDERS = '/usr/share/mobile-broadband-provider-info/serviceproviders.xml'
+PIN_FILE = '/etc/zorro-lte/pin'          # optional, root only (zorro-lte pin --remember)
 
 
 class Timeout(Exception):
@@ -140,6 +142,8 @@ def wake():
         rpc.UtaModeSet(r, 1)           # radio on (leaves the FCC "flight mode")
         signal.alarm(0)
         print('\n== modem awake, FCC unlocked, radio on')
+        time.sleep(2)
+        auto_unlock()
         return r
     except Timeout:
         print('\n!! the modem did not answer within the time limit')
@@ -178,37 +182,93 @@ def at(fd, cmd, wait=4.0):
 
 
 def status():
-    for port in ports()[1]:
-        try:
-            fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
-        except OSError as e:
-            print(f'{port}: {e.strerror}')
-            continue
-        first = at(fd, 'AT', 6)
-        print(f'== {port}: {"answers" if first else "silent"}')
-        if first:
-            for cmd in ('ATI', 'AT+CGMR', 'AT+CFUN?', 'AT+CPIN?', 'AT+COPS?', 'AT+CSQ',
-                        'AT+CREG?', 'AT+CEREG?', 'AT+CSPN?', 'AT+CMGF?'):
-                print(f'   {cmd:12} {at(fd, cmd)}')
-            m = re.search(r'(\d{5})\d{5,}', at(fd, 'AT+CIMI'))   # SIM id: show the network code only
-            print(f'   {"network":12} {m.group(1) if m else "?"} (MCC+MNC of the SIM)')
+    fd = at_port()
+    if fd is None:
+        print('== no AT port answers')
+        return
+    try:
+        for cmd in ('ATI', 'AT+CGMR', 'AT+CFUN?', 'AT+CPIN?', 'AT+COPS?', 'AT+CSQ',
+                    'AT+CREG?', 'AT+CEREG?', 'AT+CMGF?'):
+            print(f'   {cmd:12} {at(fd, cmd)}')
+        m = re.search(r'(\d{5})\d{5,}', at(fd, 'AT+CIMI'))   # SIM id: the network code only
+        print(f'   {"network":12} {m.group(1) if m else "? (unlock the SIM first)"}')
+    finally:
         os.close(fd)
 
-
-def ask(cmd, wait=6):
-    """one AT command on the first port that answers"""
+def at_port():
+    """the AT port that answers 'OK' (on the T14: wwan0at1; wwan0at0 stays mute)"""
     for port in ports()[1]:
         try:
             fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         except OSError:
             continue
-        try:
-            out = at(fd, cmd, wait)
-            if out:
-                return out
-        finally:
-            os.close(fd)
-    return ''
+        if 'OK' in at(fd, 'AT', 4):
+            return fd
+        os.close(fd)
+    return None
+
+
+def ask(cmd, wait=6):
+    """one AT command on the port that answers"""
+    fd = at_port()
+    if fd is None:
+        return ''
+    try:
+        return at(fd, cmd, wait)
+    finally:
+        os.close(fd)
+
+
+def sim_state():
+    m = re.search(r'\+CPIN: ([A-Z ]+)', ask('AT+CPIN?'))
+    return m.group(1).strip() if m else '?'
+
+
+def unlock(pin, from_file=False):
+    """enter the SIM PIN once (never retried: three wrong PINs block the SIM)"""
+    if not re.fullmatch(r'\d{4,8}', pin or ''):
+        print('!! a PIN is 4 to 8 digits')
+        return False
+    out = ask(f'AT+CPIN="{pin}"', 10)
+    time.sleep(2)
+    if sim_state() == 'READY':
+        print('== SIM unlocked')
+        return True
+    print('!! the SIM did not accept the PIN. Careful: after 3 wrong PINs it needs the PUK.')
+    if from_file:
+        os.remove(PIN_FILE)                 # never try a wrong stored PIN again
+        print(f'   the stored PIN was wrong and is removed ({PIN_FILE})')
+    if 'ERROR' in out:
+        print(f'   modem: {out}')
+    return False
+
+
+def pin_command(remember=False):
+    import getpass
+    st = sim_state()
+    if st == 'READY':
+        print('== the SIM is unlocked already')
+        return True
+    if st != 'SIM PIN':
+        print(f'!! SIM state: {st}' + (' (needs the PUK: use a phone)' if 'PUK' in st else ''))
+        return False
+    pin = getpass.getpass('SIM PIN (not shown): ').strip()
+    if not unlock(pin):
+        return False
+    if remember:
+        os.makedirs(os.path.dirname(PIN_FILE), mode=0o700, exist_ok=True)
+        fd = os.open(PIN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write(pin + '\n')
+        print(f'== PIN stored for automatic unlock (root only: {PIN_FILE})')
+    return True
+
+
+def auto_unlock():
+    """after wake: a stored PIN unlocks the SIM by itself"""
+    if sim_state() == 'SIM PIN' and os.path.exists(PIN_FILE):
+        with open(PIN_FILE) as f:
+            unlock(f.read().strip(), from_file=True)
 
 
 def sim_network():
@@ -282,6 +342,13 @@ def up(apn=None):
     if not r:
         return False
     time.sleep(2)
+    if sim_state() != 'READY':
+        print(f'!! SIM: {sim_state()}. Unlock it first:  zorro-lte pin')
+        return False
+    for _ in range(30):                     # registration takes a few seconds after unlock
+        if re.search(r'\+CEREG: \d,[15]', ask('AT+CEREG?')):
+            break
+        time.sleep(1)
     if apn:
         tries = [(apn, 'given')]
     else:
@@ -344,6 +411,10 @@ def main():
         sys.exit(0 if up(a[1] if len(a) == 2 else None) else 1)
     elif a == ['down']:
         sys.exit(0 if down() else 1)
+    elif a[:1] == ['pin'] and a[1:] in ([], ['--remember']):
+        if not wake():
+            sys.exit(1)
+        sys.exit(0 if pin_command('--remember' in a) else 1)
     elif a == ['reset']:
         sys.exit(0 if reset() else 1)
     elif a == ['diag']:
