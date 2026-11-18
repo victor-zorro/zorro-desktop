@@ -10,7 +10,7 @@ the RPC code of the xmm7360-pci project (xmm7360/, see NOTICE).
   zorro-lte up [APN]   wake, attach, connect mobile data on wwan0 (APN: from the operator
                        database by the SIM's network code when not given)
   zorro-lte down       mobile data off (wwan0 down)
-  zorro-lte reset      restart the modem (PCI remove + rescan); wake does it by itself
+  zorro-lte reset      restart the modem (ACPI / bus reset); wake does it by itself
   zorro-lte diag       PCI state, ports and the kernel's modem messages
 Wi-Fi and Ethernet stay preferred: the mobile default route has a high metric.
 """
@@ -65,24 +65,36 @@ def glob_dirs(pattern):
 
 
 def reset():
-    """take the modem off the PCI bus and find it again: the driver starts it fresh"""
+    """a real restart of the modem: unbind the driver, reset the device through ACPI
+    (the firmware switches the modem's power off and on) or a bus reset, bind again"""
     dev = modem_pci()
     if not dev:
         print('!! no XMM7360 modem on the PCI bus')
         return False
-    print(f'== resetting the modem ({os.path.basename(dev)})')
-    with open(f'{dev}/remove', 'w') as f:
-        f.write('1')
+    name = os.path.basename(dev)
+    print(f'== resetting the modem ({name}; methods: '
+          f'{open(f"{dev}/reset_method").read().strip()})')
+    drv = os.path.realpath(f'{dev}/driver') if os.path.exists(f'{dev}/driver') else None
+    if drv:
+        with open(f'{drv}/unbind', 'w') as f:
+            f.write(name)
+        time.sleep(1)
+    try:
+        with open(f'{dev}/reset', 'w') as f:
+            f.write('1')
+    except OSError as e:
+        print(f'   reset: {e.strerror}')
     time.sleep(3)
-    with open('/sys/bus/pci/rescan', 'w') as f:
-        f.write('1')
-    for _ in range(60):                       # the driver needs up to ~30 s
+    with open('/sys/bus/pci/drivers/iosm/bind' if not drv else f'{drv}/bind', 'w') as f:
+        f.write(name)
+    for _ in range(60):                       # the modem boots its firmware: up to ~30 s
         time.sleep(1)
         if ports()[0]:
-            time.sleep(5)                     # let the modem finish booting
+            time.sleep(5)
             print('== modem back')
             return True
-    print('!! the modem did not come back after the reset')
+    print('!! the modem did not come back. Switch the laptop fully off (not restart),\n'
+          '   wait 10 seconds, switch on, and run  zorro-lte status  first thing.')
     return False
 
 
