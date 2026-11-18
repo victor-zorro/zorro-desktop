@@ -165,6 +165,9 @@ done
 log "Icons: white Lucide line icons (apps/zorro-icons)"
 apps/zorro-icons/build-icons
 ln -sfn "$PWD/apps/zorro-icons/zorro-winicons" ~/.local/bin/zorro-winicons
+
+log "Window places (apps/zorro-winpos)"
+apps/zorro-winpos/install.sh
 log "Dial launcher (apps/zorro-dial)"
 apps/zorro-dial/install.sh
 log "Living wallpaper (apps/zorro-wall)"

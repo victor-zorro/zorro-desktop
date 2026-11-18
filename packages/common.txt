@@ -89,3 +89,5 @@ xcape
 # Split DNS: NetBird answers only *.netbird.selfhosted (on wt0), the rest goes to the
 # router via NetworkManager. Without it NetBird takes over all DNS (resolv.conf).
 systemd-resolved
+# zorro-winpos: windows reopen where you left them (X events from Python)
+python3-xlib

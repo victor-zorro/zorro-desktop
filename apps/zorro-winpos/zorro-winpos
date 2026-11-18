@@ -1,0 +1,191 @@
+#!/usr/bin/python3
+"""zorro-winpos: windows reopen where you left them.
+
+Remembers per app (WM_CLASS) the place, size and maximized state of its normal windows
+(no dialogs, popups or desktop pieces) and puts the first window of that app back there
+when it opens again. Event driven: it waits on X (window list changes, moves, resizes,
+state changes); nothing is polled. Started from Openbox autostart.
+
+  ~/.local/state/zorro-winpos/places.json   what it remembers
+  ~/.config/zorro-winpos/config.json        {"ignore": ["SomeClass", ...]}
+"""
+import json
+import os
+import select
+import sys
+import time
+from pathlib import Path
+
+try:
+    from Xlib import X, Xatom, display, error, protocol
+except ImportError:
+    sys.exit('zorro-winpos: needs python3-xlib (sudo apt install python3-xlib)')
+
+STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'zorro-winpos'
+PLACES = STATE / 'places.json'
+CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-winpos' / 'config.json'
+SAVE_AFTER = 1.5                     # seconds of quiet before writing the file
+
+
+class WinPos:
+    def __init__(self):
+        self.d = display.Display()
+        self.root = self.d.screen().root
+        a = self.d.intern_atom
+        self.A = {n: a(n) for n in (
+            '_NET_CLIENT_LIST', '_NET_WM_STATE', '_NET_WM_STATE_MAXIMIZED_VERT',
+            '_NET_WM_STATE_MAXIMIZED_HORZ', '_NET_WM_STATE_FULLSCREEN', '_NET_WM_WINDOW_TYPE',
+            '_NET_WM_WINDOW_TYPE_NORMAL', '_NET_MOVERESIZE_WINDOW')}
+        try:
+            self.ignore = set(json.loads(CONF.read_text()).get('ignore', []))
+        except (OSError, ValueError):
+            self.ignore = set()
+        try:
+            self.places = json.loads(PLACES.read_text())
+        except (OSError, ValueError):
+            self.places = {}
+        self.known = {}                  # window id -> app key, for the open windows we follow
+        self.dirty_at = 0.0
+        self.root.change_attributes(event_mask=X.PropertyChangeMask)
+        for wid in self.clients():       # windows already open: follow, don't move them
+            self.follow(wid, restore=False)
+
+    # -- X helpers
+    def clients(self):
+        p = self.root.get_full_property(self.A['_NET_CLIENT_LIST'], Xatom.WINDOW)
+        return list(p.value) if p else []
+
+    def key(self, w):
+        """the app: WM_CLASS class (+ instance when it differs, e.g. Firefox profiles)"""
+        c = w.get_wm_class()
+        if not c:
+            return None
+        inst, cls = c
+        if cls in self.ignore or cls.lower().startswith('zorro-'):
+            return None
+        return cls if inst.lower() == cls.lower() else f'{cls}/{inst}'
+
+    def normal(self, w):
+        if w.get_wm_transient_for():
+            return False                 # a dialog of another window
+        t = w.get_full_property(self.A['_NET_WM_WINDOW_TYPE'], Xatom.ATOM)
+        return not t or self.A['_NET_WM_WINDOW_TYPE_NORMAL'] in t.value
+
+    def states(self, w):
+        p = w.get_full_property(self.A['_NET_WM_STATE'], Xatom.ATOM)
+        return set(p.value) if p else set()
+
+    def geometry(self, w):
+        """the client area on screen (not the frame): x, y, width, height"""
+        g = w.get_geometry()
+        pos = self.root.translate_coords(w, 0, 0)
+        return pos.x, pos.y, g.width, g.height
+
+    def message(self, w, atom, data):
+        ev = protocol.event.ClientMessage(window=w, client_type=atom, data=(32, data + [0] * (5 - len(data))))
+        self.root.send_event(ev, event_mask=X.SubstructureRedirectMask | X.SubstructureNotifyMask)
+
+    # -- remember and restore
+    def follow(self, wid, restore=True):
+        w = self.d.create_resource_object('window', wid)
+        try:
+            if not self.normal(w):
+                return
+            k = self.key(w)
+            if not k:
+                return
+            w.change_attributes(event_mask=X.StructureNotifyMask | X.PropertyChangeMask)
+            first = k not in self.known.values()
+            self.known[wid] = k
+            if restore and first and k in self.places:
+                self.restore(w, self.places[k])
+            else:
+                self.record(wid)
+        except error.XError:
+            self.known.pop(wid, None)
+
+    def restore(self, w, p):
+        sw, sh = self.root.get_geometry().width, self.root.get_geometry().height
+        x, y, ww, hh = p['x'], p['y'], p['w'], p['h']
+        ww, hh = min(ww, sw), min(hh, sh)
+        if x + ww > sw or y + hh > sh or x < 0 or y < 0:      # screen changed: keep it on screen
+            x, y = max(0, min(x, sw - ww)), max(0, min(y, sh - hh))
+        # StaticGravity (10): x, y are the client's own corner; x, y, w, h given; from a pager (2)
+        flags = 10 | (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11) | (2 << 12)
+        self.message(w, self.A['_NET_MOVERESIZE_WINDOW'], [flags, x, y, ww, hh])
+        if p.get('max'):
+            self.message(w, self.A['_NET_WM_STATE'], [1, self.A['_NET_WM_STATE_MAXIMIZED_VERT'],
+                                                      self.A['_NET_WM_STATE_MAXIMIZED_HORZ'], 2])
+        self.d.flush()
+
+    def record(self, wid):
+        k = self.known.get(wid)
+        if not k:
+            return
+        w = self.d.create_resource_object('window', wid)
+        try:
+            st = self.states(w)
+            if self.A['_NET_WM_STATE_FULLSCREEN'] in st:
+                return                   # fullscreen video etc.: keep the normal place
+            mx = {self.A['_NET_WM_STATE_MAXIMIZED_VERT'], self.A['_NET_WM_STATE_MAXIMIZED_HORZ']} <= st
+            old = self.places.get(k, {})
+            if mx:                       # keep the size it had before maximizing
+                new = dict(old, max=True) if old else None
+            else:
+                x, y, ww, hh = self.geometry(w)
+                new = {'x': x, 'y': y, 'w': ww, 'h': hh, 'max': False}
+            if new and new != old:
+                self.places[k] = new
+                self.dirty_at = self.dirty_at or time.time()
+        except error.XError:
+            pass
+
+    def save(self):
+        STATE.mkdir(parents=True, exist_ok=True)
+        tmp = PLACES.with_suffix('.tmp')
+        tmp.write_text(json.dumps(self.places, indent=1, sort_keys=True))
+        tmp.replace(PLACES)
+        self.dirty_at = 0.0
+
+    # -- events
+    def handle(self, ev):
+        if ev.type == X.PropertyNotify and ev.window == self.root:
+            if ev.atom == self.A['_NET_CLIENT_LIST']:
+                now = set(self.clients())
+                for wid in now - set(self.known):
+                    self.follow(wid)
+                for wid in set(self.known) - now:
+                    self.known.pop(wid, None)
+        elif ev.type == X.PropertyNotify and ev.atom == self.A['_NET_WM_STATE']:
+            self.record(ev.window.id)
+        elif ev.type == X.ConfigureNotify:
+            self.record(ev.window.id)
+        elif ev.type == X.DestroyNotify:
+            self.known.pop(ev.window.id, None)
+
+    def run(self):
+        fd = self.d.fileno()
+        while True:
+            wait = None
+            if self.dirty_at:
+                wait = max(0.0, self.dirty_at + SAVE_AFTER - time.time())
+            if not self.d.pending_events():
+                select.select([fd], [], [], wait)
+            while self.d.pending_events():
+                try:
+                    self.handle(self.d.next_event())
+                except error.XError:
+                    pass
+            if self.dirty_at and time.time() >= self.dirty_at + SAVE_AFTER:
+                self.save()
+
+
+def main():
+    if len(sys.argv) > 1:
+        print(__doc__.strip())
+        sys.exit(0 if sys.argv[1] in ('-h', '--help') else 1)
+    WinPos().run()
+
+
+if __name__ == '__main__':
+    main()

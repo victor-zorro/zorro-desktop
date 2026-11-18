@@ -25,6 +25,7 @@ command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 command -v xcape >/dev/null && xcape -e 'Super_L=Super_L|space' &
 # Same white Lucide icons on every window (Alt+Tab, window menu)
 command -v zorro-winicons >/dev/null && zorro-winicons &
+command -v zorro-winpos >/dev/null && zorro-winpos &      # windows reopen where they were
 # Living wallpaper first, so the info circle lands on top of it
 command -v zorro-wall >/dev/null && zorro-wall &
 # Info circle (apps/zorro-orb) replaces conky; conky stays as fallback
