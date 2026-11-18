@@ -18,6 +18,8 @@
    Each notebook → `~/Notes/<vault>/`, attachments in `_attachments/`, created / updated /
    tags / source in the note's properties, added to Obsidian's vault list (close Obsidian
    first). Rerun-safe: new and changed Evernote notes come in, notes edited in Obsidian stay.
+   `--map "Small notebook=Notes"` puts a notebook in a folder of another vault (Obsidian Sync
+   takes up to 10 vaults); the choice is remembered in `~/Notes/.zorro-evernote-map.json`.
 
    Or with Obsidian's own Importer, into one vault: create the vault `~/Notes`, then
    Settings → Community plugins → turn them on → Browse → **Importer** (official) →

@@ -38,6 +38,7 @@ ENEX = EXPORT / 'enex'
 NOTES = HOME / 'Notes'
 OBSIDIAN = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'obsidian' / 'obsidian.json'
 TOOL = HOME / '.local/bin/evernote-backup'
+MAPS = Path.home() / 'Notes' / '.zorro-evernote-map.json'   # merges you made: notebook -> vault
 STATE = '.zorro-evernote.json'          # in each vault: Evernote id -> file, and its date
 ATTACH = '_attachments'
 GENERIC = re.compile(r'(?i)(attachment|image|img|snapshot|photo|picture|screenshot|scan|untitled|'
@@ -508,7 +509,13 @@ def main():
         return
     if not DB.exists():
         sys.exit(f'nothing downloaded yet ({DB}): run evernote-backup init-db and sync first')
-    names = dict(m.split('=', 1) for m in a.map if '=' in m)
+    try:
+        names = json.loads(MAPS.read_text())          # earlier --map choices are remembered
+    except (OSError, ValueError):
+        names = {}
+    names.update(m.split('=', 1) for m in a.map if '=' in m)
+    if a.map and not a.dry_run:
+        MAPS.write_text(json.dumps(names, indent=1))
     if not a.no_export:
         print('Exporting from the download…', flush=True)
         export()
@@ -529,7 +536,7 @@ def main():
                 print(f'{vname}: not rebuilt, you changed {len(changed)} notes in it (e.g. {changed[0]})')
                 continue
         for nb, f in books:
-            sub = clean_name(nb) if len(books) > 1 else ''
+            sub = clean_name(nb) if len(books) > 1 and clean_name(vault_name(nb)) != vname else ''
             print(f'{nb} → ~/Notes/{vname}{"/" + sub if sub else ""}', flush=True)
             for note in notes_in(f):
                 v.write(sub, note)
