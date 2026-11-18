@@ -235,16 +235,64 @@ def kind_icon(path):
     return 'lucide:file-text'
 
 
+def folder_tile(path, name=None, icon='lucide:folder', sub=None):
+    """a folder that unfolds into its contents (read only when it unfolds) and opens on click"""
+    path = Path(path)
+    if sub is None:
+        try:
+            sub = f'{sum(1 for e in os.scandir(path) if not e.name.startswith("."))} items'
+        except OSError:
+            sub = ''
+    return tile(icon, (name or path.name)[:22], sub, lambda: spawn('xdg-open', str(path)),
+                id=str(path), kids=lambda: folder_kids(path))
+
+
+def folder_kids(path, limit=60):
+    """a folder's contents: folders first, then files, newest first; no hidden ones"""
+    try:
+        entries = [e for e in os.scandir(path) if not e.name.startswith('.')]
+    except OSError:
+        return []
+    dirs = sorted((e for e in entries if e.is_dir(follow_symlinks=True)), key=lambda e: e.name.lower())
+
+    def mtime(e):
+        try:
+            return e.stat().st_mtime
+        except OSError:
+            return 0
+    files = sorted((e for e in entries if not e.is_dir(follow_symlinks=True)), key=mtime, reverse=True)
+    out = [folder_tile(e.path) for e in dirs[:limit]]
+    for f in files[:max(0, limit - len(out))]:
+        out.append(tile(kind_icon(f.name), f.name[:24], '', lambda p=f.path: spawn('xdg-open', p), id=f.path))
+    return out
+
+
+def gvfs_path(uri):
+    """a mounted network share as a normal folder (gvfs-fuse), or None when not mounted"""
+    u = urlparse(uri)
+    base = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'gvfs'
+    if u.scheme == 'smb' and base.is_dir():
+        parts = [x for x in u.path.split('/') if x]
+        if parts:
+            p = base / f'smb-share:server={u.hostname},share={parts[0].lower()}'
+            for alt in (p, base / f'smb-share:server={u.hostname},share={parts[0]}'):
+                if alt.is_dir():
+                    return alt.joinpath(*parts[1:])
+    return None
+
+
 class Files(Part):
+    """a tree: places in the first ring; rest on a folder and its contents unfold in the next"""
     key, title = 'files', 'Files'
+    tree = True
 
     def fetch(self):
-        def open_dir(p):
-            return lambda: spawn('xdg-open', str(p))
-        places = [('lucide:house', 'Home', HOME), ('lucide:folder-down', 'Downloads', HOME / 'Downloads'),
-                  ('lucide:file-text', 'Documents', HOME / 'Documents'),
-                  ('lucide:images', 'Pictures', HOME / 'Pictures'), ('lucide:cloud', 'Drive', HOME / 'Drive')]
-        self.places = [tile(i, n, '', open_dir(p)) for i, n, p in places if p.exists()]
+        roots = []
+        for icon, name, p in (('lucide:house', 'Home', HOME), ('lucide:folder-down', 'Downloads', HOME / 'Downloads'),
+                              ('lucide:file-text', 'Documents', HOME / 'Documents'),
+                              ('lucide:images', 'Pictures', HOME / 'Pictures'), ('lucide:cloud', 'Drive', HOME / 'Drive')):
+            if p.exists():
+                roots.append(folder_tile(p, name, icon))
         recent = []
         try:
             root = ET.parse(HOME / '.local/share/recently-used.xbel').getroot()
@@ -258,33 +306,41 @@ class Files(Part):
             pass
         recent.sort(reverse=True)
         self.recent = [tile(kind_icon(p), os.path.basename(p)[:24], os.path.dirname(p).replace(str(HOME), '~'),
-                            lambda p=p: spawn('xdg-open', p)) for _, p in recent[:5]]
-        shares = []
+                            lambda p=p: spawn('xdg-open', p), id=p) for _, p in recent[:12]]
+        roots.append(tile('lucide:rotate-ccw', 'Recent', f'{len(self.recent)} files', None, id='recent',
+                          kids=lambda: self.recent))
+        nemo = shutil.which('nemo')
         try:
             for line in (HOME / '.config/gtk-3.0/bookmarks').read_text().splitlines():
                 uri, _, label = line.partition(' ')
                 if uri.startswith(('smb://', 'sftp://', 'dav', 'ftp://', 'nfs://')):
-                    shares.append(tile('lucide:network', label or uri.split('//')[1][:22], uri.split('://')[0],
-                                       lambda u=uri: spawn('nemo', u) if shutil.which('nemo') else spawn('xdg-open', u)))
+                    local = gvfs_path(uri)
+                    t_ = tile('lucide:hard-drive', (label or urlparse(uri).hostname or uri)[:22],
+                              'share' if local else 'share · click to connect',
+                              lambda u=uri: spawn('nemo', u) if nemo else spawn('xdg-open', u), id=uri)
+                    if local:
+                        t_['kids'] = lambda p=local: folder_kids(p)
+                    roots.append(t_)
                 elif uri.startswith('file://') and label:
-                    shares.append(tile('lucide:folder-heart', label, 'bookmark',
-                                       lambda u=uri: spawn('xdg-open', unquote(urlparse(u).path))))
+                    roots.append(folder_tile(unquote(urlparse(uri).path), label, 'lucide:folder-heart'))
         except OSError:
             pass
         media = Path('/media') / os.environ.get('USER', '')
         for m in (sorted(media.iterdir()) if media.is_dir() else []):
-            shares.append(tile('lucide:usb', m.name[:22], 'USB', lambda m=m: spawn('xdg-open', str(m))))
-        shares.append(tile('lucide:network', 'Network', 'browse', lambda: spawn('nemo', 'network:///')
-                           if shutil.which('nemo') else spawn('xdg-open', 'network:///')))
-        self.shares = shares[:5]
+            roots.append(folder_tile(m, m.name, 'lucide:usb'))
+        roots.append(tile('lucide:network', 'Network', 'browse', lambda: spawn('nemo', 'network:///')
+                          if nemo else spawn('xdg-open', 'network:///'), id='network'))
+        self.roots_ = roots
         self.ready = True
 
-    def preview(self):
-        n = len(getattr(self, 'recent', []))
-        return 'FILES', 'Files', [f'{n} recent' if n else 'places and shares']
+    def roots(self):
+        return getattr(self, 'roots_', [])
 
-    def rings(self):
-        return [getattr(self, 'places', []), getattr(self, 'recent', []), getattr(self, 'shares', [])]
+    def rings(self):                     # not used for a tree; kept for the Part interface
+        return [self.roots(), [], []]
+
+    def preview(self):
+        return 'FILES', 'Files', ['rest on a folder: it opens']
 
     def centre(self):
         return 'open Nemo', lambda: spawn('nemo') if shutil.which('nemo') else spawn('xdg-open', str(HOME))

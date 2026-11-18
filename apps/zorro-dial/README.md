@@ -14,7 +14,11 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
   - Messages: dunst's history; click opens it again, right-click dismisses.
   - System: battery / Wi-Fi / CPU / disk, switches (Wi-Fi, Bluetooth, Mobile, Airplane, Do not
     disturb), Lock, Sleep, and Log out / Restart / Power off with a second click to confirm.
-  - Files: places, recent files, bookmarked shares (smb://…), USB, network.
+  - Files: **a tree**. Places (Home, Downloads, Documents, Pictures, Drive, Recent, bookmarked
+    shares, USB, Network) in the first ring; rest the mouse 0.4 s on a folder (or hold Super) and
+    its contents unfold in the next ring, beside it; deeper than three levels the tree moves
+    inward. Click opens (folders in Nemo), Esc goes one level back, the centre shows the path
+    and opens that folder. A mounted share (gvfs) unfolds too.
   - Notes: the Obsidian vault (pinned + recent notes); Music: the SoundCloud player (next).
 - **One gear for all settings apps** in the last slice; Zorro itself stays visible too.
 - **Drag to rearrange**: drag an app to another place in its slice, or onto another slice.

@@ -211,6 +211,10 @@ class Dial(Gtk.Window):
         self.hub_hover = None           # a part's key, 'centre', or None
         self.armed = None               # (tile name, time): a confirm tile clicked once
         self.parts = dialmodes.PARTS
+        self.path = {}                  # per tree part: the unfolded nodes, level by level
+        self.kids = {}                  # node id -> its children (None while loading)
+        self.dwell = None               # (node, level, since): resting on something that unfolds
+        self.dwell_id = None
         for part in self.parts.values():
             threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
         self.theme = Gtk.IconTheme.get_default()
@@ -440,6 +444,8 @@ class Dial(Gtk.Window):
                 'lucide:search', f'SoundCloud: {self.filter}'[:30], 'Enter: play', None)], []])
         elif self.filter:
             self.draw_search(cr, cx, cy, rings, a0, a1)
+        elif self.mode != 'apps' and getattr(self.parts[self.mode], 'tree', False):
+            self.draw_tree(cr, cx, cy, rings, a0, a1, self.parts[self.mode])
         elif self.mode != 'apps':
             part = self.parts[self.mode]
             if hasattr(part, 'draw'):
@@ -477,8 +483,11 @@ class Dial(Gtk.Window):
                 Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
                 cr.paint()
         self.text(cr, 'type to search · drag to rearrange · Enter starts · Esc closes'
-                  if self.mode == 'apps' else 'click a part of the circle: it stays · Esc: back to apps',
-                  cx + math.cos(am) * (outer + 70), cy + math.sin(am) * (outer + 70), 9,
+                  if self.mode == 'apps' else
+                  'rest on a folder: it opens in the next ring · hold Super: at once · Esc: one back'
+                  if getattr(self.parts.get(self.mode), 'tree', False) else
+                  'click a part of the circle: it stays · Esc: back to apps',
+                  cx + math.cos(am) * (outer + 115), cy + math.sin(am) * (outer + 115), 9,
                   bold=False, alpha=0.5, split=0)
         return False
 
@@ -532,6 +541,15 @@ class Dial(Gtk.Window):
             return
         show = self.hub_hover if self.hub_hover in self.parts else (
             self.mode if self.mode != 'apps' and self.hub_hover != 'apps' else None)
+        tree_path = self.path.get(show) if show == self.mode else None
+        if show and not self.filter and tree_path:
+            names = [n['name'] for n in tree_path]
+            crumbs = ' › '.join(names[-3:])
+            self.text_block(cr, cx, cy, [(self.parts[show].title.upper(), 8 * k, True, 0.55),
+                                         (names[-1][:20], 13 * k, True, 1), (crumbs[-30:], 8 * k, False, 0.7),
+                                         ('click: open · Esc: back', 8 * k, False,
+                                          0.9 if self.hub_hover == 'centre' else 0.5)])
+            return
         if show and not self.filter:
             title, big, lines = self.parts[show].preview()
             block = [(title, 8 * k, True, 0.55), (big, (28 if len(big) <= 5 else 15 if len(big) <= 11 else 11) * k, True, 1)]
@@ -553,6 +571,131 @@ class Dial(Gtk.Window):
         for (s, size, bold, a), h in zip(block, heights):
             self.text(cr, s, cx, y + h / 2, max(7, size), bold=bold, alpha=a, split=1.6 if bold else 0.8)
             y += h
+
+    # -- trees: each level in the next ring, unfolding where the mouse rests
+    DWELL = 0.4
+
+    def node_key(self, n):
+        return n.get('id') or n.get('name')
+
+    def tree_levels(self, part):
+        levels = [part.roots()]
+        for n in self.path.get(part.key, []):
+            kids = self.kids.get(self.node_key(n))
+            levels.append([dialmodes.tile('lucide:ellipsis', 'opening…', '', None, id='__loading')]
+                          if kids is None else kids)
+        return levels
+
+    def expand(self, node, level):
+        """unfold node: its children (read in a thread) show in the next ring"""
+        path = self.path.setdefault(self.mode, [])
+        del path[level:]
+        path.append(node)
+        key = self.node_key(node)
+        if key not in self.kids:
+            self.kids[key] = None
+
+            def work():
+                try:
+                    kids = node['kids']()
+                except Exception:       # noqa: BLE001 - an unreadable folder: just empty
+                    kids = []
+                self.kids[key] = kids
+                GLib.idle_add(lambda: self.area.queue_draw() and False)
+            threading.Thread(target=work, daemon=True).start()
+        self.dwell = None
+        self.area.queue_draw()
+
+    def dwell_tick(self):
+        if not self.dwell or not same(self.hover, self.dwell[0]):
+            self.dwell, self.dwell_id = None, None
+            self.area.queue_draw()
+            return False
+        if time.time() - self.dwell[2] >= self.DWELL:
+            self.dwell_id = None
+            self.expand(self.dwell[0], self.dwell[1])
+            return False
+        self.area.queue_draw()
+        return True
+
+    def draw_tree(self, cr, cx, cy, rings, a0, a1, part):
+        levels = self.tree_levels(part)
+        path = self.path.get(part.key, [])
+        start = max(0, len(levels) - 3)           # deeper than three: the tree moves inward
+        parent_angle, parent_r = None, None
+        for k, items in enumerate(levels[start:start + 3]):
+            lv = start + k
+            ri, ro = rings[k]
+            rm = (ri + ro) / 2
+            size = (30, 27, 25)[k]
+            # room per item: the first ring is icons only (a name on hover), the others have names
+            step = math.degrees((44 if k == 0 else 66) / rm)
+            cap = max(2, int((a1 - a0 - 4) / step))
+            items = list(items)
+            if len(items) > cap:                   # never dropped silently: "+N" opens the folder
+                parent = path[lv - 1] if lv > 0 else None
+                extra = len(items) - cap + 1
+                items = items[:cap - 1] + [dialmodes.tile('lucide:ellipsis', f'{extra} more', 'open the folder',
+                                                          parent and parent.get('act'), id=f'__more{lv}')]
+            n = max(1, len(items))
+            if parent_angle is None:
+                s0, s1 = a0, a1
+            else:
+                w = min(a1 - a0 - 4, n * step)
+                s0 = max(a0 + 2, min(a1 - 2 - w, parent_angle - w / 2))
+                s1 = s0 + w
+                cr.new_path()                      # the band the children sit in
+                cr.arc(cx, cy, ro - 2, math.radians(s0 - 2), math.radians(s1 + 2))
+                cr.arc_negative(cx, cy, ri + 2, math.radians(s1 + 2), math.radians(s0 - 2))
+                cr.close_path()
+                cr.set_source_rgba(0.03, 0.03, 0.05, 0.62)
+                cr.fill_preserve()
+                cr.set_source_rgba(1, 1, 1, 0.07)
+                cr.set_line_width(1)
+                cr.stroke()
+                pa = math.radians(parent_angle)    # a thin chromatic line from parent to children
+                for col, dx in ((RED, -0.8), (CYAN, 0.8)):
+                    cr.move_to(cx + math.cos(pa) * (parent_r + 26) + dx, cy + math.sin(pa) * (parent_r + 26))
+                    cr.line_to(cx + math.cos(pa) * (ri + 4) + dx, cy + math.sin(pa) * (ri + 4))
+                    cr.set_source_rgba(*col, 0.35)
+                    cr.set_line_width(1)
+                    cr.stroke()
+            next_angle = None
+            for j, t in enumerate(items):
+                a = s0 + (s1 - s0) * (j + 0.5) / n
+                x, y = cx + math.cos(math.radians(a)) * rm, cy + math.sin(math.radians(a)) * rm
+                self.slots.append((x, y, size * 0.9, t, lv, None))
+                is_open = lv < len(path) and same(path[lv], t)
+                if is_open:
+                    next_angle = a
+                hov = same(self.hover, t)
+                if is_open or hov:
+                    cr.new_path()
+                    cr.arc(x, y, size * 0.85, 0, 2 * math.pi)
+                    cr.set_source_rgba(*CYAN, 0.16 if is_open else 0.09)
+                    cr.fill()
+                    self.chroma_circle(cr, x, y, size * 0.85, alpha=0.8 if is_open else 0.5)
+                if self.dwell and same(self.dwell[0], t):          # the unfold timer
+                    f = min(1.0, (time.time() - self.dwell[2]) / self.DWELL)
+                    for col, dx in ((RED, -1), (CYAN, 1)):
+                        cr.new_path()
+                        cr.arc(x + dx, y, size * 0.85 + 5, -math.pi / 2, -math.pi / 2 + 2 * math.pi * f)
+                        cr.set_source_rgba(*col, 0.9)
+                        cr.set_line_width(2.2)
+                        cr.stroke()
+                pb = self.icon(t, size)
+                if pb:
+                    Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2 - 3)
+                    cr.paint()
+                if t.get('kids'):
+                    ch = self.lucide('chevron-right', 10, 0.4)
+                    if ch:
+                        Gdk.cairo_set_source_pixbuf(cr, ch, x + size * 0.55, y - size * 0.75)
+                        cr.paint()
+                if k > 0 or is_open or hov:
+                    self.text(cr, t['name'][:18], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
+                              alpha=0.9, split=0.8 if is_open else 0)
+            parent_angle, parent_r = next_angle, rm
 
     def draw_tiles(self, cr, cx, cy, rings, a0, a1, rows):
         """a part's three rings of tiles: icon, label, and an optional value ring"""
@@ -705,11 +848,25 @@ class Dial(Gtk.Window):
             self.hover = target if target is not self.drag[0] else None
             self.area.queue_draw()
             return
-        h = self.hit(ev.x, ev.y)
+        slot = self.hit(ev.x, ev.y, slot=True)
+        h = slot[3] if slot else None
         z = self.hub_at(ev.x, ev.y)
         if not same(h, self.hover) or z != self.hub_hover:
             self.hover, self.hub_hover = h, z
             self.area.queue_draw()
+        part = self.parts.get(self.mode)
+        if h and h.get('kids') and part is not None and getattr(part, 'tree', False):
+            lv = slot[4]
+            path = self.path.get(self.mode, [])
+            if not (lv < len(path) and same(path[lv], h)):
+                if ev.state & Gdk.ModifierType.MOD4_MASK:      # Super held: at once
+                    self.expand(h, lv)
+                elif not (self.dwell and same(self.dwell[0], h)):
+                    self.dwell = (h, lv, time.time())
+                    if not self.dwell_id:
+                        self.dwell_id = GLib.timeout_add(30, self.dwell_tick)
+        elif self.dwell and not same(h, self.dwell[0]):
+            self.dwell = None
 
     def on_release(self, _w, ev):
         press, drag = self.press, self.drag
@@ -758,7 +915,10 @@ class Dial(Gtk.Window):
         elif a and ev.button == 1:
             self.press = (a, ev.x, ev.y)    # start on release; moving it drags instead
         elif z and ev.button == 1:
-            if z == 'centre':
+            if z == 'centre' and self.path.get(self.mode) and self.path[self.mode][-1].get('act'):
+                self.path[self.mode][-1]['act']()           # open where you are in the tree
+                self.close_dial()
+            elif z == 'centre':
                 c = self.parts[self.mode].centre() if self.mode in self.parts else None
                 if c:
                     part = self.parts[self.mode]
@@ -780,8 +940,13 @@ class Dial(Gtk.Window):
 
     def on_key(self, _w, ev):
         k = Gdk.keyval_name(ev.keyval) or ''
+        if k.startswith('Super') or ev.state & Gdk.ModifierType.MOD4_MASK:
+            return True                     # holding Super unfolds; its xcape Super+Space is not typing
         if k == 'Escape':
-            if self.mode != 'apps' and not self.filter:
+            if self.mode != 'apps' and self.path.get(self.mode) and not self.filter:
+                self.path[self.mode].pop()  # one level back
+                self.area.queue_draw()
+            elif self.mode != 'apps' and not self.filter:
                 self.mode = 'apps'
                 self.area.queue_draw()
             elif self.expanded is not None and not self.filter:
