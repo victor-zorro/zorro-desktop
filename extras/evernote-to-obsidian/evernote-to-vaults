@@ -418,7 +418,8 @@ def notes_in(enex):
 
 # -- Obsidian's vault list
 def obsidian_running():
-    return subprocess.run(['pgrep', '-x', 'obsidian'], capture_output=True).returncode == 0
+    return subprocess.run(['pgrep', '-r', 'R,S,D', '-x', 'obsidian'],     # not a leftover zombie
+                          capture_output=True).returncode == 0
 
 
 def register(paths):
