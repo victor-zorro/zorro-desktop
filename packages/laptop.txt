@@ -6,7 +6,8 @@ tlp
 pkexec
 # printing (ThinkPad app → Hardware → Add printer; driverless IPP printers)
 cups
-printer-driver-brlaser   # Brother GDI lasers (the HL-1210W at home): no driverless printing
+# Brother GDI lasers (the HL-1210W at home) cannot print driverless
+printer-driver-brlaser
 # Wi-Fi menu (rofi) + advanced connection editor
 python3-gi
 gir1.2-nm-1.0
