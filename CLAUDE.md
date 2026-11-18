@@ -19,6 +19,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-dial/` — the Dialer: app launcher around the clock; hub in six parts (Apps, Music, Notes, Messages, System, Files) (Super tap / Super+Space)
   - `apps/zorro-wall/` — living wallpaper: the login engine (iridescent deep sea + wireframe animal) on the desktop
   - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones
+  - `apps/zorro-music/` — SoundCloud player (mpv + yt-dlp with your Firefox login); the Dialer's Music part
   - `apps/zorro-winpos/` — windows reopen where you left them (per app place, size, maximized)
   - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)

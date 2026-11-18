@@ -35,3 +35,7 @@ gstreamer1.0-plugins-good
 gstreamer1.0-gtk3
 gir1.2-gstreamer-1.0
 gir1.2-gst-plugins-base-1.0
+# zorro-music: SoundCloud through mpv (+ MPRIS for media keys and the Dialer); yt-dlp via pipx
+mpv
+mpv-mpris
+pipx

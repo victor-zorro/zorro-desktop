@@ -351,15 +351,154 @@ class Notes(Part):
         return None
 
 
-# ---- Music: the SoundCloud player comes next ----------------------------------------------
+# ---- Music: whichever player plays (MPRIS), and zorro-music for SoundCloud -------------------
+MUSIC = APPS / 'zorro-music' / 'zorro-music'
+
+
+def mpris_players():
+    """[(bus name, props)] of the media players on the session bus"""
+    try:
+        from gi.repository import Gio, GLib
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        names = bus.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
+                              'ListNames', None, None, 0, 1000, None).unpack()[0]
+    except Exception:                   # noqa: BLE001 - no bus: no players
+        return []
+    out = []
+    for n in names:
+        if not n.startswith('org.mpris.MediaPlayer2.'):
+            continue
+        try:
+            props = bus.call_sync(n, '/org/mpris/MediaPlayer2', 'org.freedesktop.DBus.Properties', 'GetAll',
+                                  GLib.Variant('(s)', ('org.mpris.MediaPlayer2.Player',)),
+                                  None, 0, 500, None).unpack()[0]
+            out.append((n, props))
+        except Exception:               # noqa: BLE001 - a player that does not answer
+            continue
+    return out
+
+
+def mpris_call(name, method):
+    try:
+        from gi.repository import Gio
+        Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
+            name, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player', method, None, None, 0, 2000, None)
+    except Exception:                   # noqa: BLE001
+        pass
+
+
 class Music(Part):
     key, title = 'music', 'Music'
 
+    def fetch(self):
+        self.np = None                  # now playing: {player, title, artist, playing, pos, dur}
+        players = mpris_players()
+        rank = sorted(players, key=lambda p: (p[1].get('PlaybackStatus') != 'Playing',
+                                              'mpv' not in p[0], 'firefox' in p[0]))
+        for name, props in rank:
+            md = props.get('Metadata') or {}
+            title = md.get('xesam:title') or ''
+            if not title and props.get('PlaybackStatus') == 'Stopped':
+                continue
+            artist = md.get('xesam:artist') or ['']
+            self.np = {'player': name, 'title': title or 'Playing', 'artist': artist[0] if artist else '',
+                       'playing': props.get('PlaybackStatus') == 'Playing',
+                       'pos': (props.get('Position') or 0) / 1e6, 'dur': (md.get('mpris:length') or 0) / 1e6,
+                       'app': name.split('.')[3].split('_')[0]}
+            break
+        if self.np is None and os.path.exists(MUSIC):          # mpv without mpv-mpris
+            try:
+                st = json.loads(run(str(MUSIC), 'status') or '{}')
+            except ValueError:
+                st = {}
+            if st.get('running') and not st.get('idle'):
+                self.np = {'player': None, 'title': st.get('title') or 'Playing', 'artist': st.get('artist', ''),
+                           'playing': st.get('playing'), 'pos': st.get('position') or 0,
+                           'dur': st.get('duration') or 0, 'app': 'zorro-music'}
+        try:
+            self.conf = json.loads((HOME / '.config/zorro-music/config.json').read_text())
+        except (OSError, ValueError):
+            self.conf = {}
+        self.fetched = time.time()
+        self.ready = True
+
+    def control(self, what):
+        np = self.np or {}
+        if np.get('player'):
+            mpris_call(np['player'], {'toggle': 'PlayPause', 'next': 'Next', 'prev': 'Previous'}[what])
+        else:
+            run(str(MUSIC), what)
+        time.sleep(0.4)
+        self.fetch()
+
+    def play(self, *args):
+        spawn(str(MUSIC), 'play', *args)
+
+    def position(self):
+        """seconds, moving on between fetches while playing"""
+        np = self.np or {}
+        pos = np.get('pos', 0) + ((time.time() - self.fetched) if np.get('playing') else 0)
+        return min(pos, np.get('dur') or pos)
+
     def preview(self):
-        return 'MUSIC', 'SoundCloud', ['coming next']
+        np = getattr(self, 'np', None)
+        if not np:
+            return 'MUSIC', 'SoundCloud', ['nothing playing']
+        t = int(self.position())
+        d = int(np.get('dur') or 0)
+        when = f'{t // 60}:{t % 60:02d}' + (f' / {d // 60}:{d % 60:02d}' if d else '')
+        return 'NOW PLAYING' if np['playing'] else 'PAUSED', np['title'][:22], [np['artist'][:26], when]
 
     def rings(self):
-        return [[tile('lucide:music', 'SoundCloud', 'the player is the next step', None)], [], []]
+        np = getattr(self, 'np', None)
+        ctl = [tile('lucide:skip-back', 'Previous', '', lambda: self.control('prev'), keep=True),
+               tile('lucide:pause' if np and np['playing'] else 'lucide:play',
+                    'Pause' if np and np['playing'] else 'Play', np['app'] if np else '',
+                    lambda: self.control('toggle'), lit=bool(np and np['playing']), keep=True),
+               tile('lucide:skip-forward', 'Next', '', lambda: self.control('next'), keep=True)]
+        src = []
+        conf = getattr(self, 'conf', {})
+        if conf.get('user'):
+            src.append(tile('lucide:star', 'My likes', conf['user'], lambda: self.play('likes'), keep=True))
+        for f in conf.get('favourites', [])[:4]:
+            src.append(tile('lucide:music', f.get('name', '?')[:18], 'favourite',
+                            lambda u=f.get('url'): self.play(u), keep=True))
+        src.append(tile('lucide:clipboard-paste', 'Play a link', 'from the clipboard', self.play_clipboard, keep=True))
+        return [[], ctl, src]
+
+    def play_clipboard(self):
+        url = run('xclip', '-o', '-selection', 'clipboard').strip()
+        if url.startswith('http'):
+            self.play(url)
+
+    def search(self, text):
+        self.play('search', text)
+
+    def draw(self, dial, cr, cx, cy, rings, a0, a1):
+        """the inner ring: the track as a band of particles; the played part lights up"""
+        import math
+        import random
+        np = getattr(self, 'np', None)
+        r0, r1 = rings[0]
+        mid, half = (r0 + r1) / 2, (r1 - r0) * 0.42
+        frac = (self.position() / np['dur']) if np and np.get('dur') else 0
+        rnd = random.Random(hash(np['title']) if np else 7)
+        n = 140
+        t = time.time()
+        for j in range(n):
+            a = a0 + 3 + (a1 - a0 - 6) * j / n
+            amp = 0.25 + 0.75 * abs(math.sin(j * 0.23 + rnd.random()) * math.cos(j * 0.051 + rnd.random()))
+            if np and np.get('playing') and j / n <= frac:
+                amp *= 0.85 + 0.15 * math.sin(t * 3 + j)        # breathes while playing
+            played = j / n <= frac
+            for _ in range(int(3 + amp * 8)):
+                rr = mid + rnd.uniform(-1, 1) * amp * half
+                x = cx + math.cos(math.radians(a)) * rr
+                y = cy + math.sin(math.radians(a)) * rr
+                cr.set_source_rgba(*((0.1, 0.9, 1.0) if played else (0.85, 0.85, 0.9)),
+                                   (0.85 if played else 0.3) * rnd.uniform(0.5, 1))
+                cr.rectangle(x, y, 1.6, 1.6)
+                cr.fill()
 
 
 PARTS = {p.key: p for p in (Messages(), System(), Files(), Notes(), Music())}
