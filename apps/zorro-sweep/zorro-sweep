@@ -520,7 +520,7 @@ class Sweep(Gtk.Window):
         self._counts = None
         left = len(self.v.to_scan())
         st = self.v.stats
-        self.count.set_text(f'{left} left to scan · {st["deleted"]} deleted · {self.v.sorted_count()} sorted')
+        self.count.set_text(f'{st["deleted"]} deleted · {self.v.sorted_count()} sorted')   # 'to scan' is in the score bar
         i = self.pick.get_active()
         if 0 <= i < len(self.pick_paths) and self.pick_paths[i] == self.v.path:
             self.pick.get_model()[i][0] = f'{self.v.path.name} · {left} to scan'

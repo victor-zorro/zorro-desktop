@@ -364,11 +364,14 @@ def run_overlay(start_mode):
                 self.mode_btns[key] = b
                 bar.add(b)
             bar.add(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=6, margin_end=6))
-            for label, cb, tip in (('Copy', lambda b: self.done(save=False), 'Ctrl+C'),
-                                   ('Save', lambda b: self.done(save=True), 'Enter'),
-                                   ('Cancel', lambda b: self.cancel(), 'Esc')):
+            # the key on the button itself (it was only in a tooltip)
+            for label, cb, tip in (('Copy  Ctrl+C', lambda b: self.done(save=False),
+                                    'to the clipboard only, no file kept'),
+                                   ('Save  Enter', lambda b: self.done(save=True),
+                                    'to ~/Pictures/Screenshots, and on the clipboard'),
+                                   ('Cancel  Esc', lambda b: self.cancel(), None)):
                 b = Gtk.Button(label=label, tooltip_text=tip)
-                if label == 'Save':
+                if label.startswith('Save'):
                     b.get_style_context().add_class('suggested-action')
                 b.connect('clicked', cb)
                 bar.add(b)
@@ -424,8 +427,8 @@ def run_overlay(start_mode):
             if self.mode == 'window':
                 t = 'Click a window  ·  Esc cancels'
             elif self.sel:
-                t = (f'{abs(int(self.sel[2]))} × {abs(int(self.sel[3]))}  ·  drag the edges to adjust  '
-                     '·  Enter or double-click saves')
+                t = 'drag the edges to adjust  ·  Enter or double-click saves  ·  Ctrl+C copies'
+                # (the size shows once, next to the selection)
             else:
                 t = 'Drag to select an area  ·  click a window  ·  Space = whole screen'
             self.hint.set_text(t)

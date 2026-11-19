@@ -287,12 +287,14 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   "client ID" everywhere; verb buttons in confirm dialogs.
 
 - [ ] **3.8 Screenshot arrangement** (S-M)
+  Done: keys on the buttons, size shown once, theme colours (3.1). Open: window click /
+  Space select first instead of saving at once: waiting for Vincent's answer.
   `apps/zorro-shot/zorro-shot`.
   Keys in button labels ("Copy  Ctrl+C", "Save  Enter", "Cancel  Esc"); window click and
   Space select first so Copy works for windows too, double-click and Enter stay the fast
   path; show the size once. Ask Vincent first: it adds one step to "click a window".
 
-- [ ] **3.9 Sweep notes arrangement** (S)
+- [x] **3.9 Sweep notes arrangement** (S)
   `apps/zorro-sweep/zorro-sweep`.
   "left to scan" shows in the top bar label and in the score bar: keep the score bar, let
   the top label show only deleted / sorted.
