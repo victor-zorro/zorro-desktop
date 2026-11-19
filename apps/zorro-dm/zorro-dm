@@ -572,6 +572,7 @@ class DM:
                         x, cookie = start_x(LOCK_DISPLAY, LOCK_VT)
                     except Exception as e:
                         log('lock screen X failed, retrying:', e)
+                        vt_lock(True)           # no console switch to the session while waiting
                         time.sleep(2)
                         continue
                     vt_switch(LOCK_VT)
