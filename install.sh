@@ -93,7 +93,7 @@ command -v claude >/dev/null || [[ -x "$HOME/.local/bin/claude" ]] \
   || curl -fsSL https://claude.ai/install.sh | bash
 
 log "Apps from GitHub releases, rclone, Blender"
-./update-extras.sh
+./update-extras.sh || echo "!! some extras failed, continuing"
 
 # --- Hardware profiles --------------------------------------------------
 if has nvidia; then

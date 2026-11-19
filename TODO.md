@@ -67,7 +67,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   and 3 (no camera).
   Fix: always answer a refused press with `fail`; map exit codes to their own messages.
 
-- [ ] **1.7 update-extras.sh aborts install.sh on a failed download** (S)
+- [x] **1.7 update-extras.sh aborts install.sh on a failed download** (S)
   `update-extras.sh` lines 14-20; `install.sh` line 96.
   With `set -euo pipefail` a failed curl or empty grep ends the script before the "No .deb
   found" check, and install.sh stops before stow and the apps.
