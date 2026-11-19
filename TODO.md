@@ -123,14 +123,14 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   `apps/zorro-dm/theme/js/login.js` about line 41 (`appear()`).
   Fix: expose `cfg.crt` on `FX`; wait about 500 ms when it is false.
 
-- [ ] **2.2 Dialer: Notes roots rebuilt on every frame** (S)
+- [x] **2.2 Dialer: Notes roots rebuilt on every frame** (S)
   `apps/zorro-dial/zorro-dial` about 252, 629-630; `dialmodes.py` about 618-677.
   Each draw (20 per second) calls `part.roots()`; `Notes.roots()` takes 68 ms.
   `search_tiles()` rescans all note text per frame while typing.
   Fix: build roots and tags once at the end of `fetch()`; store lowercased text once; cache
   search results per query string. Measure `roots()` before and after.
 
-- [ ] **2.3 Dialer: fetch a part only when first touched** (S)
+- [x] **2.3 Dialer: fetch a part only when first touched** (S)
   `apps/zorro-dial/zorro-dial` about 225-226; `dialmodes.py` about 219-249.
   All five parts are fetched on every open. Add `--rescan no` to the `nmcli` calls.
   Fix: fetch on first hover / click of the hub sector; start eager ones from `GLib.idle_add`

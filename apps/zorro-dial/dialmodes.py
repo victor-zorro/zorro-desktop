@@ -224,7 +224,7 @@ class System(Part):
             self.bat_status = (bat / 'status').read_text().strip().lower()
         except (OSError, ValueError):
             self.bat, self.bat_status = None, ''
-        wifi = re.search(r'^yes:(\d+)', run('nmcli', '-t', '-f', 'ACTIVE,SIGNAL', 'dev', 'wifi'), re.M)
+        wifi = re.search(r'^yes:(\d+)', run('nmcli', '-t', '-f', 'ACTIVE,SIGNAL', 'dev', 'wifi', 'list', '--rescan', 'no'), re.M)
         self.wifi_sig = int(wifi.group(1)) if wifi else None
         self.wifi_on = 'enabled' in run('nmcli', 'radio', 'wifi')
 
@@ -584,6 +584,10 @@ class Notes(Part):
                     self.text[p] = fh.read(200000)
             except OSError:
                 pass
+        # made once per opening: the Dialer draws 20 times a second and asks for these each time
+        self.lower = {p: (os.path.basename(p).lower(), t.lower()) for p, t in self.text.items()}
+        self._roots, self._tags, self._heads, self._found = None, None, {}, {}
+        self._roots = self.make_roots()     # here in the thread, not in the first frame
         self.ready = True
 
     def vault_of(self, p):
@@ -600,7 +604,10 @@ class Notes(Part):
         v = self.vault_of(p)
         rel = os.path.relpath(p, v)
         where = os.path.dirname(rel) or (v.name if len(self.all) > 1 else 'vault')
-        heads = [(len(h), txt.strip()) for h, txt in HEADING.findall(self.text.get(p, ''))][:24]
+        cache = self.__dict__.setdefault('_heads', {})
+        if p not in cache:
+            cache[p] = [(len(h), txt.strip()) for h, txt in HEADING.findall(self.text.get(p, ''))][:24]
+        heads = cache[p]
         t_ = tile('lucide:file-text', os.path.basename(p)[:-3][:26],
                   sub if sub is not None else where,
                   lambda: spawn('xdg-open', self.uri(p)), id=p)
@@ -620,6 +627,8 @@ class Notes(Part):
                     + [self.note_tile(p, ago(time.time() - m)) for m, p in notes])
 
     def tags(self):
+        if getattr(self, '_tags', None) is not None:
+            return self._tags
         count = {}
         for p, txt in self.text.items():
             fm = re.match(r'^---\n(.*?)\n---', txt, re.S)
@@ -630,11 +639,17 @@ class Notes(Part):
                     found |= {x.strip(' -[]"\'') for x in re.split(r'[,\n]', block.group(1)) if x.strip(' -[]"\'')}
             for tg in found:
                 count.setdefault(tg.lower(), []).append(p)
-        return sorted(count.items(), key=lambda kv: -len(kv[1]))
+        self._tags = sorted(count.items(), key=lambda kv: -len(kv[1]))
+        return self._tags
 
     def roots(self):
         if not getattr(self, 'ready', False):
             return [tile('lucide:ellipsis', 'Loading…', '', None, id='loading')]
+        if getattr(self, '_roots', None) is None:
+            self._roots = self.make_roots()
+        return self._roots
+
+    def make_roots(self):
         if not self.root:
             return [tile('lucide:file-pen', 'Open Obsidian', 'make a vault, e.g. ~/Notes',
                          lambda: spawn('obsidian'), id='open'),
@@ -680,18 +695,26 @@ class Notes(Part):
         words = [w.lower() for w in text.split() if w]
         if not words or not getattr(self, 'root', None):
             return []
+        meant = self.meaning(text.strip())
+        found = self.__dict__.setdefault('_found', {})
+        key = (tuple(words), len(meant))            # the meaning hits come in a moment later
+        if key in found:
+            return found[key]
+        lower = getattr(self, 'lower', {})
         hits = []
         for m, p in self.notes:
-            name = os.path.basename(p).lower()
-            body = self.text.get(p, '').lower()
+            name, body = lower.get(p) or (os.path.basename(p).lower(), '')
             if all(w in name or w in body for w in words):
                 hits.append((not all(w in name for w in words), -m, p))
         hits.sort()
         exact = [p for _, _, p in hits[:30]]
         known = {p for _, p in self.notes}
-        more = [h for h in self.meaning(text.strip()) if h['path'] in known and h['path'] not in exact]
-        return [self.note_tile(p) for p in exact] + \
+        more = [h for h in meant if h['path'] in known and h['path'] not in exact]
+        if len(found) > 64:
+            found.clear()
+        found[key] = [self.note_tile(p) for p in exact] + \
             [self.note_tile(h['path'], '≈ ' + (h['snippet'] or 'meaning')[:40]) for h in more][:max(0, 27 - len(exact))]
+        return found[key]
 
     def meaning(self, text):
         """what zorro-search found for text; asked in a thread (the Dialer redraws every second)"""

@@ -227,8 +227,7 @@ class Dial(Gtk.Window):
         self.preview = None             # the file whose preview is shown
         self.previews = {}              # file -> preview data (None while it is made)
         self.preview_pb = {}            # image file -> scaled picture
-        for part in self.parts.values():
-            threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
+        self.fetching = set()           # parts whose data is being read (after the first frame)
         self.theme = Gtk.IconTheme.get_default()
         self.icons = {}
         disp = Gdk.Display.get_default()
@@ -267,6 +266,14 @@ class Dial(Gtk.Window):
         self.show_all()
         GLib.idle_add(self.grab)
         GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True)
+        # the parts' data (notes, messages, system state…) is read once the dial is on screen,
+        # so it does not hold up the first frame; hovering a part reads it at once
+        GLib.timeout_add(150, lambda: [self.start_fetch(p) for p in self.parts.values()] and False)
+
+    def start_fetch(self, part):
+        if part.key not in self.fetching:
+            self.fetching.add(part.key)
+            threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
 
     def fetch_part(self, part):
         try:
@@ -1015,6 +1022,8 @@ class Dial(Gtk.Window):
         key = self.music_key_at(ev.x, ev.y)
         if not same(h, self.hover) or z != self.hub_hover or key != self.hub_key:
             self.hover, self.hub_hover, self.hub_key = h, z, key
+            if z in self.parts:
+                self.start_fetch(self.parts[z])
             self.area.queue_draw()
         part = self.parts.get(self.mode)
         if self.preview and not same(h, self.preview):
