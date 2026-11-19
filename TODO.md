@@ -83,7 +83,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
      status` piles up threads, one failing command blanks all six cards. Add a busy flag as
      in `hw_refresh` and a try/except per card.
 
-- [ ] **1.9 winpos: terminal reopens in the wrong folder** (S)
+- [x] **1.9 winpos: terminal reopens in the wrong folder** (S)
   `apps/zorro-winpos/zorro-winpos` about lines 136, 180-200, 220-221.
   The program and folder are read once when the window is first followed. README promises
   the folder the shell was in last.

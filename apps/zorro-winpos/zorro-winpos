@@ -44,6 +44,7 @@ CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro
 SESSION = STATE / 'session.json'
 FRESH = 3.0                          # seconds a new window may not wander to another desktop
 SAVE_AFTER = 1.5                     # seconds of quiet before writing the file
+FOLDERS_EVERY = 60                   # seconds: look again which folder each terminal is in
 DROP_AFTER = 20.0                    # a closed window leaves the session list after this
 PENDING = 120.0                      # seconds after login a window may still be one to put back
 SHELLS = {'bash', 'zsh', 'fish', 'sh', 'dash'}
@@ -75,6 +76,7 @@ class WinPos:
         self.fresh = {}                  # new window id -> when it appeared (desktop grace time)
         self.dirty_at = 0.0
         self.session_at = 0.0            # when the session list must be written
+        self.folders_at = time.time() + FOLDERS_EVERY
         self.pending = []                # windows to put back after a restart
         self.pending_until = 0.0
         self.later = []                  # (when, window id, entry): place once more
@@ -198,6 +200,24 @@ class WinPos:
             except OSError:
                 continue
         return {'pid': pid, 'cmd': cmd, 'cwd': cwd}
+
+    def check_folders(self):
+        """a shell that changed folder makes no window event: read the folders again and
+        save the session list when one changed (so a terminal reopens where it was last)"""
+        changed = False
+        for wid in list(self.known):
+            old = self.info.get(wid)
+            if not old:
+                continue
+            try:
+                new = self.program(self.d.create_resource_object('window', wid))
+            except error.XError:
+                continue
+            if new and new != old:          # gone from /proc: keep what we had
+                self.info[wid] = new
+                changed = True
+        if changed:
+            self.session_at = self.session_at or time.time()
 
     def snapshot(self):
         out = []
@@ -334,6 +354,8 @@ class WinPos:
             due = [t for t in (self.dirty_at + SAVE_AFTER if self.dirty_at else 0,
                                self.session_at + SAVE_AFTER if self.session_at else 0) if t]
             due += [t for t, _, _ in self.later]
+            if self.keep_session:
+                due.append(self.folders_at)
             if due:
                 wait = max(0.0, min(due) - time.time())
             if not self.d.pending_events():
@@ -345,6 +367,9 @@ class WinPos:
                     pass
             if self.dirty_at and time.time() >= self.dirty_at + SAVE_AFTER:
                 self.save()
+            if self.keep_session and time.time() >= self.folders_at:
+                self.folders_at = time.time() + FOLDERS_EVERY
+                self.check_folders()
             starting = self.pending and time.time() < self.pending_until    # apps still coming up
             if self.keep_session and self.session_at and time.time() >= self.session_at + SAVE_AFTER \
                     and not starting:
