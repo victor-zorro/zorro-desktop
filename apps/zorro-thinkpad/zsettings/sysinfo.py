@@ -20,7 +20,23 @@ def meminfo():
     return m
 
 
+_FIXED = (0.0, None)                # (when, facts that do not change while the app runs)
+
+
 def collect():
+    """all facts; the fixed ones (model, processor, graphics, disks, system) are read once
+    every 5 minutes, the rest (memory, mounts, uptime, temperatures) every call"""
+    global _FIXED
+    at, fixed = _FIXED
+    if fixed is None or time.monotonic() - at > 300:
+        fixed = collect_fixed()
+        _FIXED = (time.monotonic(), fixed)
+    info = dict(fixed)
+    info.update(collect_live())
+    return info
+
+
+def collect_fixed():
     dmi = Path('/sys/class/dmi/id')
     info = {'model': f'{sysread(dmi / "sys_vendor")} {sysread(dmi / "product_version")}'.strip(),
             'type': sysread(dmi / 'product_name'), 'bios': sysread(dmi / 'bios_version'),
@@ -40,9 +56,6 @@ def collect():
     info['vram'] = gb(int(vram)) if vram.isdigit() else ''
     drv = Path('/sys/class/drm/card0/device/driver')
     info['gpu_driver'] = os.path.basename(os.path.realpath(drv)) if drv.exists() else ''
-    mem = meminfo()
-    info['mem_total'], info['mem_used'] = mem.get('MemTotal', 0), mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)
-    info['swap_total'], info['swap_used'] = mem.get('SwapTotal', 0), mem.get('SwapTotal', 0) - mem.get('SwapFree', 0)
     disks = []
     try:
         tree = json.loads(run('lsblk', '-b', '-J', '-o', 'NAME,SIZE,TYPE,MODEL,TRAN') or '{}')
@@ -53,6 +66,19 @@ def collect():
     except ValueError:
         pass
     info['disks'] = disks
+    osr = dict(re.findall(r'^(\w+)="?([^"\n]*)"?', sysread('/etc/os-release'), re.M))
+    info['os'] = osr.get('PRETTY_NAME', 'Linux')
+    info['kernel'] = os.uname().release
+    m = re.search(r'(\d+x\d+)\+\d+\+\d+', run('xrandr', '--current'))
+    info['screen'] = m.group(1) if m else ''
+    return info
+
+
+def collect_live():
+    info = {}
+    mem = meminfo()
+    info['mem_total'], info['mem_used'] = mem.get('MemTotal', 0), mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)
+    info['swap_total'], info['swap_used'] = mem.get('SwapTotal', 0), mem.get('SwapTotal', 0) - mem.get('SwapFree', 0)
     mounts = []
     for mp in ('/', '/home', str(Path.home() / 'Drive')):
         try:
@@ -63,14 +89,9 @@ def collect():
         if total and all(m['total'] != total for m in mounts):
             mounts.append({'path': mp, 'total': total, 'used': total - free})
     info['mounts'] = mounts
-    osr = dict(re.findall(r'^(\w+)="?([^"\n]*)"?', sysread('/etc/os-release'), re.M))
-    info['os'] = osr.get('PRETTY_NAME', 'Linux')
-    info['kernel'] = os.uname().release
     up = float(sysread('/proc/uptime', '0 0').split()[0])
     info['uptime'] = f'{int(up // 86400)} d {int(up % 86400 // 3600)} h' if up > 86400 else \
         f'{int(up // 3600)} h {int(up % 3600 // 60)} min'
-    m = re.search(r'(\d+x\d+)\+\d+\+\d+', run('xrandr', '--current'))
-    info['screen'] = m.group(1) if m else ''
     temps = {}
     for h in Path('/sys/class/hwmon').glob('hwmon*'):
         name = sysread(h / 'name')

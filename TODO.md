@@ -148,7 +148,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   the root notes again.
   Fix: in the one loop, keep `when(front(text[:600])[0], p)` in a dict; sort from that.
 
-- [ ] **2.6 Settings Home: heavy poll every 5 s, also unfocused** (S-M)
+- [x] **2.6 Settings Home: heavy poll every 5 s, also unfocused** (S-M)
   `apps/zorro-thinkpad/zsettings/pages_home.py` about 91-97, 167-197; `app.py` about 125.
   About 16 processes per round. `printers.installed` 314 ms, `netbird status` 111 ms.
   `nmcli dev wifi` without `--rescan no` triggers Wi-Fi scans.

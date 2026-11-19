@@ -6,6 +6,7 @@ import re
 import shutil
 import sys
 import threading
+import time
 from pathlib import Path
 
 from . import audio, eq, printers, sysinfo, webcam
@@ -93,7 +94,9 @@ class HomePages:
         return self.home
 
     def home_tick(self):
-        if self.top.get_visible_child_name() == 'home' and self.home.get_visible_child_name() == 'dash':
+        # only while you look at it: not when another window is in front
+        if self.is_active() and self.top.get_visible_child_name() == 'home' \
+                and self.home.get_visible_child_name() == 'dash':
             self.home_refresh()
         return True
 
@@ -180,12 +183,26 @@ class HomePages:
         def sound(d):
             d.update(sinks=audio.devices('sinks'), eq=eq.settings(), eq_running=bool(eq.running()))
 
+        slow = self.__dict__.setdefault('home_slow', {})     # name: (when, facts)
+
+        def every(name, secs, fn, d):
+            """facts that are slow to read and seldom change: at most every `secs` seconds"""
+            at, facts = slow.get(name, (0, None))
+            if facts is None or time.monotonic() - at > secs:
+                facts = {}
+                fn(facts)
+                slow[name] = (time.monotonic(), facts)
+            d.update(facts)
+
         def printer(d):
-            d['printers'] = printers.installed() if printers.available() else None
-            d['queue'] = len([ln for ln in run('lpstat', '-o').splitlines() if ln.strip()])
+            def read(f):
+                f['printers'] = printers.installed() if printers.available() else None   # 0.3 s
+                f['queue'] = len([ln for ln in run('lpstat', '-o').splitlines() if ln.strip()])
+            every('printer', 30, read, d)
 
         def conn(d):
-            wifi = re.search(r'^yes:(\d+):(.*)$', run('nmcli', '-t', '-f', 'ACTIVE,SIGNAL,SSID', 'dev', 'wifi'), re.M)
+            wifi = re.search(r'^yes:(\d+):(.*)$', run('nmcli', '-t', '-f', 'ACTIVE,SIGNAL,SSID', 'dev', 'wifi',
+                                                    'list', '--rescan', 'no'), re.M)   # no Wi-Fi scan
             d['wifi'] = (wifi.group(2), wifi.group(1)) if wifi else None
             d['wifi_on'] = 'enabled' in run('nmcli', 'radio', 'wifi')
             devs = [ln.split(':') for ln in run('nmcli', '-t', '-f', 'DEVICE,TYPE,STATE', 'dev').splitlines()
@@ -197,12 +214,14 @@ class HomePages:
             d['bt_on'] = 'Powered: yes' in run('bluetoothctl', 'show')
             d['bt_dev'] = [ln.split(' ', 2)[2] for ln in run('bluetoothctl', 'devices', 'Connected').splitlines()
                            if ln.startswith('Device ')]
-            try:
-                nb = json.loads(run('netbird', 'status', '--json', timeout=8) or '{}')
-            except ValueError:
-                nb = {}
-            d['nb'] = (nb.get('management', {}).get('connected'), nb.get('peers', {}).get('connected', 0),
-                       nb.get('peers', {}).get('total', 0)) if nb else None
+            def netbird(f):
+                try:
+                    nb = json.loads(run('netbird', 'status', '--json', timeout=8) or '{}')
+                except ValueError:
+                    nb = {}
+                f['nb'] = (nb.get('management', {}).get('connected'), nb.get('peers', {}).get('connected', 0),
+                           nb.get('peers', {}).get('total', 0)) if nb else None
+            every('netbird', 30, netbird, d)
             soft = [sysread(r / 'soft') == '1' for r in Path('/sys/class/rfkill').glob('rfkill*')]
             from .keys import airplane_on
             d['airplane'] = airplane_on() if soft else False
