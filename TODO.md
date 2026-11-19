@@ -302,10 +302,9 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
 
 ## Phase 4: larger jobs
 
-- [ ] **4.1 Dialer stays resident** (M)
-  Done: the cheaper first step (app list cached, 46 -> 1 ms; together with 2.2 / 2.3 the
-  first frame came at ~0.56 s on the test screen). Open: the resident Dialer itself; it changes
-  the Super key binding and autostart, so test it in the VM first.
+- [x] **4.1 Dialer stays resident** (M)
+  Done: app list cached; zorro-dial --daemon from autostart, Super signals it: dial on screen in
+  ~0.1 s instead of ~0.3 s (test screen). Not tried in the VM (zvm opens a window on the desktop).
   Every Super press is a cold start of about 275 ms (`zorro-dial` 203-262, 1206-1213).
   Start hidden at login; a second invocation signals it (SIGUSR1) to show / hide; re-read
   apps only when the application folders' mtime changes. Cheaper first step: cache the app

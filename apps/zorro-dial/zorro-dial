@@ -6,6 +6,9 @@ ones further out. Three slices, each an app category you choose (Zorro app → D
 Launcher). Type to search all apps, Enter starts the first match, Esc or a click outside
 closes. Started again while open: closes (so Super toggles it).
 
+  zorro-dial            show the dial (or close it); signals the daemon when that runs
+  zorro-dial --daemon   stay loaded in the background (autostart): Super shows it at once
+
 Usage counts: ~/.local/state/zorro-dial/usage.json (the more and the more recently an app
 is started, the closer to the clock).
 """
@@ -19,6 +22,26 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+DAEMON_PID = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-dial-daemon.pid'
+
+
+def signal_daemon():
+    """Super pressed with 'zorro-dial --daemon' running (started at login): it shows or hides
+    the dial, already loaded, so this process ends before GTK is even imported"""
+    try:
+        pid = int(DAEMON_PID.read_text())
+        argv = Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')
+        if b'--daemon' not in argv or not any(os.path.basename(a) == b'zorro-dial' for a in argv):
+            return False
+        os.kill(pid, signal.SIGUSR1)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+if __name__ == '__main__' and sys.argv[1:] != ['--daemon'] and signal_daemon():
+    sys.exit(0)
 
 import cairo
 import gi
@@ -300,7 +323,7 @@ class Dial(Gtk.Window):
         self.layout_apps()
         self.show_all()
         GLib.idle_add(self.grab)
-        GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True)
+        self.tick_id = GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True)
         # the parts' data (notes, messages, system state…) is read once the dial is on screen,
         # so it does not hold up the first frame; hovering a part reads it at once
         GLib.timeout_add(150, lambda: [self.start_fetch(p) for p in self.parts.values()] and False)
@@ -1318,10 +1341,51 @@ class Dial(Gtk.Window):
 
     def close_dial(self):
         Gdk.Display.get_default().get_default_seat().ungrab()
-        Gtk.main_quit()
+        if RESIDENT:                    # zorro-dial --daemon: this window goes, the process stays
+            if getattr(self, 'tick_id', None):
+                GLib.source_remove(self.tick_id)
+                self.tick_id = None
+            if self.dwell_id:
+                GLib.source_remove(self.dwell_id)
+                self.dwell_id = None
+            OPEN[:] = []
+            self.destroy()
+        else:
+            Gtk.main_quit()
+
+
+RESIDENT = False                        # True in 'zorro-dial --daemon'
+OPEN = []                               # the dial window now shown by the daemon
+
+
+def daemon():
+    """stay loaded (GTK, the parts, the app list); SIGUSR1 (a Super press) shows a fresh dial,
+    or closes the one that is open"""
+    global RESIDENT
+    RESIDENT = True
+    DAEMON_PID.write_text(str(os.getpid()))
+
+    def toggle():
+        if OPEN:
+            OPEN[0].close_dial()
+        else:
+            OPEN.append(Dial())
+        return True
+    GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGUSR1, toggle)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda: Gtk.main_quit() or False)
+    try:
+        Gtk.main()
+    finally:
+        try:
+            if DAEMON_PID.read_text() == str(os.getpid()):
+                DAEMON_PID.unlink()
+        except OSError:
+            pass
 
 
 def main():
+    if sys.argv[1:] == ['--daemon']:
+        return daemon()
     if toggle_running():
         return
     PIDFILE.write_text(str(os.getpid()))

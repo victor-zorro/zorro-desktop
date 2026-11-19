@@ -44,3 +44,8 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
   opening it again closes it.
 - Opens with **Super+Space**, and with a **tap of Super** via `xcape` (Super with other keys
   stays Super). Rofi stays on **Super+Shift+Space**.
+
+**Stays loaded**: the Openbox autostart runs `zorro-dial --daemon`; a Super press then only
+signals it and a fresh dial is on screen in ~0.1 s (without the daemon ~0.3 s; Super still works
+without it). After changing the code: log out and in, or `pkill -f 'zorro-dial --daemon'` and
+start it again.

@@ -23,6 +23,8 @@ command -v spice-vdagent >/dev/null && spice-vdagent &   # VM only
 (sleep 4 && "$HOME/.local/bin/whatsapp") &
 # Super tapped alone = Super+Space (the dial launcher); Super with other keys stays Super
 command -v xcape >/dev/null && xcape -e 'Super_L=Super_L|space' &
+# the Dialer stays loaded, so Super shows it at once (apps/zorro-dial)
+command -v zorro-dial >/dev/null && zorro-dial --daemon &
 # Same white Lucide icons on every window (Alt+Tab, window menu)
 command -v zorro-winicons >/dev/null && zorro-winicons &
 command -v zorro-winpos >/dev/null && zorro-winpos &      # windows reopen where they were
