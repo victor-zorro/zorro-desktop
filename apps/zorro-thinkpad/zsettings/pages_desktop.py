@@ -9,7 +9,7 @@ from .fxshim import Snow, zorro_fx
 from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS
 from .power import load_orb, load_script
 from .ui import Pages, heading, idle, note, radios
-from .windows import TITLE_SIZES, apply_windows, win_conf
+from .windows import TITLE_SIZES, apply_windows, set_winpos, win_conf, winpos_conf
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gdk, Gtk
@@ -385,6 +385,16 @@ class DesktopPages:
         box.add(note('Real transparency needs the compositor. It also makes the '
                      'indicator and info circle truly see-through. Off = everything '
                      'solid, a little less battery.'))
+        box.add(heading('After a restart', 'After a restart'))
+        wp = winpos_conf()
+        again = Gtk.Switch(active=wp.get('restore_session', True), halign=Gtk.Align.START)
+        here = Gtk.Switch(active=wp.get('open_on_current_desktop', True), halign=Gtk.Align.START)
+        again.connect('notify::active', lambda w, _p: set_winpos('restore_session', w.get_active()))
+        here.connect('notify::active', lambda w, _p: set_winpos('open_on_current_desktop', w.get_active()))
+        box.add(grid([('Reopen apps, windows and tabs', again), ('New windows on the current desktop', here)]))
+        box.add(note('After a restart the apps that were open start again, every window on its own '
+                     'desktop, place and size (maximized too), terminals in the folder they were in, '
+                     'and Firefox with all its windows and tabs (also WhatsApp and Google).'))
         self.win_msg = note()
         if not shutil.which('picom'):
             self.win_msg.set_text('picom is not installed yet: sudo apt install picom')

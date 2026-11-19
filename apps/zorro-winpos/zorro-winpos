@@ -7,14 +7,29 @@ when it opens again. Event driven: it waits on X (window list changes, moves, re
 state changes); nothing is polled. Started from Openbox autostart.
 
   ~/.local/state/zorro-winpos/places.json   what it remembers
+  ~/.local/state/zorro-winpos/session.json  what is open now (for after a restart)
   ~/.config/zorro-winpos/config.json        {"ignore": ["SomeClass", ...],
-                                             "open_on_current_desktop": true}
+                                             "open_on_current_desktop": true,
+                                             "restore_session": true}
 New windows open on the desktop you are on (also Firefox, which would go back to its old one).
+
+After a restart (restore_session): the apps that were open start again and every window goes
+back to its desktop, place, size and maximized state; terminals open in the folder they were
+in; Firefox reopens its own windows and tabs (its "open previous windows and tabs" is switched
+on in every profile). Windows that close are only dropped from the list after 20 s, so the
+windows closing during a shutdown don't wipe it.
 """
+import configparser
+import glob
 import json
 import os
+import re
 import select
+import shlex
+import shutil
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -26,8 +41,13 @@ except ImportError:
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'zorro-winpos'
 PLACES = STATE / 'places.json'
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-winpos' / 'config.json'
+SESSION = STATE / 'session.json'
 FRESH = 3.0                          # seconds a new window may not wander to another desktop
 SAVE_AFTER = 1.5                     # seconds of quiet before writing the file
+DROP_AFTER = 20.0                    # a closed window leaves the session list after this
+PENDING = 120.0                      # seconds after login a window may still be one to put back
+SHELLS = {'bash', 'zsh', 'fish', 'sh', 'dash'}
+FF_BEGIN, FF_END = '// zorro: reopen windows and tabs (Zorro app → Windows)', '// zorro: end reopen'
 
 
 class WinPos:
@@ -39,13 +59,14 @@ class WinPos:
             '_NET_CLIENT_LIST', '_NET_WM_STATE', '_NET_WM_STATE_MAXIMIZED_VERT',
             '_NET_WM_STATE_MAXIMIZED_HORZ', '_NET_WM_STATE_FULLSCREEN', '_NET_WM_WINDOW_TYPE',
             '_NET_WM_WINDOW_TYPE_NORMAL', '_NET_MOVERESIZE_WINDOW', '_NET_CURRENT_DESKTOP',
-            '_NET_WM_DESKTOP')}
+            '_NET_WM_DESKTOP', '_NET_WM_PID')}
         try:
             conf = json.loads(CONF.read_text())
         except (OSError, ValueError):
             conf = {}
         self.ignore = set(conf.get('ignore', []))
         self.here = conf.get('open_on_current_desktop', True)
+        self.keep_session = conf.get('restore_session', True)
         try:
             self.places = json.loads(PLACES.read_text())
         except (OSError, ValueError):
@@ -53,9 +74,17 @@ class WinPos:
         self.known = {}                  # window id -> app key, for the open windows we follow
         self.fresh = {}                  # new window id -> when it appeared (desktop grace time)
         self.dirty_at = 0.0
+        self.session_at = 0.0            # when the session list must be written
+        self.pending = []                # windows to put back after a restart
+        self.pending_until = 0.0
+        self.later = []                  # (when, window id, entry): place once more
+        self.info = {}                   # window id -> its program (for the session list)
         self.root.change_attributes(event_mask=X.PropertyChangeMask)
         for wid in self.clients():       # windows already open: follow, don't move them
             self.follow(wid, restore=False)
+        if self.keep_session:
+            firefox_restore(True)
+            self.start_session()
 
     # -- X helpers
     def clients(self):
@@ -104,6 +133,13 @@ class WinPos:
             w.change_attributes(event_mask=X.StructureNotifyMask | X.PropertyChangeMask)
             first = k not in self.known.values()
             self.known[wid] = k
+            self.info[wid] = self.program(w)
+            self.session_at = self.session_at or time.time()
+            back = self.take_pending(k) if restore else None
+            if back:                     # after a restart: its own desktop, place and size
+                self.put_back(w, back)
+                self.later.append((time.time() + 1.5, wid, back))
+                return
             if restore:
                 self.fresh[wid] = time.time()
                 self.to_current_desktop(w)
@@ -140,6 +176,94 @@ class WinPos:
                                                       self.A['_NET_WM_STATE_MAXIMIZED_HORZ'], 2])
         self.d.flush()
 
+    # -- the session: what is open, and opening it again after a restart
+    def program(self, w):
+        """how to start this window's program again: (command, folder)"""
+        p = w.get_full_property(self.A['_NET_WM_PID'], Xatom.CARDINAL)
+        if not p:
+            return None
+        pid = p.value[0]
+        try:
+            cmd = [a for a in Path(f'/proc/{pid}/cmdline').read_bytes().decode(errors='replace').split('\0') if a]
+            cwd = os.readlink(f'/proc/{pid}/cwd')
+        except OSError:
+            return None
+        if not cmd:
+            return None
+        for child in children(pid):      # a terminal: the folder its shell is in
+            try:
+                if Path(f'/proc/{child}/comm').read_text().strip() in SHELLS:
+                    cwd = os.readlink(f'/proc/{child}/cwd')
+                    break
+            except OSError:
+                continue
+        return {'pid': pid, 'cmd': cmd, 'cwd': cwd}
+
+    def snapshot(self):
+        out = []
+        for wid in self.clients():
+            k = self.known.get(wid)
+            if not k:
+                continue
+            w = self.d.create_resource_object('window', wid)
+            try:
+                st = self.states(w)
+                x, y, ww, hh = self.geometry(w)
+                desk = w.get_full_property(self.A['_NET_WM_DESKTOP'], Xatom.CARDINAL)
+            except error.XError:
+                continue
+            mx = {self.A['_NET_WM_STATE_MAXIMIZED_VERT'], self.A['_NET_WM_STATE_MAXIMIZED_HORZ']} <= st
+            e = {'key': k, 'x': x, 'y': y, 'w': ww, 'h': hh, 'max': mx,
+                 'desk': desk.value[0] if desk else None}
+            if mx and k in self.places:   # the size it had before maximizing
+                e.update({f: self.places[k][f] for f in ('x', 'y', 'w', 'h') if f in self.places[k]})
+            if self.info.get(wid):
+                e.update(self.info[wid])
+            out.append(e)
+        return out
+
+    def save_session(self):
+        STATE.mkdir(parents=True, exist_ok=True)
+        tmp = SESSION.with_suffix('.tmp')
+        tmp.write_text(json.dumps({'saved': time.time(), 'windows': self.snapshot()}, indent=1))
+        tmp.replace(SESSION)
+        self.session_at = 0.0
+
+    def start_session(self):
+        """once per login: start what was open, and put its windows back as they appear"""
+        mark = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-winpos-restored'
+        if mark.exists():
+            return                       # winpos restarted within the same login: nothing to do
+        mark.touch()
+        try:
+            wins = json.loads(SESSION.read_text()).get('windows', [])
+        except (OSError, ValueError):
+            return
+        self.pending = [e for e in wins if e.get('key')]
+        self.pending_until = time.time() + PENDING
+        for wid in self.clients():        # already open (autostart): put those back too
+            k = self.known.get(wid)
+            back = self.take_pending(k) if k else None
+            if back:
+                self.put_back(self.d.create_resource_object('window', wid), back)
+        threading.Thread(target=launch, args=(list(self.pending),), daemon=True).start()
+
+    def take_pending(self, k):
+        if not self.pending or time.time() > self.pending_until:
+            return None
+        for i, e in enumerate(self.pending):
+            if e['key'] == k:
+                return self.pending.pop(i)
+        return None
+
+    def put_back(self, w, e):
+        try:
+            if e.get('desk') is not None:
+                self.message(w, self.A['_NET_WM_DESKTOP'], [e['desk'], 2])
+            self.restore(w, {'x': e['x'], 'y': e['y'], 'w': e['w'], 'h': e['h'], 'max': e.get('max')})
+        except error.XError:
+            pass
+
     def record(self, wid):
         k = self.known.get(wid)
         if not k:
@@ -159,6 +283,7 @@ class WinPos:
             if new and new != old:
                 self.places[k] = new
                 self.dirty_at = self.dirty_at or time.time()
+            self.session_at = self.session_at or time.time()
         except error.XError:
             pass
 
@@ -178,6 +303,8 @@ class WinPos:
                     self.follow(wid)
                 for wid in set(self.known) - now:
                     self.known.pop(wid, None)
+                    self.info.pop(wid, None)
+                    self.closed()
                 for wid in set(self.fresh) - now:
                     self.fresh.pop(wid, None)
         elif ev.type == X.PropertyNotify and ev.atom == self.A['_NET_WM_DESKTOP']:
@@ -189,15 +316,26 @@ class WinPos:
         elif ev.type == X.ConfigureNotify:
             self.record(ev.window.id)
         elif ev.type == X.DestroyNotify:
-            self.known.pop(ev.window.id, None)
+            if self.known.pop(ev.window.id, None):
+                self.closed()
+            self.info.pop(ev.window.id, None)
             self.fresh.pop(ev.window.id, None)
+
+    def closed(self):
+        """a window closed: written only after DROP_AFTER, so a shutdown (everything closing
+        at once, then this program stopping) leaves the list as it was"""
+        if self.keep_session:
+            self.session_at = max(self.session_at, time.time() + DROP_AFTER - SAVE_AFTER)
 
     def run(self):
         fd = self.d.fileno()
         while True:
             wait = None
-            if self.dirty_at:
-                wait = max(0.0, self.dirty_at + SAVE_AFTER - time.time())
+            due = [t for t in (self.dirty_at + SAVE_AFTER if self.dirty_at else 0,
+                               self.session_at + SAVE_AFTER if self.session_at else 0) if t]
+            due += [t for t, _, _ in self.later]
+            if due:
+                wait = max(0.0, min(due) - time.time())
             if not self.d.pending_events():
                 select.select([fd], [], [], wait)
             while self.d.pending_events():
@@ -207,9 +345,108 @@ class WinPos:
                     pass
             if self.dirty_at and time.time() >= self.dirty_at + SAVE_AFTER:
                 self.save()
+            starting = self.pending and time.time() < self.pending_until    # apps still coming up
+            if self.keep_session and self.session_at and time.time() >= self.session_at + SAVE_AFTER \
+                    and not starting:
+                self.save_session()
+            for item in [i for i in self.later if i[0] <= time.time()]:
+                self.later.remove(item)          # once more: apps like to resize themselves
+                if item[1] in self.known:
+                    self.put_back(self.d.create_resource_object('window', item[1]), item[2])
+
+
+def children(pid):
+    out = []
+    for f in glob.glob(f'/proc/{pid}/task/*/children'):
+        try:
+            out += [int(x) for x in Path(f).read_text().split()]
+        except (OSError, ValueError):
+            pass
+    return out
+
+
+def desktop_exec(key):
+    """the .desktop file's command for an app whose own command can't be run again"""
+    cls = key.split('/')[0].lower()
+    dirs = [Path.home() / '.local/share/applications', Path('/usr/share/applications')]
+    for d in dirs:
+        for f in sorted(d.glob('*.desktop')):
+            cp = configparser.ConfigParser(interpolation=None, strict=False)
+            try:
+                cp.read(f)
+                e = cp['Desktop Entry']
+            except Exception:            # noqa: BLE001 - a broken .desktop file
+                continue
+            if e.get('startupwmclass', '').lower() == cls or f.stem.lower().split('.')[-1] == cls:
+                ex = re.sub(r'\s*%[fFuUick]', '', e.get('exec', ''))
+                return shlex.split(ex) if ex else None
+    return None
+
+
+def running_cmds():
+    out = set()
+    for f in glob.glob('/proc/[0-9]*/cmdline'):
+        try:
+            out.add(tuple(a for a in Path(f).read_bytes().decode(errors='replace').split('\0') if a))
+        except OSError:
+            pass
+    return out
+
+
+def launch(windows):
+    """start each program that had windows once (one Firefox opens all its windows itself);
+    not what runs already, nothing from /tmp (AppImage mounts): then its .desktop entry"""
+    seen, running = set(), running_cmds()
+    for e in windows:
+        cmd, cwd = e.get('cmd'), e.get('cwd') or str(Path.home())
+        if not cmd:
+            continue
+        if cmd[0].startswith('/tmp/') or not (os.path.exists(cmd[0]) or shutil.which(cmd[0])):
+            cmd = desktop_exec(e['key'])
+            if not cmd:
+                continue
+        name = os.path.basename(cmd[0])
+        if name in ('kitty', 'alacritty', 'xfce4-terminal', 'foot') and os.path.isdir(cwd):
+            sig = (tuple(cmd), cwd)      # every terminal window: its own, in its own folder
+        else:
+            sig = (tuple(cmd),)
+        if sig in seen or tuple(cmd) in running and len(sig) == 1:
+            continue
+        seen.add(sig)
+        try:
+            subprocess.Popen(cmd, cwd=cwd if os.path.isdir(cwd) else None, start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            continue
+        time.sleep(0.4)
+
+
+def firefox_restore(on):
+    """Firefox's own 'open previous windows and tabs', in every profile (web apps too)"""
+    home = Path.home()
+    profs = [p for b in (home / '.config/mozilla/firefox', home / '.mozilla/firefox') for p in b.glob('*')]
+    profs += list((home / '.local/share').glob('firefox-*'))
+    for prof in profs:
+        if not (prof / 'prefs.js').exists():
+            continue
+        f = prof / 'user.js'
+        try:
+            old = f.read_text()
+        except OSError:
+            old = ''
+        new = re.sub(re.escape(FF_BEGIN) + r'.*?' + re.escape(FF_END) + r'\n?', '', old, flags=re.S)
+        if on:
+            new = new.rstrip('\n') + ('\n' if new.strip() else '') + '\n'.join([
+                FF_BEGIN, 'user_pref("browser.startup.page", 3);',
+                'user_pref("browser.sessionstore.resume_from_crash", true);', FF_END]) + '\n'
+        if new != old:
+            f.write_text(new)
 
 
 def main():
+    if sys.argv[1:2] in (['--firefox-on'], ['--firefox-off']):      # from the Zorro app
+        firefox_restore(sys.argv[1] == '--firefox-on')
+        return
     if len(sys.argv) > 1:
         print(__doc__.strip())
         sys.exit(0 if sys.argv[1] in ('-h', '--help') else 1)

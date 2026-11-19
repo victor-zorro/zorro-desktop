@@ -1,4 +1,5 @@
 """window theme, picom, kitty and GTK css"""
+import json
 import os
 import re
 import shutil
@@ -228,3 +229,31 @@ def apply_windows(login=False):
             os.kill(int(pid), 10)                        # SIGUSR1
         except (OSError, ValueError):
             pass
+
+
+# ---- zorro-winpos: where windows open, and reopening everything after a restart ----------
+WINPOS_CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-winpos' / 'config.json'
+
+
+def winpos_conf():
+    try:
+        return json.loads(WINPOS_CONF.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def set_winpos(key, value):
+    """save, switch Firefox's own session restore along, and restart zorro-winpos (it reads its
+    settings when it starts; it does not reopen anything when restarted within a login)"""
+    c = winpos_conf()
+    c[key] = value
+    WINPOS_CONF.parent.mkdir(parents=True, exist_ok=True)
+    WINPOS_CONF.write_text(json.dumps(c, indent=1))
+    tool = shutil.which('zorro-winpos')
+    if not tool:
+        return
+    if key == 'restore_session':
+        subprocess.run([tool, '--firefox-on' if value else '--firefox-off'], check=False)
+    subprocess.run(['pkill', '-x', 'zorro-winpos'], check=False)
+    subprocess.Popen([tool], start_new_session=True, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
