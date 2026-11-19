@@ -91,3 +91,7 @@ xcape
 systemd-resolved
 # zorro-winpos: windows reopen where you left them (X events from Python)
 python3-xlib
+# zorro-search: search notes and documents by meaning (multilingual-e5-small, on the laptop)
+python3-onnxruntime
+python3-sentencepiece
+poppler-utils

@@ -10,8 +10,10 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -500,6 +502,19 @@ class Files(Part):
 
 # ---- Notes: the Obsidian vault, as a tree ---------------------------------------------------
 TAG = re.compile(r'(?:^|\s)#([A-Za-z][\w/-]{1,40})')
+SEARCH_SOCK = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-search.sock'
+
+
+def ask_search(text, n=30):
+    """zorro-search (by meaning): [{path, title, score, snippet, kind}], [] when it does not run"""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect(str(SEARCH_SOCK))
+            s.sendall((json.dumps({'q': text, 'n': n, 'kind': 'note'}) + '\n').encode())
+            return json.loads(s.makefile().readline() or '[]')
+    except (OSError, ValueError):
+        return []
 HEADING = re.compile(r'^(#{1,3})\s+(.+?)\s*#*\s*$', re.M)
 
 
@@ -643,7 +658,8 @@ class Notes(Part):
         return [self.roots(), [], []]
 
     def search_tiles(self, text):
-        """notes whose title or text has every word, titles first, newest first"""
+        """notes whose title or text has every word (titles first, newest first), then the
+        notes zorro-search finds by meaning (they come in a moment later)"""
         words = [w.lower() for w in text.split() if w]
         if not words or not getattr(self, 'root', None):
             return []
@@ -654,7 +670,29 @@ class Notes(Part):
             if all(w in name or w in body for w in words):
                 hits.append((not all(w in name for w in words), -m, p))
         hits.sort()
-        return [self.note_tile(p) for _, _, p in hits[:30]]
+        exact = [p for _, _, p in hits[:30]]
+        known = {p for _, p in self.notes}
+        more = [h for h in self.meaning(text.strip()) if h['path'] in known and h['path'] not in exact]
+        return [self.note_tile(p) for p in exact] + \
+            [self.note_tile(h['path'], '≈ ' + (h['snippet'] or 'meaning')[:40]) for h in more][:max(0, 27 - len(exact))]
+
+    def meaning(self, text):
+        """what zorro-search found for text; asked in a thread (the Dialer redraws every second)"""
+        if not hasattr(self, '_meaning'):
+            self._meaning, self._want, self._asking = {}, None, False
+        if len(text) < 3 or text in self._meaning:
+            return self._meaning.get(text, [])
+        self._want = text
+        if not self._asking:
+            self._asking = True
+
+            def work():
+                while self._want and self._want not in self._meaning:
+                    t = self._want
+                    self._meaning[t] = ask_search(t)
+                self._asking = False
+            threading.Thread(target=work, daemon=True).start()
+        return []
 
     def search(self, text):
         found = self.search_tiles(text)

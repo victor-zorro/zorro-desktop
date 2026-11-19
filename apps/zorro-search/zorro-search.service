@@ -1,0 +1,14 @@
+[Unit]
+Description=zorro-search: search notes and documents by meaning
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/zorro-search serve
+Nice=10
+IOSchedulingClass=idle
+MemoryHigh=1G
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

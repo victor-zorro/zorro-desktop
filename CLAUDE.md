@@ -21,6 +21,8 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones
   - `apps/zorro-music/` — SoundCloud player (mpv + yt-dlp with your Firefox login); the Dialer's Music part
   - `apps/zorro-winpos/` — windows reopen where you left them (per app place, size, maximized)
+  - `apps/zorro-face/` — face unlock with the IR camera (OpenCV YuNet + SFace) for the lock screen / login
+  - `apps/zorro-search/` — search notes and documents by meaning (multilingual-e5-small, local service); the Dialer's Notes search
   - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)

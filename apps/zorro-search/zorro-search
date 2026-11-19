@@ -1,0 +1,370 @@
+#!/usr/bin/python3
+"""zorro-search: search your notes and documents by meaning, on the laptop.
+
+  zorro-search serve           the background service (zorro-search.service): keeps the model
+                               loaded, answers over $XDG_RUNTIME_DIR/zorro-search.sock and
+                               brings the index up to date every 10 minutes
+  zorro-search TEXT ...        search (asks the service, or loads the model itself)
+  zorro-search --json TEXT     the same as JSON: [{path, title, score, snippet, kind}]
+  zorro-search index           bring the index up to date now
+  zorro-search status          JSON: files, pieces, model, last update
+
+"rice dish from Indonesia" finds the note called "nasi goreng". The model is multilingual-e5-small
+(Dutch, English and ~100 other languages), run with onnxruntime; nothing leaves the laptop.
+What is searched: every Obsidian vault, and ~/Documents (md, txt, pdf).
+The index lives in ~/.cache/zorro-search/ (numbers and short snippets, rebuildable).
+"""
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+HOME = Path.home()
+MODEL = Path(os.environ.get('XDG_DATA_HOME', HOME / '.local/share')) / 'zorro-search'
+CACHE = Path(os.environ.get('XDG_CACHE_HOME', HOME / '.cache')) / 'zorro-search'
+SOCK = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-search.sock'
+DOCS = [HOME / 'Documents']
+TEXT_EXT = {'.md', '.txt', '.org', '.rst'}
+DOC_EXT = TEXT_EXT | {'.pdf'}
+PIECE = 900                  # characters per piece of a note
+MAX_TOKENS = 256
+EVERY = 600                  # seconds between index updates in the service
+
+
+# ---- what to search ------------------------------------------------------------------------
+
+def vaults():
+    try:
+        vs = json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values()
+    except (OSError, ValueError):
+        return []
+    return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', ''))]
+
+
+def files():
+    """{path: (mtime, kind)}"""
+    out = {}
+    for root, kind, exts in [(v, 'note', {'.md'}) for v in vaults()] + [(d, 'doc', DOC_EXT) for d in DOCS]:
+        if not root.is_dir():
+            continue
+        for dirpath, dirs, names in os.walk(root):
+            dirs[:] = [d for d in dirs if not d.startswith(('.', '_')) and d != 'node_modules']
+            for n in names:
+                p = os.path.join(dirpath, n)
+                if os.path.splitext(n)[1].lower() in exts:
+                    try:
+                        st = os.stat(p)
+                    except OSError:
+                        continue
+                    if st.st_size < 20_000_000:
+                        out[p] = (st.st_mtime, kind)
+    return out
+
+
+def read_text(p):
+    if p.lower().endswith('.pdf'):
+        try:
+            return subprocess.run(['pdftotext', '-l', '30', '-q', p, '-'], capture_output=True,
+                                  text=True, timeout=30).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return ''
+    try:
+        with open(p, errors='replace') as f:
+            return f.read(400_000)
+    except OSError:
+        return ''
+
+
+FRONT = re.compile(r'\A---\n.*?\n---\n', re.S)
+LINKS = re.compile(r'!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)|\]\([^)]*\)|<[^>]+>')
+
+
+def pieces(p, text):
+    """the title, then the text in pieces of ~PIECE characters split at blank lines"""
+    title = os.path.splitext(os.path.basename(p))[0]
+    tags = ''
+    fm = FRONT.match(text)
+    if fm:
+        m = re.search(r'^tags:\s*(.*(?:\n\s*-\s*.*)*)', fm.group(0), re.M)
+        tags = ' '.join(re.findall(r'[\w/-]+', m.group(1))) if m else ''
+        text = text[fm.end():]
+    text = LINKS.sub(' ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    out, cur = [], ''
+    for para in re.split(r'\n\s*\n', text):
+        para = para.strip()
+        if not para:
+            continue
+        while len(para) > PIECE * 1.5:
+            out.append(para[:PIECE])
+            para = para[PIECE:]
+        if cur and len(cur) + len(para) > PIECE:
+            out.append(cur)
+            cur = ''
+        cur = (cur + '\n' + para).strip()
+    if cur:
+        out.append(cur)
+    head = f'{title} {tags}'.strip()
+    return [head] if not out else [f'{head}\n{c}' for c in out[:40]]
+
+
+def clean(snippet):
+    """a snippet without markdown marks and links, for showing"""
+    t = re.sub(r'https?://\S+', '', snippet)
+    t = re.sub(r'[|*#>`_~\[\]\\]+|^\s*[-+]\s+|\s\d+\.\s', ' ', t)
+    return ' '.join(t.split())
+
+
+# ---- the model ----------------------------------------------------------------------------
+
+class Model:
+    def __init__(self):
+        import numpy as np
+        import onnxruntime as ort
+        import sentencepiece as spm
+        self.np = np
+        opt = ort.SessionOptions()
+        opt.intra_op_num_threads = max(1, (os.cpu_count() or 2) // 2)
+        # Debian's onnxruntime prints ~570 harmless "Schema error" lines while loading a
+        # model (onnx registered twice); keep them out of the journal
+        err = os.dup(2)
+        null = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null, 2)
+        try:
+            self.sess = ort.InferenceSession(str(MODEL / 'model_quantized.onnx'), opt,
+                                             providers=['CPUExecutionProvider'])
+        finally:
+            os.dup2(err, 2)
+            os.close(err)
+            os.close(null)
+        self.inputs = {i.name for i in self.sess.get_inputs()}
+        self.sp = spm.SentencePieceProcessor(model_file=str(MODEL / 'sentencepiece.bpe.model'))
+
+    def ids(self, text):
+        """XLM-R ids: <s>=0 <pad>=1 </s>=2 <unk>=3, sentencepiece ids shifted by one"""
+        t = [i + 1 if i else 3 for i in self.sp.encode(text)][:MAX_TOKENS - 2]
+        return [0] + t + [2]
+
+    def embed(self, texts, batch=16):
+        np = self.np
+        out = []
+        for i in range(0, len(texts), batch):
+            seqs = [self.ids(t) for t in texts[i:i + batch]]
+            n = max(map(len, seqs))
+            ids = np.ones((len(seqs), n), np.int64)
+            mask = np.zeros((len(seqs), n), np.int64)
+            for j, s in enumerate(seqs):
+                ids[j, :len(s)] = s
+                mask[j, :len(s)] = 1
+            feed = {'input_ids': ids, 'attention_mask': mask}
+            if 'token_type_ids' in self.inputs:
+                feed['token_type_ids'] = np.zeros_like(ids)
+            hidden = self.sess.run(None, feed)[0]
+            v = (hidden * mask[..., None]).sum(1) / mask.sum(1, keepdims=True)
+            out.append(v / np.linalg.norm(v, axis=1, keepdims=True))
+        return np.concatenate(out).astype(np.float32) if out else np.zeros((0, 384), np.float32)
+
+
+# ---- the index ----------------------------------------------------------------------------
+
+class Index:
+    def __init__(self, model):
+        import numpy as np
+        self.np, self.model, self.lock = np, model, threading.Lock()
+        self.meta, self.vecs, self.updated = [], np.zeros((0, 384), np.float32), 0
+        try:
+            self.meta = json.loads((CACHE / 'meta.json').read_text())
+            self.vecs = np.load(CACHE / 'vecs.npy').astype(np.float32)
+            self.updated = (CACHE / 'vecs.npy').stat().st_mtime
+            if len(self.meta) != len(self.vecs):
+                raise ValueError
+        except (OSError, ValueError):
+            self.meta, self.vecs = [], np.zeros((0, 384), np.float32)
+
+    def update(self, say=lambda *a: None):
+        """embed new and changed files, drop removed ones; returns how many files changed"""
+        np = self.np
+        now = files()
+        known = {}
+        for i, m in enumerate(self.meta):
+            known.setdefault(m['p'], (m['m'], []))[1].append(i)
+        keep = [i for p, (m, idx) in known.items() if p in now and abs(now[p][0] - m) < 1 for i in idx]
+        todo = [p for p in now if p not in known or abs(now[p][0] - known[p][0]) >= 1]
+        if not todo and len(keep) == len(self.meta):
+            return 0
+        meta = [self.meta[i] for i in keep]
+        vecs = [self.vecs[keep]] if keep else []
+        say(f'{len(todo)} files to read')
+        batch_meta, batch_text = [], []
+
+        def flush():
+            if batch_text:
+                vecs.append(self.model.embed(['passage: ' + t for t in batch_text]))
+                meta.extend(batch_meta)
+                batch_meta.clear()
+                batch_text.clear()
+
+        for k, p in enumerate(sorted(todo, key=lambda p: -now[p][0])):
+            for j, piece in enumerate(pieces(p, read_text(p))):
+                batch_meta.append({'p': p, 'm': now[p][0], 'k': now[p][1], 'j': j,
+                                   's': ' '.join(piece.split('\n', 1)[-1].split())[:200]})
+                batch_text.append(piece)
+            if len(batch_text) >= 64:
+                flush()
+                say(f'{k + 1}/{len(todo)}')
+        flush()
+        with self.lock:
+            self.meta = meta
+            self.vecs = np.concatenate(vecs) if vecs else np.zeros((0, 384), np.float32)
+        CACHE.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE / 'vecs.tmp.npy'
+        np.save(tmp, self.vecs.astype(np.float16))
+        (CACHE / 'meta.tmp.json').write_text(json.dumps(meta))
+        os.replace(tmp, CACHE / 'vecs.npy')
+        os.replace(CACHE / 'meta.tmp.json', CACHE / 'meta.json')
+        self.updated = time.time()
+        return len(todo)
+
+    def search(self, text, n=30, kind=None):
+        np = self.np
+        q = self.model.embed(['query: ' + text])[0]
+        words = [w for w in re.findall(r'\w+', text.lower()) if len(w) > 1]
+        with self.lock:
+            if not len(self.vecs):
+                return []
+            sims = self.vecs @ q
+            meta = self.meta
+        best = {}
+        for i in np.argsort(-sims)[:400]:
+            m = meta[i]
+            if kind and m['k'] != kind:
+                continue
+            s = float(sims[i])
+            title = os.path.splitext(os.path.basename(m['p']))[0]
+            if words and all(w in title.lower() for w in words):
+                s += 0.04                       # the words in the title: a little extra
+            if m['p'] not in best or s > best[m['p']]['score']:
+                best[m['p']] = {'path': m['p'], 'title': title, 'score': round(s, 4),
+                                'snippet': clean(m['s']), 'kind': m['k']}
+        hits = sorted(best.values(), key=lambda h: -h['score'])
+        if hits:                                # only the ones close to the best
+            top = hits[0]['score']
+            hits = [h for h in hits if h['score'] >= max(top - 0.07, 0.78)]
+        return hits[:n]
+
+
+# ---- service and client -------------------------------------------------------------------
+
+def serve():
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+    idx = Index(Model())
+    SOCK.unlink(missing_ok=True)
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(SOCK))
+    os.chmod(SOCK, 0o600)
+    srv.listen(8)
+    state = {'busy': False, 'wake': threading.Event()}
+
+    def updater():
+        while True:
+            state['busy'] = True
+            try:
+                n = idx.update(lambda *a: None)
+                if n:
+                    print(f'index: {n} files read, {len(idx.meta)} pieces', flush=True)
+            except Exception as e:          # noqa: BLE001 - keep serving with the old index
+                print(f'index update failed: {e}', flush=True)
+            state['busy'] = False
+            state['wake'].wait(EVERY)
+            state['wake'].clear()
+
+    threading.Thread(target=updater, daemon=True).start()
+
+    def client(conn):
+        with conn:
+            try:
+                req = json.loads(conn.makefile().readline() or '{}')
+                if req.get('cmd') == 'status':
+                    res = status_of(idx, state['busy'])
+                elif req.get('cmd') == 'index':
+                    state['wake'].set()
+                    res = {'ok': True}
+                else:
+                    res = idx.search(req.get('q', ''), int(req.get('n', 30)), req.get('kind'))
+                conn.sendall((json.dumps(res) + '\n').encode())
+            except (OSError, ValueError):
+                pass
+
+    while True:
+        conn, _ = srv.accept()
+        threading.Thread(target=client, args=(conn,), daemon=True).start()
+
+
+def status_of(idx, busy=False):
+    return {'files': len({m['p'] for m in idx.meta}), 'pieces': len(idx.meta), 'busy': busy,
+            'updated': idx.updated, 'model': (MODEL / 'model_quantized.onnx').exists()}
+
+
+def ask(req, timeout=3.0):
+    """the service's answer, or None when it does not run"""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect(str(SOCK))
+            s.sendall((json.dumps(req) + '\n').encode())
+            return json.loads(s.makefile().readline())
+    except (OSError, ValueError):
+        return None
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    if a[0] == 'serve':
+        serve()
+        return 0
+    if a[0] == 'index':
+        idx = Index(Model())
+        n = idx.update(lambda *m: print(*m, flush=True))
+        print(f'{n} files read; {len(idx.meta)} pieces from {len({m["p"] for m in idx.meta})} files')
+        ask({'cmd': 'index'})
+        return 0
+    if a[0] == 'status':
+        print(json.dumps(ask({'cmd': 'status'}) or {**status_of(_offline()), 'service': False}))
+        return 0
+    as_json = a[0] == '--json'
+    text = ' '.join(a[1:] if as_json else a)
+    hits = ask({'q': text, 'n': 30}, timeout=20)
+    if hits is None:
+        hits = Index(Model()).search(text)
+    if as_json:
+        print(json.dumps(hits))
+    else:
+        for h in hits:
+            print(f'{h["score"]:.2f}  {h["title"]}\n      {h["path"]}\n      {h["snippet"][:120]}')
+    return 0
+
+
+def _offline():
+    class I:
+        meta, updated = [], 0
+    try:
+        I.meta = json.loads((CACHE / 'meta.json').read_text())
+        I.updated = (CACHE / 'meta.json').stat().st_mtime
+    except (OSError, ValueError):
+        pass
+    return I
+
+
+if __name__ == '__main__':
+    sys.exit(main())

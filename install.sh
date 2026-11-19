@@ -177,6 +177,8 @@ log "Living wallpaper (apps/zorro-wall)"
 apps/zorro-wall/install.sh
 log "Info circle on the desktop (apps/zorro-orb)"
 apps/zorro-orb/install.sh
+log "Search by meaning (apps/zorro-search)"
+apps/zorro-search/install.sh
 
 # Scripts in ~/.local/bin on PATH for every shell
 grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \
@@ -201,6 +203,10 @@ if has laptop; then
   if [[ -d /sys/devices/platform/thinkpad_acpi ]]; then
     sudo apps/zorro-thinkpad/install.sh
     apps/zorro-thinkpad/install-user.sh
+  fi
+  # Face unlock (apps/zorro-face): only with an IR camera (a greyscale-only video device)
+  if ls /dev/v4l/by-path/ >/dev/null 2>&1 && apps/zorro-face/zorro-face status | grep -q '"camera": "/'; then
+    sudo apps/zorro-face/install.sh
   fi
 fi
 
