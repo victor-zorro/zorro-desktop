@@ -346,6 +346,7 @@ def cmd_watch(_args):
                 p = local_path(f)
                 p.mkdir(parents=True, exist_ok=True)
                 roots[str(p.resolve())] = f
+        CONF_DIR.mkdir(parents=True, exist_ok=True)
         mtime = CONF.stat().st_mtime if CONF.exists() else 0
         if not roots:
             while (CONF.stat().st_mtime if CONF.exists() else 0) == mtime:
@@ -353,8 +354,9 @@ def cmd_watch(_args):
             continue
         proc = subprocess.Popen(
             ['inotifywait', '-m', '-r', '-q', '--format', '%e %w%f',
-             '-e', 'close_write,moved_to,moved_from,create,delete', *roots],
-            stdout=subprocess.PIPE, text=True)
+             '-e', 'close_write,moved_to,moved_from,create,delete', *roots, str(CONF_DIR)],
+            stdout=subprocess.PIPE)                 # the config folder too: no polling for it
+        fd, buf = proc.stdout.fileno(), b''
         pending, running, dirty = {}, {}, set()
         next_check = 0
 
@@ -370,23 +372,33 @@ def cmd_watch(_args):
                     pending[f['id']] = time.monotonic() + DEBOUNCE
         try:
             while True:
-                r, _, _ = select.select([proc.stdout], [], [], 1)
+                # sleep until an event, the next due sync or the next minute check; a little
+                # sooner while syncs run (their end can queue a follow-up)
+                wake = [next_check, *pending.values()] + ([time.monotonic() + 5] if running or dirty else [])
+                r, _, _ = select.select([fd], [], [], max(0.05, min(wake) - time.monotonic()))
                 if r:
-                    line = proc.stdout.readline()
-                    if not line:
+                    # the raw pipe, split here: a buffered readline() would keep lines that came
+                    # together in its buffer, where select() does not see them
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
                         break                   # inotifywait died: restart it
-                    events, _, path = line.rstrip('\n').partition(' ')
-                    if IGNORE.search(path):
-                        continue
-                    for root, f in roots.items():
-                        if (path + '/').startswith(root + '/'):
-                            if f['id'] not in running and not is_locked(f['id']):
-                                pending[f['id']] = time.monotonic() + DEBOUNCE
-                            elif 'CLOSE_WRITE' in events:
-                                # during a sync: rclone writes *.partial and renames it, so a
-                                # file written in place is a save of yours: sync again after
-                                dirty.add(f['id'])
-                            break
+                    buf += chunk
+                    *lines, buf = buf.split(b'\n')
+                    if any(ln.decode(errors='replace').partition(' ')[2] == str(CONF) for ln in lines):
+                        break                   # folders changed: rewatch
+                    for ln in lines:
+                        events, _, path = ln.decode(errors='replace').partition(' ')
+                        if IGNORE.search(path):
+                            continue
+                        for root, f in roots.items():
+                            if (path + '/').startswith(root + '/'):
+                                if f['id'] not in running and not is_locked(f['id']):
+                                    pending[f['id']] = time.monotonic() + DEBOUNCE
+                                elif 'CLOSE_WRITE' in events:
+                                    # during a sync: rclone writes *.partial and renames it, so
+                                    # a file written in place is a save of yours: sync again after
+                                    dirty.add(f['id'])
+                                break
                 now = time.monotonic()
                 if now >= next_check:
                     # resume syncs cut off by a reboot, retry after Google's rate limit
@@ -407,8 +419,6 @@ def cmd_watch(_args):
                         t = threading.Thread(target=work, args=(f,))
                         running[fid] = t
                         t.start()
-                if (CONF.stat().st_mtime if CONF.exists() else 0) != mtime:
-                    break                       # folders changed: rewatch
         finally:
             proc.terminate()
             for t in list(running.values()):
