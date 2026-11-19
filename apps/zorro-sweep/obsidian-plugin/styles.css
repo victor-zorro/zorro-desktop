@@ -70,6 +70,10 @@
 .zs-card.is-gone { transition: transform .12s, opacity .12s; opacity: 0; }
 .zs-title { font-size: 1.5em; font-weight: 600; color: #fff; margin-bottom: 6px; }
 .zs-meta { font: 11px var(--zs-mono); color: var(--zs-dim); margin-bottom: 16px; }
+/* the text scrolls inside the card: it too may only pan up/down, or a sideways finger
+   becomes a scroll and the swipe gets cancelled */
+.zs-card, .zs-card * { touch-action: pan-y; }
+.zs-stage.is-sort .zs-card, .zs-stage.is-sort .zs-card * { touch-action: none; }
 .zs-body { overflow-y: auto; overscroll-behavior: contain; font-size: calc(var(--zs-zoom) * 1em); color: var(--zs-fg); }
 .zs-card.is-short .zs-body { font-size: calc(var(--zs-zoom) * 1.45em); }
 .zs-card.is-medium .zs-body { font-size: calc(var(--zs-zoom) * 1.15em); }
