@@ -67,8 +67,23 @@ from sweeplib import (IMG, ROUND, Meaning, Vault, ago, attach_dir, free_name, fr
 
 
 # ---- the window ------------------------------------------------------------------------------
+SCREEN_DPI = 96.0                       # set from the screen at start (Xft.dpi)
+
+
+def text_layout(cr):
+    """a Pango layout at the screen's font DPI (Xft.dpi: the Text size setting in the Zorro
+    app); cairo's own default would stay at 96 whatever is set"""
+    lay = PangoCairo.create_layout(cr)
+    PangoCairo.context_set_resolution(lay.get_context(), SCREEN_DPI)
+    lay.context_changed()
+    return lay
+
+
 class Sweep(Gtk.Window):
     def __init__(self, vault):
+        global SCREEN_DPI                   # the Text size setting (Xft.dpi)
+        res = Gdk.Screen.get_default().get_resolution()
+        SCREEN_DPI = res if res > 0 else 96.0
         super().__init__(title='Sweep notes')
         self.set_default_size(1180, 820)
         self.set_icon_name('edit-clear-all')
@@ -1009,7 +1024,7 @@ class Sweep(Gtk.Window):
             lay, tw, th = hit
             PangoCairo.update_layout(cr, lay)
         else:
-            lay = PangoCairo.create_layout(cr)
+            lay = text_layout(cr)
             fd = Pango.FontDescription(f'{"DejaVu Sans Mono" if mono else "DejaVu Sans"} {size}')
             if bold:
                 fd.set_weight(Pango.Weight.BOLD)
@@ -1141,7 +1156,7 @@ class Sweep(Gtk.Window):
             name = u[1].stem
         name = name if len(name) <= 34 else name[:33] + '…'
         label = f'undo   {what} · {name}'
-        lay = PangoCairo.create_layout(cr)
+        lay = text_layout(cr)
         lay.set_font_description(Pango.FontDescription('DejaVu Sans Mono 9'))
         lay.set_text(label, -1)
         tw = lay.get_pixel_size()[0]
@@ -1230,7 +1245,7 @@ class Sweep(Gtk.Window):
         top = 80
         cr.rectangle(1, top, cw - 2, ch - top - 1)
         cr.clip()
-        lay = PangoCairo.create_layout(cr)
+        lay = text_layout(cr)
         size = 10.5 if c['words'] > 60 or c['pix'] else (14 if c['words'] > 15 else 17)
         lay.set_font_description(Pango.FontDescription(f'DejaVu Sans {size * self.zoom:.1f}'))
         lay.set_width(int((cw - 2 * pad) * Pango.SCALE))
@@ -1308,7 +1323,7 @@ class Sweep(Gtk.Window):
             cr.set_dash([])
             # the words, upright whatever the tilt
             w = t[5][0] * (1.45 if t[3] != 'pill' else 1.5)
-            lay = PangoCairo.create_layout(cr)
+            lay = text_layout(cr)
             fd = Pango.FontDescription('DejaVu Sans Mono 10')
             fd.set_weight(Pango.Weight.BOLD)
             lay.set_font_description(fd)

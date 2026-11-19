@@ -286,9 +286,15 @@ class DesktopPages:
         style.connect('changed', icons_changed)
         icon_op.connect('value-changed', icons_changed)
         box.add(heading('Screen font and colours', 'Text & colours'))
-        box.add(ui.form([('Font', font), ('Size in apps', spin('font_size', 6, 20)),
+        scale = ui.scale(1.0, 1.5, 0.05, c.get('text_scale', 1.0), lambda v: setv('text_scale', v),
+                         lambda v: f'{v * 100:.0f}%')
+        box.add(ui.form([('Text size, everywhere', scale),
+                         ('Font', font), ('Size in apps', spin('font_size', 6, 20)),
                          ('Size in the terminal', spin('term_size', 6, 24)),
                          ('Text colour', colour('text')), ('Accent colour', colour('accent'))]))
+        box.add(note('Text size makes all text bigger: apps, Firefox and the web apps, window '
+                     'titles, the Dialer and the info circle. Apps opened from now on; restart '
+                     'the others (or log out and in).'))
         box.add(note('Used by GTK apps (windows opened from now on), the terminal (right '
                      'away), the window title bars and menus (accent) and the info circle '
                      '(text). Chromatic sea: text #d8d8de, accent cyan #19e6ff.'))

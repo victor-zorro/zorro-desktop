@@ -245,6 +245,32 @@ def same(a, b):
     return key(a) == key(b)
 
 
+SCREEN_DPI = 96.0                       # set from the screen at start (Xft.dpi)
+
+
+def xft_dpi():
+    """Xft.dpi as it is now (xrdb), else what GTK read at start, else 96"""
+    try:
+        import subprocess
+        out = subprocess.run(['xrdb', '-query'], capture_output=True, text=True, timeout=2).stdout
+        for ln in out.splitlines():
+            if ln.startswith('Xft.dpi:'):
+                return float(ln.split(':', 1)[1])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    res = Gdk.Screen.get_default().get_resolution()
+    return res if res > 0 else 96.0
+
+
+def text_layout(cr):
+    """a Pango layout at the screen's font DPI (Xft.dpi: the Text size setting in the Zorro
+    app); cairo's own default would stay at 96 whatever is set"""
+    lay = PangoCairo.create_layout(cr)
+    PangoCairo.context_set_resolution(lay.get_context(), SCREEN_DPI)
+    lay.context_changed()
+    return lay
+
+
 def toggle_running():
     """already open: close it and stop (Super pressed again)"""
     try:
@@ -262,6 +288,8 @@ def toggle_running():
 
 class Dial(Gtk.Window):
     def __init__(self):
+        global SCREEN_DPI                   # the Text size setting (Xft.dpi), read per opening:
+        SCREEN_DPI = xft_dpi()              # the daemon lives longer than one setting
         super().__init__(type=Gtk.WindowType.POPUP)
         self.conf = load_conf()
         self.usage = load_usage()
@@ -464,7 +492,7 @@ class Dial(Gtk.Window):
             lay, ext = hit
             PangoCairo.update_layout(cr, lay)
         else:
-            lay = PangoCairo.create_layout(cr)
+            lay = text_layout(cr)
             lay.set_font_description(Pango.FontDescription.from_string(
                 f'DejaVu Sans {"Bold" if bold else ""} {size}'))
             lay.set_text(s, -1)
@@ -856,7 +884,7 @@ class Dial(Gtk.Window):
                 Gdk.cairo_set_source_pixbuf(cr, pb, x + (W - pb.get_width()) / 2, y + 14 + (area_h - 10 - pb.get_height()) / 2)
                 cr.paint()
         elif data.get('lines'):
-            lay = PangoCairo.create_layout(cr)
+            lay = text_layout(cr)
             lay.set_font_description(Pango.FontDescription.from_string(f'DejaVu Sans Mono {max(8, min(12, round(W / 52)))}'))
             lay.set_width(int((W - 28) * Pango.SCALE))
             lay.set_ellipsize(Pango.EllipsizeMode.END)
@@ -872,7 +900,7 @@ class Dial(Gtk.Window):
         cr.line_to(x + W - 14, y + H - 50)
         cr.set_source_rgba(1, 1, 1, 0.08)
         cr.stroke()
-        lay = PangoCairo.create_layout(cr)
+        lay = text_layout(cr)
         lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans Bold 10'))
         lay.set_width(int((W - 28) * Pango.SCALE))
         lay.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
@@ -880,7 +908,7 @@ class Dial(Gtk.Window):
         cr.move_to(x + 14, y + H - 42)
         cr.set_source_rgba(*FG, 1)
         PangoCairo.show_layout(cr, lay)
-        lay = PangoCairo.create_layout(cr)
+        lay = text_layout(cr)
         lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans 8'))
         lay.set_text(data.get('meta', ''), -1)
         cr.move_to(x + 14, y + H - 22)

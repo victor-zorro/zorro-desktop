@@ -13,7 +13,7 @@ from .base import HOME, load_conf, run, spawn, write_atomic
 
 WIN_DEFAULTS = {'titlebar': 'medium', 'compositor': True, 'kitty_opacity': 0.88,
                 'kitty_blur': True, 'accent': '#19e6ff', 'text': '#d8d8de',
-                'font': 'DejaVu Sans', 'font_size': 10, 'term_size': 11}
+                'font': 'DejaVu Sans', 'font_size': 10, 'term_size': 11, 'text_scale': 1.0}
 TITLE_SIZES = {'small': ('Small', 3, 8), 'medium': ('Medium', 6, 10), 'large': ('Large', 9, 12),
                'xl': ('Extra large', 12, 14)}       # name: (label, padding px, button px)
 THEME_DIR = HOME / '.local/share/themes/Zorro/openbox-3'
@@ -203,6 +203,18 @@ def write_gtk_css(c):
             write_atomic(p, css)        # never overwrite a gtk.css someone else wrote
 
 
+def write_dpi(c):
+    """Text size: the screen's font DPI (Xft.dpi, 96 = 100%). GTK, Firefox and the web apps,
+    Electron apps (Signal, Obsidian), Openbox and the Zorro apps read it when they start."""
+    try:
+        scale = min(1.6, max(1.0, float(c.get('text_scale', 1.0))))
+    except (TypeError, ValueError):
+        scale = 1.0
+    dpi = round(96 * scale)
+    subprocess.run(['xrdb', '-merge'], input=f'Xft.dpi: {dpi}\n', text=True,
+                   capture_output=True, timeout=5)
+
+
 def picom_running():
     return bool(run('pgrep', '-x', 'picom').strip())
 
@@ -216,6 +228,7 @@ def apply_windows(login=False):
     write_picom(c)
     write_kitty(c, want)
     write_gtk_css(c)
+    write_dpi(c)
     if not login:
         run('openbox', '--reconfigure')
     was = picom_running()
