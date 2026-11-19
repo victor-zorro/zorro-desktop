@@ -3,7 +3,7 @@
 // WebGL shader that adds the chaos: CRT power-on, TV static, film grain,
 // dust, scratches, tearing, chromatic split and colour bars.
 // Everything is configurable: window.ZORRO_LOOK (injected by zorro-greeter from
-// /etc/zorro-dm/look.json, edited in the Zorro app → Login screen).
+// /etc/zorro-dm/look.json, edited in the Zorro app → Look).
 // Exposes window.FX = { burst(strength, ms), powerOff(cb), onBurst(fn), setLook(obj) }.
 (() => {
   'use strict';

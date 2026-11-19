@@ -2,11 +2,11 @@
 
 ThinkPad T14 (Gen 1 AMD) under Openbox: every Fn key works and shows a small indicator at
 the bottom centre of the screen. The app is called **Zorro** (F9, rofi "Zorro", `zorro-settings`). It opens on **Home**
-(cards for sound, camera, printer, network, power, system); the sidebar has the tabs **Theme**
-(presets like Chromatic sea for login, lock screen and wallpaper together, plus your own),
-**Desktop** (wallpaper, Dialer, info circle, overlays, windows, languages, this app), **Login
-screen** (every effect), **Hardware**, **Audio**, **Power**, **Network** and **Accounts**. The
-ThinkPad-specific pages:
+(cards for sound, camera, printer, network, power, system); the gear shows the tabs **Network**,
+**Audio**, **Power**, **Hardware**, **Desktop** (wallpaper, Dialer, info circle, overlays, windows,
+languages, this app), **Look** (theme presets like Chromatic sea for login, lock screen and
+wallpaper together, plus your own; every login / lock screen effect; face unlock) and
+**Accounts**. The ThinkPad-specific pages:
 
 - **Keys**: what each Fn key does, and what the star key (F12 ★) does.
 - **Power**: power mode on charger / battery (TLP platform profile), charge limit
@@ -23,7 +23,7 @@ ThinkPad-specific pages:
   adds / removes the hunspell dictionaries (`zorro-lang-helper`, asks a password) and sets
   Firefox (a block in every profile's user.js, the web apps too) and Obsidian (its
   Preferences, while it is closed). `python3 -m zsettings.lang apply` sets it again.
-- **Face unlock** (Login screen): `apps/zorro-face` — learn, test, delete, where the icon shows.
+- **Face unlock** (Look tab): `apps/zorro-face` — learn, test, delete, where the icon shows.
 
 - **Hardware**: every device with ✓ / ⚠, driver and a test: webcam preview (VLC), mic
   mute + record-and-play-back test, speaker left/right test, Bluetooth on/off, connect /

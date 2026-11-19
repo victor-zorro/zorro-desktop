@@ -1,4 +1,4 @@
-"""Login screen → Face unlock: zorro-face (the IR camera) learns your face; the lock screen
+"""Look → Face unlock: zorro-face (the IR camera) learns your face; the lock screen
 and login screen get a face icon that checks your face when pressed. The password always works too."""
 import getpass
 import json

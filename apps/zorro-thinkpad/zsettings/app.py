@@ -19,7 +19,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
 
-# ---- the app window: Home (often used) + the gear: Theme, Desktop, Login screen, Hardware, Audio, Power, Network ---
+# ---- the app window: Home (often used) + the gear: Network, Audio, Power, Hardware, Desktop, Look, Accounts ---
 
 class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
@@ -83,15 +83,14 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         desk.section('text', 'Text & colours', self.text_page())
         desk.section('lang', 'Languages', self.lang_page())
         desk.section('applook', 'This app', self.fx_page('app'))
-        login = Group()
+        login = Group()                 # Look: the theme presets, then the login / lock screen itself
+        login.section('theme', 'Theme', self.theme_page())
         login.section('look', 'Login & lock screen', self.look_page())
         login.section('face', 'Face unlock', self.face_page())
-        theme = Group()
-        theme.section('theme', 'Theme', self.theme_page())
-        for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),
-                               ('login', 'Login screen', login), ('hardware', 'Hardware', hw),
-                               ('audio', 'Audio', snd), ('power', 'Power', power),
-                               ('network', 'Network', net), ('accounts', 'Accounts', acc)):
+        for name, title, g in (('network', 'Network', net), ('audio', 'Audio', snd),
+                               ('power', 'Power', power), ('hardware', 'Hardware', hw),
+                               ('desktop', 'Desktop', desk), ('login', 'Look', login),
+                               ('accounts', 'Accounts', acc)):
             stack.add_titled(g.widget(), name, title)
             self.groups[name] = g
             g.select(select)

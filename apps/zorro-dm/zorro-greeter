@@ -29,7 +29,7 @@ LOOK_FILE = os.environ.get('ZORRO_LOOK_FILE', '/etc/zorro-dm/look.json')
 
 
 def look_script():
-    """the background look (Zorro app → Login screen) for the theme's fx.js"""
+    """the background look (Zorro app → Look) for the theme's fx.js"""
     try:
         with open(LOOK_FILE) as fh:
             look = json.load(fh)

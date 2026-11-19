@@ -250,7 +250,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   button style, one word per action ("Check again" vs "Refresh" vs "Scan").
 
 - [ ] **3.4 Settings app: tab order and one home per setting** (M)
-  Done: d ("Zorro" everywhere, tooltip, README). Open: a, b, c: they move where things are; ask Vincent.
+  Done: a (Vincent said go, 2026-11-19), d. Open: b, c (offer first).
   `zsettings/app.py` 53-93.
   a) Tabs: Network, Audio, Power, Hardware, Desktop, Look, Accounts. Merge Theme and Login
      screen into "Look", Presets first.

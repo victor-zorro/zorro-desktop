@@ -1,4 +1,4 @@
-"""app: Theme and Login screen tabs"""
+"""app: the Look tab (theme presets, login / lock screen)"""
 import json
 import os
 import re
@@ -16,7 +16,7 @@ from gi.repository import GLib, Gdk, Gtk
 
 
 class LookPages:
-    """Theme tab and Login screen tab (a mixin of the app window)"""
+    """the Look tab: theme presets and the login / lock screen (a mixin of the app window)"""
 
     # -- theme presets: one look for login, lock screen and wallpaper
     def theme_page(self):
@@ -67,7 +67,7 @@ class LookPages:
         box.add(heading('Chromatic sea and other looks', 'Presets'))
         box.add(flow(theme_presets().items()))
         box.add(note('A theme sets the login screen, the lock screen and the wallpaper '
-                     'together. Fine-tune it in the Login screen tab.'))
+                     'together. Fine-tune it under Login & lock screen.'))
 
         box.add(heading('Your own presets', 'Your presets'))
         mine = custom_presets()
@@ -82,7 +82,7 @@ class LookPages:
         row.add(self.theme_name)
         row.add(save)
         box.add(row)
-        box.add(note('Saves what the Login screen tab shows now (also unsaved changes).'))
+        box.add(note('Saves what Login & lock screen shows now (also unsaved changes).'))
         box.footer(self.theme_msg)
         return box
 
@@ -112,7 +112,7 @@ class LookPages:
         threading.Thread(target=work, daemon=True).start()
 
     def theme_done(self, msg, ok):
-        if ok:                                  # rebuild: Login screen tab shows the new look
+        if ok:                                  # rebuild: Login & lock screen shows the new look
             app = self.get_application()
             self.destroy()
             win = type(self)(app, select='theme:0')
@@ -129,7 +129,7 @@ class LookPages:
             return
         pid = 'my-' + re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
         mine = custom_presets()
-        mine[pid] = {'name': name, 'about': 'Saved from the Login screen tab',
+        mine[pid] = {'name': name, 'about': 'Saved from Login & lock screen',
                      'look': dict(getattr(self, 'look', LOOK_DEFAULTS))}
         write_atomic(CUSTOM_PRESETS, json.dumps(mine, indent=2) + '\n')
         app = self.get_application()
@@ -177,7 +177,7 @@ class LookPages:
             view.set_background_color(black)
             view.connect('context-menu', lambda *a: True)
             view.set_size_request(-1, 210)
-            # the WebGL page (a web process) starts when the Login screen tab is first opened
+            # the WebGL page (a web process) starts when the Look tab is first opened
             self.when_shown('login', lambda v=view: v.load_uri('file://' + str(DM_DIR / 'theme' / 'secondary.html')))
             frame = Gtk.Box(margin_start=18, margin_end=18, margin_top=14)
             view.set_hexpand(True)

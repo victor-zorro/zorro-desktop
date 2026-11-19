@@ -33,7 +33,7 @@ lock screen and, if you want, the login. The password always works too.
 sudo apps/zorro-face/install.sh      # models, /usr/local/bin/zorro-face, polkit rule
 zorro-face status zorro
 ```
-Learn your face in the Zorro app → Login screen → Face unlock (asks your password).
+Learn your face in the Zorro app → Look → Face unlock (asks your password).
 The login and lock screen show a small face icon under the password field (only when a
 face is learned); pressing it runs `zorro-face verify USER` in zorro-dm. Nothing scans by
 itself, and the password keeps working while it looks.
