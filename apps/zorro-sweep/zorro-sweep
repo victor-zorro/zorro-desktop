@@ -19,6 +19,7 @@ Progress: ~/.local/state/zorro-sweep/<vault>.json (which notes you kept)
 """
 import json
 import math
+import random
 import os
 import re
 import shutil
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import zlib
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +36,7 @@ gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
 gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+import cairo  # noqa: E402
 
 HERE = Path(os.path.realpath(__file__)).parent
 HOME = Path.home()
@@ -61,6 +64,7 @@ CYAN = (0.10, 0.90, 1.0)
 GREEN = (0.30, 1.0, 0.62)
 ROUND = 10                      # keep this many, then sort them
 LIFTED = 0.3                    # Sort: a picked-up card shrinks to this, to see the notebooks
+SHAPES = ('circle', 'hex', 'squircle', 'oct', 'pill', 'blob', 'diamond')   # notebook forms
 SWIPE = 150                     # px past which a let-go counts as a swipe
 IMG = re.compile(r'\.(png|jpe?g|gif|webp|bmp|svg)$', re.I)
 GAP = '<span size="4000"> </span>'     # an empty line, made small
@@ -343,6 +347,7 @@ class Sweep(Gtk.Window):
         self.drag = None                   # (x, y) where the drag started
         self.wheel_at = 0.0                # touchpad swipe: last scroll event
         self.scroll = 0.0                  # the preview, scrolled down
+        self.zoom = 1.0                    # the preview, zoomed in (Ctrl+scroll, pinch, + -)
         self.fly = None                    # (start, from dx, to dx, to dy, then)
         self.enter_at = time.monotonic()   # new card zooms in
         self.toast, self.toast_at = '', 0.0
@@ -384,7 +389,7 @@ class Sweep(Gtk.Window):
         self.area = Gtk.DrawingArea(vexpand=True, can_focus=True)
         self.area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK |
                              Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK |
-                             Gdk.EventMask.SMOOTH_SCROLL_MASK)
+                             Gdk.EventMask.SMOOTH_SCROLL_MASK | Gdk.EventMask.TOUCHPAD_GESTURE_MASK)
         self.area.connect('draw', self.draw_bg)
         self.snow = None
         try:                                # the theme's particles (apps/zorro-fx)
@@ -398,6 +403,7 @@ class Sweep(Gtk.Window):
         self.area.connect('motion-notify-event', self.motion)
         self.area.connect('button-release-event', self.release)
         self.area.connect('scroll-event', self.wheel)
+        self.area.connect('event', self.pinch)
         box.add(self.area)
         self.add(box)
         self.connect('key-press-event', self.key)
@@ -490,6 +496,7 @@ class Sweep(Gtk.Window):
             self.b_sort.set_active(True)
             return
         self.dx = self.dy = self.scroll = 0.0
+        self.zoom = 1.0
         self.lift, self.grab = 0.0, (0.0, 0.0)
         self.hover = None
         self.enter_at = time.monotonic()
@@ -513,20 +520,26 @@ class Sweep(Gtk.Window):
         text = self.v.read(path)
         meta, body = front(text)
         pics = [f for f in self.v.attachments(path, text) if IMG.search(f.name)]
-        pix = None
-        for f in pics[:3]:
-            try:
-                pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(f), 560, 240, True)
+        pix = []
+        for f in pics[:6]:
+            if len(pix) == 4:
                 break
+            try:
+                p = GdkPixbuf.Pixbuf.new_from_file(str(f))
             except GLib.Error:
-                pass
+                continue
+            k = min(1.0, 1800 / max(p.get_width(), p.get_height()))
+            if k < 1:
+                p = p.scale_simple(int(p.get_width() * k), int(p.get_height() * k),
+                                   GdkPixbuf.InterpType.BILINEAR)
+            pix.append(p)
         n_att = len(self.v.attachments(path, text))
         sub = ago(when(meta, path))
         if n_att:
             sub += f' · {n_att} attachment{"s" if n_att > 1 else ""}'
         words = len(body.split())
         sub += f' · {words} word{"s" if words != 1 else ""}'
-        card = {'path': path, 'title': path.stem, 'sub': sub, 'markup': markup(body), 'pix': pix,
+        card = {'path': path, 'title': path.stem, 'sub': sub, 'markup': markup(body), 'pix': pix, 'words': words,
                 'scores': {}}
         vec = self.meaning.of(path)
         if vec is not None:
@@ -977,6 +990,12 @@ class Sweep(Gtk.Window):
             self.open_obsidian(self.card['path'])
         elif k in ('space', 'Down'):
             self.decide('skip')
+        elif k in ('plus', 'equal', 'KP_Add'):
+            self.zoom_by(1.25)
+        elif k in ('minus', 'KP_Subtract'):
+            self.zoom_by(1 / 1.25)
+        elif k in ('0', 'KP_0') and (ctrl or self.mode == 'sweep'):
+            self.zoom_by(1 / self.zoom)
         elif k in ('Page_Down',):
             self.scroll += 300
         elif k in ('Page_Up',):
@@ -1051,8 +1070,32 @@ class Sweep(Gtk.Window):
             return self.decide('dest', self.hover)
         self.fly = (time.monotonic(), self.dx, 0, 0, None)     # spring back
 
+    def zoom_by(self, f):
+        z = max(1.0, min(4.0, self.zoom * f))
+        if abs(z - self.zoom) > 0.001:
+            self.scroll *= z / self.zoom
+            self.zoom = z
+            self.say(f'zoom {round(z * 100)} %' if z > 1 else 'zoom normal')
+            self.area.queue_draw()
+
+    def pinch(self, w, ev):
+        """two fingers apart / together on the touchpad: zoom the preview"""
+        if ev.type != Gdk.EventType.TOUCHPAD_PINCH or not self.card:
+            return False
+        if ev.phase == Gdk.TouchpadGesturePhase.BEGIN:
+            self.pinch_from = self.zoom
+        elif ev.phase == Gdk.TouchpadGesturePhase.UPDATE:
+            self.zoom_by(getattr(self, 'pinch_from', self.zoom) * ev.scale / self.zoom)
+        return True
+
     def wheel(self, w, ev):
         ok, dx, dy = ev.get_scroll_deltas()
+        if ev.state & Gdk.ModifierType.CONTROL_MASK and self.card:     # Ctrl + scroll: zoom
+            if not ok:
+                dy = {Gdk.ScrollDirection.UP: -1, Gdk.ScrollDirection.DOWN: 1}.get(ev.direction, 0)
+            if dy:
+                self.zoom_by(1.12 ** (-dy if not ok else -dy * 0.6))
+            return True
         if not ok:                              # a mouse wheel: up / down / left / right
             d = ev.direction
             dx = {Gdk.ScrollDirection.LEFT: -1, Gdk.ScrollDirection.RIGHT: 1}.get(d, 0)
@@ -1113,33 +1156,108 @@ class Sweep(Gtk.Window):
         return True
 
     # ---- layout --------------------------------------------------------------------------
-    def card_rect(self):
+    def card_rect(self, base=False):
         W, H = self.area.get_allocated_width(), self.area.get_allocated_height()
         if self.mode == 'sort':
             cw = min(560, W - 2 * 250)
         else:
             cw = min(700, W - 80)
+        if not base and self.zoom > 1:      # zoomed in: wider, up to the whole window
+            cw = min(W - 40, cw * min(self.zoom, 2.4))
         ch = H - 180                       # room for the score above, undo + keys below
         return W / 2, 62 + ch / 2, max(cw, 300), max(ch, 300)
 
-    def tile_rects(self):
-        """Sort: the notebooks, left and right of the card: (centre x, centre y, w, h)"""
+    def tile_layout(self):
+        """Sort: the notebooks scattered left and right of the card, each its own form, bigger
+        when it holds more notes: [x, y, r, shape, tilt, (rx, ry)], kept while nothing changes"""
         W, H = self.area.get_allocated_width(), self.area.get_allocated_height()
-        cx, cy, cw, ch = self.card_rect()
-        tw, th, gap = min(220, (W - cw) / 2 - 30), 62, 12
-        n = len(self.dests)
-        rows = math.ceil(n / 2)
-        top = cy - (rows * (th + gap) - gap) / 2 + th / 2
-        out = []
-        for i in range(n):
-            side = -1 if i % 2 == 0 else 1
-            x = cx + side * (cw / 2 + 24 + tw / 2)
-            out.append((x, top + (i // 2) * (th + gap), tw, th))
-        return out
+        cx, cy, cw, ch = self.card_rect(base=True)
+        key = (W, H, cw, tuple((d['name'], d.get('n')) for d in self.dests))
+        if getattr(self, '_layout', None) and self._layout[0] == key:
+            return self._layout[1]
+        bands = ((20, cx - cw / 2 - 24), (cx + cw / 2 + 24, W - 20))
+        top, bot = 64, H - 56
+        rows = max(1, math.ceil(len(self.dests) / 2))
+        tiles = []
+        for i, d in enumerate(self.dests):
+            rnd = random.Random(zlib.crc32(d['name'].encode()))
+            n = d.get('n')
+            if d['path']:
+                r = min(88, 50 + 15 * math.log10((n or 0) + 1))
+                shape = SHAPES[i % len(SHAPES)]
+            else:                               # "stays" and "+ new": small dashed rings
+                r, shape = 46, 'ring'
+            rx, ry = (r * 1.45, r * 0.8) if shape == 'pill' else (r, r)
+            b = bands[i % 2]
+            x = rnd.uniform(b[0] + rx, max(b[0] + rx, b[1] - rx))
+            y = top + (bot - top) * ((i // 2 + rnd.uniform(0.2, 0.8)) / rows)
+            tiles.append([x, y, r, shape, rnd.uniform(-0.3, 0.3), (rx, ry), b])
+        for _ in range(240):                    # push apart until nothing overlaps
+            calm = True
+            for i, a in enumerate(tiles):
+                for c in tiles[i + 1:]:
+                    dx, dy = c[0] - a[0], c[1] - a[1]
+                    dist = math.hypot(dx, dy) or 0.01
+                    need = max(a[5]) * 1.08 + max(c[5]) * 1.08 + 16
+                    if dist < need:
+                        calm = False
+                        push = (need - dist) / 2
+                        a[0] -= dx / dist * push
+                        a[1] -= dy / dist * push
+                        c[0] += dx / dist * push
+                        c[1] += dy / dist * push
+            for t in tiles:                     # stay in its band, on the screen
+                (rx, ry), b = t[5], t[6]
+                t[0] = min(max(t[0], b[0] + rx), max(b[0] + rx, b[1] - rx))
+                t[1] = min(max(t[1], top + ry), max(top + ry, bot - ry))
+            if calm:
+                break
+        self._layout = (key, tiles)
+        return tiles
+
+    def tile_rects(self):
+        """(centre x, centre y, w, h) of every notebook"""
+        return [(t[0], t[1], 2 * t[5][0], 2 * t[5][1]) for t in self.tile_layout()]
+
+    def shape_path(self, cr, t, grow=1.0):
+        """the outline of a notebook's form around its centre"""
+        x, y, r, shape, tilt = t[:5]
+        r *= grow
+        cr.save()
+        cr.translate(x, y)
+        cr.rotate(tilt if shape not in ('circle', 'ring') else 0)
+        cr.new_path()
+        if shape in ('circle', 'ring'):
+            cr.arc(0, 0, r, 0, 2 * math.pi)
+        elif shape == 'pill':
+            w, h = r * 1.45, r * 0.8
+            cr.arc(-w + h, 0, h, math.pi / 2, 3 * math.pi / 2)
+            cr.arc(w - h, 0, h, -math.pi / 2, math.pi / 2)
+            cr.close_path()
+        else:
+            k = {'hex': 6, 'oct': 8}.get(shape)
+            for j in range(96 if not k else k):
+                a = 2 * math.pi * j / (96 if not k else k)
+                if k:
+                    rr = r * (1.06 if k == 6 else 1.03)
+                    a += math.pi / k
+                elif shape == 'blob':
+                    rr = r * (1 + 0.07 * math.sin(3 * a + tilt * 9) + 0.04 * math.sin(5 * a))
+                else:                           # squircle / diamond: superellipses
+                    e = 4.0 if shape == 'squircle' else 1.5
+                    c, s_ = math.cos(a), math.sin(a)
+                    rr = r * (0.97 if e == 4 else 1.2) / ((abs(c) ** e + abs(s_) ** e) ** (1 / e))
+                px, py = rr * math.cos(a), rr * math.sin(a)
+                (cr.line_to if j else cr.move_to)(px, py)
+            cr.close_path()
+        cr.restore()
 
     def tile_at(self, x, y):
-        for i, (tx, ty, tw, th) in enumerate(self.tile_rects()):
-            if abs(x - tx) < tw / 2 and abs(y - ty) < th / 2:
+        if not hasattr(self, '_hit'):
+            self._hit = cairo.Context(cairo.ImageSurface(cairo.FORMAT_A8, 1, 1))
+        for i, t in enumerate(self.tile_layout()):
+            self.shape_path(self._hit, t, 1.05)
+            if self._hit.in_fill(x, y):
                 return i
         return None
 
@@ -1201,8 +1319,8 @@ class Sweep(Gtk.Window):
             for off, rgb, a in ((-1.5, RED, 0.6), (1.5, CYAN, 0.6), (0, FG, 1)):
                 self.text(cr, label, self.pointer[0] + off, y, 11, rgb, a, bold=True, align='center')
         # bottom line: what the keys do
-        hint = ('← keep   → delete   space skip   O open in Obsidian   Ctrl+Z undo' if self.mode == 'sweep'
-                else 'drag onto a notebook   1-9 or Enter (best match)   space skip   Ctrl+Z undo')
+        hint = ('← keep   → delete   space skip   + − zoom   O open in Obsidian   Ctrl+Z undo' if self.mode == 'sweep'
+                else 'drag onto a notebook   1-9 or Enter (best match)   space skip   + − zoom   Ctrl+Z undo')
         self.text(cr, hint, W / 2, H - 30, 9, DIM, align='center')
         self.draw_score(cr, W)
         self.draw_undo(cr, W, H)
@@ -1343,9 +1461,8 @@ class Sweep(Gtk.Window):
     def contents(self, cw, ch):
         """the note drawn flat into a picture once (cheap to redraw, and clipping text in a
         tilted card goes wrong on some X servers)"""
-        import cairo
         c = self.card
-        key = (id(c), int(self.scroll), cw, ch)
+        key = (id(c), int(self.scroll), cw, ch, self.zoom)
         if c.get('surf_key') == key:
             return c['surf']
         s = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(cw), int(ch))
@@ -1357,28 +1474,43 @@ class Sweep(Gtk.Window):
         cr.rectangle(1, top, cw - 2, ch - top - 1)
         cr.clip()
         lay = PangoCairo.create_layout(cr)
-        lay.set_font_description(Pango.FontDescription('DejaVu Sans 10.5'))
+        size = 10.5 if c['words'] > 60 or c['pix'] else (14 if c['words'] > 15 else 17)
+        lay.set_font_description(Pango.FontDescription(f'DejaVu Sans {size * self.zoom:.1f}'))
         lay.set_width(int((cw - 2 * pad) * Pango.SCALE))
         lay.set_wrap(Pango.WrapMode.WORD_CHAR)
         try:
             lay.set_markup(c['markup'], -1)
         except GLib.Error:
             lay.set_text(re.sub(r'<[^>]+>', '', c['markup']), -1)
-        lh = lay.get_pixel_size()[1]
-        ph = c['pix'].get_height() + 16 if c['pix'] else 0
+        lh = lay.get_pixel_size()[1] if c['markup'].strip() else 0
+        # pictures: as big as the card allows; with little text they share the free room
+        room = ch - top - 24
+        free = max(room * 0.45, room - lh - 20) / max(1, len(c['pix'])) - 12
+        sizes = []
+        for p in c['pix']:
+            pw, ph_ = p.get_width(), p.get_height()
+            k = min((cw - 2 * pad) / pw, max(free, 160) / ph_, 4.0) * self.zoom
+            k = min(k, (cw - 2 * pad) / pw)             # never wider than the card
+            sizes.append((pw * k, ph_ * k, k))
+        ph = sum(h + 12 for _, h, _ in sizes)
         most = max(0, ph + lh + 30 - (ch - top))        # scrolled no further than the end
         if self.scroll > most:
             self.scroll = most
         oy = top - int(self.scroll)
-        if c['pix']:
-            pw = c['pix'].get_width()
-            if c['pix'].get_has_alpha():                # a logo on see-through: light backing
-                cr.rectangle(pad, oy, pw, ph - 16)
+        for p, (w, h, k) in zip(c['pix'], sizes):
+            x = pad + (cw - 2 * pad - w) / 2
+            if p.get_has_alpha():                       # a logo on see-through: light backing
+                cr.rectangle(x, oy, w, h)
                 cr.set_source_rgba(1, 1, 1, 0.85)
                 cr.fill()
-            Gdk.cairo_set_source_pixbuf(cr, c['pix'], pad, oy)
+            cr.save()
+            cr.translate(x, oy)
+            cr.scale(k, k)
+            Gdk.cairo_set_source_pixbuf(cr, p, 0, 0)
+            cr.get_source().set_filter(cairo.FILTER_GOOD)
             cr.paint_with_alpha(0.92)
-            oy += ph
+            cr.restore()
+            oy += h + 12
         cr.set_source_rgba(*FG, 0.92)
         cr.move_to(pad, oy)
         PangoCairo.show_layout(cr, lay)
@@ -1391,34 +1523,70 @@ class Sweep(Gtk.Window):
             cr.rectangle(0, ch - 60, cw, 60)
             cr.set_source(g)
             cr.fill()
-        c['surf'], c['surf_key'] = s, (id(c), int(self.scroll), cw, ch)
+        c['surf'], c['surf_key'] = s, key
         return s
 
     def draw_tiles(self, cr):
         best = self.card['best'] if self.card else None
         scores = self.card['scores'] if self.card else {}
-        for i, (tx, ty, tw, th) in enumerate(self.tile_rects()):
+        for i, t in enumerate(self.tile_layout()):
             d = self.dests[i]
-            x, y = tx - tw / 2, ty - th / 2
+            x, y, r = t[0], t[1], t[2]
             hot = i == self.hover
+            grow = 1.08 if hot else 1.0
             line = CYAN if (i == best or hot) else (1, 1, 1)
-            self.frame(cr, x, y, tw, th, line, 0.8 if hot else (0.55 if i == best else 0.16), 0.55)
-            if hot:
-                cr.rectangle(x, y, tw, th)
-                cr.set_source_rgba(*CYAN, 0.12)
-                cr.fill()
-            self.text(cr, f'{i + 1}', x + 8, y + 8, 8, DIM)
-            self.text(cr, d['name'], x + 24, y + 8, 10, FG, width=tw - 32)
-            sub = d['sub'] + (f' · {d["n"]} notes' if d.get('n') is not None and d['path'] else '')
-            self.text(cr, 'best match · ' + sub if i == best else sub, x + 24, y + 28, 8,
-                      CYAN if i == best else DIM, width=tw - 32)
+            if hot or i == best:                # a soft glow around the hot one
+                self.shape_path(cr, t, grow * 1.06)
+                cr.set_source_rgba(*CYAN, 0.10 if hot else 0.05)
+                cr.set_line_width(8)
+                cr.stroke()
+            self.shape_path(cr, t, grow)
+            cr.set_source_rgba(*(CYAN if hot else (0, 0, 0)), 0.14 if hot else 0.6)
+            cr.fill_preserve()
+            cr.set_source_rgba(*line, 0.85 if hot else (0.6 if i == best else 0.22))
+            cr.set_line_width(1.2)
+            if t[3] == 'ring':
+                cr.set_dash([5, 5])
+            cr.stroke()
+            cr.set_dash([])
+            # the words, upright whatever the tilt
+            w = t[5][0] * (1.45 if t[3] != 'pill' else 1.5)
+            lay = PangoCairo.create_layout(cr)
+            fd = Pango.FontDescription('DejaVu Sans Mono 10')
+            fd.set_weight(Pango.Weight.BOLD)
+            lay.set_font_description(fd)
+            lay.set_text(max(d['name'].split() or [''], key=len), -1)
+            long = lay.get_pixel_size()[0]
+            if long > w:                        # a long word: smaller, rather than cut in two
+                fd.set_size(int(max(7.5, 10 * w / long) * Pango.SCALE))
+                lay.set_font_description(fd)
+            lay.set_width(int(w * Pango.SCALE))
+            lay.set_wrap(Pango.WrapMode.WORD)
+            lay.set_height(-2)
+            lay.set_ellipsize(Pango.EllipsizeMode.END)
+            lay.set_alignment(Pango.Alignment.CENTER)
+            lay.set_text(d['name'], -1)
+            nh = lay.get_pixel_size()[1]
+            ty = y - nh / 2 - 4
+            self.text(cr, f'{i + 1}', x, ty - 18, 8, CYAN if hot else DIM, align='center')
+            cr.set_source_rgba(*FG, 1)
+            cr.move_to(x - w / 2, ty)
+            PangoCairo.show_layout(cr, lay)
+            sub = d['sub'] if not d.get('n') else f'{d["n"]} notes'
+            if d.get('vault'):
+                sub = 'vault · ' + sub
+            self.text(cr, 'best match' if i == best else sub, x, ty + nh + 3, 8,
+                      CYAN if i == best else DIM, align='center', width=w)
             s = scores.get(i)
             if s is not None:                   # how close in meaning: a thin bar
                 k = max(0.0, min(1.0, (s - 0.70) / 0.2))
-                cr.rectangle(x + 24, y + th - 10, (tw - 40) * k, 2)
+                bw = min(w, r * 1.1)
+                cr.rectangle(x - bw / 2, ty + nh + 20, bw, 2)
+                cr.set_source_rgba(1, 1, 1, 0.08)
+                cr.fill()
+                cr.rectangle(x - bw / 2, ty + nh + 20, bw * k, 2)
                 cr.set_source_rgba(*(CYAN if i == best else DIM), 0.9)
                 cr.fill()
-
 
 def pick_vault(arg):
     if arg:

@@ -14,7 +14,8 @@ It plays in **rounds**:
 
    The notebook closest in meaning lights up as **best match**. It uses the zorro-search
    index, and Enter sends the note there. Each tile shows how many notes that notebook
-   already holds.
+   already holds. The notebooks lie scattered beside the card, each in its own form
+   (circle, hexagon, blob…), bigger when it holds more notes.
 3. "ROUND n DONE", and the next 10.
 
 The top of the screen shows:
@@ -40,6 +41,9 @@ The two buttons at the top left switch by hand, for example to sort a half-full 
 | O or double-click | open in Obsidian | open in Obsidian |
 | Ctrl+Z / Backspace, or the undo button under the card | undo | undo |
 | Page Up/Down, scroll | scroll the note | scroll the note |
+| + / − / 0, Ctrl+scroll, pinch | zoom the note in / out / back | zoom |
+
+A short note gets bigger letters, and pictures fill the room the text leaves.
 
 ## Undo
 The **undo** button under the card shows what it takes back (for example "kept · Mobile Unit
