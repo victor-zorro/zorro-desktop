@@ -33,7 +33,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
 gi.require_version('PangoCairo', '1.0')
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango, PangoCairo  # noqa: E402
 
 HERE = Path(os.path.realpath(__file__)).parent
 HOME = Path.home()
@@ -41,6 +41,18 @@ OBSIDIAN_JSON = HOME / '.config/obsidian/obsidian.json'
 STATE_DIR = Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state')) / 'zorro-sweep'
 INDEX = Path(os.environ.get('XDG_CACHE_HOME', HOME / '.cache')) / 'zorro-search'
 
+CSS = b'''
+window, box, list, row, scrolledwindow, viewport { background: #05070a; }
+label { color: #9a9aa3; }
+button { background: rgba(255,255,255,.04); background-image: none; border: 1px solid rgba(255,255,255,.16);
+         border-radius: 0; box-shadow: none; text-shadow: none; }
+button box, combobox box { background: transparent; }
+button label, button cellview { color: #d8d8de; }
+button:hover { border-color: #19e6ff; }
+button:checked { background: rgba(25,230,255,.14); border-color: #19e6ff; }
+entry { background: #0d1016; color: #d8d8de; border: 1px solid rgba(255,255,255,.25); border-radius: 0; }
+menu, .menu { background: #0b0d12; } menuitem label { color: #d8d8de; }
+'''
 BG = (0.02, 0.027, 0.04)
 FG = (0.85, 0.85, 0.87)
 DIM = (0.44, 0.44, 0.47)
@@ -246,9 +258,32 @@ def move(src, dst, ops):
     ops.append(('mv', src, dst))
 
 
+def obsidian_open():
+    return subprocess.run(['pgrep', '-x', 'obsidian'], capture_output=True).returncode == 0
+
+
+def set_vault_path(old, new):
+    """Obsidian's vault list: point a vault at a new folder (new=None: take it off the list).
+    Only while Obsidian is closed: it writes this file itself."""
+    d = json.loads(OBSIDIAN_JSON.read_text())
+    for k, v in list(d['vaults'].items()):
+        if Path(v['path']) == old:
+            if new is None:
+                del d['vaults'][k]
+            else:
+                v['path'] = str(new)
+    tmp = OBSIDIAN_JSON.with_suffix('.zorro-tmp')
+    tmp.write_text(json.dumps(d))
+    os.replace(tmp, OBSIDIAN_JSON)
+
+
 def undo_ops(ops):
     for op in reversed(ops):
-        if op[0] == 'mv':
+        if op[0] == 'mkdir':
+            shutil.rmtree(op[1]) if op[1].is_dir() and not any(op[1].iterdir()) else None
+        elif op[0] == 'vaultpath':
+            set_vault_path(op[2], op[1])
+        elif op[0] == 'mv':
             op[1].parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(op[2]), str(op[1]))
         elif op[0] == 'cp':
@@ -315,6 +350,9 @@ class Sweep(Gtk.Window):
         self.hover = None                  # Sort: the notebook under the card
         self.card = None                   # cached rendering of the current note
         self.banner = None                 # (title, sub, start): round start / round done
+        self.undo_rect = None              # the undo button under the card (x, y, w, h)
+        self.undo_hot = False
+        self.nb_win = None                 # the Notebooks window, when open
         self.dests = []
         self.find_dests()
 
@@ -333,10 +371,10 @@ class Sweep(Gtk.Window):
         self.fill_pick()
         self.pick.connect('changed', lambda c: self.change_vault())
         top.add(self.pick)
-        ub = Gtk.Button(label='Undo')
-        ub.set_tooltip_text('Ctrl+Z')
-        ub.connect('clicked', lambda b: self.do_undo())
-        top.add(ub)
+        nb = Gtk.Button(label='Notebooks')
+        nb.set_tooltip_text('Make, rename or delete notebooks')
+        nb.connect('clicked', lambda b: self.notebooks())
+        top.add(nb)
         box.add(top)
 
         self.area = Gtk.DrawingArea(vexpand=True, can_focus=True)
@@ -361,8 +399,7 @@ class Sweep(Gtk.Window):
         self.connect('key-press-event', self.key)
         self.connect('destroy', lambda w: (self.v.save(), Gtk.main_quit()))
         css = Gtk.CssProvider()
-        css.load_from_data(b'window, box { background: #05070a; } label { color: #9a9aa3; } '
-                          b'button box, combobox box { background: transparent; }')
+        css.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css, 800)
         self.show_all()
         self.area.grab_focus()
@@ -605,11 +642,245 @@ class Sweep(Gtk.Window):
         self.send(p, d)
         return True
 
+    # ---- notebooks: make, rename, delete ------------------------------------------------------
+    def ask_name(self, title, button, text=''):
+        dlg = Gtk.Dialog(title=title, transient_for=self, modal=True)
+        dlg.add_buttons('Cancel', Gtk.ResponseType.CANCEL, button, Gtk.ResponseType.OK)
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        e = Gtk.Entry(activates_default=True, margin=12, text=text, placeholder_text='name')
+        dlg.get_content_area().add(e)
+        dlg.show_all()
+        ok = dlg.run() == Gtk.ResponseType.OK
+        name = e.get_text().strip().strip('/.').replace('/', '-')
+        dlg.destroy()
+        return name if ok and name else None
+
+    def message(self, text, secondary='', buttons=Gtk.ButtonsType.OK):
+        m = Gtk.MessageDialog(transient_for=self, modal=True, text=text, secondary_text=secondary,
+                              buttons=buttons)
+        r = m.run()
+        m.destroy()
+        return r
+
+    def refresh(self, say):
+        self.find_dests()
+        self.fill_pick()
+        self.say(say)
+        self.next_card()
+        if self.nb_win:
+            self.nb_fill()
+
+    def nb_new(self):
+        name = self.ask_name(f'New notebook in {self.v.path.name}', 'Make')
+        if not name:
+            return
+        f = self.v.path / name
+        if f.exists():
+            self.message(f'There is already a "{name}".')
+            return
+        f.mkdir()
+        self.undo.append(('folder', name, [('mkdir', f)], False))
+        self.refresh(f'new notebook: {name}')
+
+    def nb_rename(self, d):
+        old = d['path']
+        if d['vault'] and obsidian_open():
+            self.message('Close Obsidian first', f'"{old.name}" is a vault: Obsidian keeps a list of its '
+                         'vaults and writes it while it runs. Close Obsidian, then rename again.\n\n'
+                         'Obsidian Sync stays connected; the online copy keeps its old name (rename it in '
+                         'Obsidian: Settings → Sync → Manage).')
+            return
+        name = self.ask_name(f'Rename "{old.name}"', 'Rename', old.name)
+        if not name or name == old.name:
+            return
+        new = old.with_name(name)
+        if new.exists():
+            self.message(f'There is already a "{name}".')
+            return
+        ops = []
+        try:
+            move(old, new, ops)
+            if d['vault']:
+                set_vault_path(old, new)
+                ops.append(('vaultpath', old, new))
+        except OSError as e:
+            undo_ops(ops)
+            self.message('Could not rename', str(e))
+            return
+        self.undo.append(('folder', f'{old.name} → {name}', ops, d['vault']))
+        self.refresh(f'renamed to {name}')
+
+    def nb_delete(self, d):
+        if d['vault']:
+            return self.vault_delete(d)
+        f = d['path']
+        notes = [p for p in f.rglob('*.md')]
+        dlg = Gtk.Dialog(title=f'Delete "{f.name}"', transient_for=self, modal=True)
+        dlg.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Delete notebook', Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(14)
+        box.add(Gtk.Label(xalign=0, label=f'"{f.name}", a folder in {self.v.path.name}, '
+                                          f'{len(notes)} note{"s" if len(notes) != 1 else ""}.'))
+        back = Gtk.RadioButton(label=f'Its notes go back to {self.v.path.name}, to sweep again')
+        gone = Gtk.RadioButton(label='Delete its notes too', group=back)
+        if notes:
+            box.add(back)
+            box.add(gone)
+        box.add(Gtk.Label(xalign=0, wrap=True, max_width_chars=60, label=(
+            'Obsidian Sync takes this along: the notebook also goes from the online copy and your phone. '
+            'Deleted notes go to the vault\'s .trash folder on this laptop, and Undo brings it all back.')))
+        dlg.show_all()
+        ok = dlg.run() == Gtk.ResponseType.OK
+        to_trash = gone.get_active()
+        dlg.destroy()
+        if not ok:
+            return
+        trash = self.v.path / '.trash'
+        ops = []
+        try:
+            for p in notes:
+                move(p, free_name((trash if to_trash else self.v.path) / p.name), ops)
+            move(f, free_name(trash / f.name), ops)          # the rest: pictures, empty folders
+        except OSError as e:
+            undo_ops(ops)
+            self.message('Could not delete', str(e))
+            return
+        self.undo.append(('folder', f'deleted {f.name}', ops, False))
+        self.v = Vault(self.v.path)
+        self.refresh(f'deleted {f.name}')
+
+    def vault_delete(self, d):
+        f = d['path']
+        n = d.get('n', 0)
+        dlg = Gtk.Dialog(title=f'Delete vault "{f.name}"', transient_for=self, modal=True)
+        dlg.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Delete', Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(14)
+        box.add(Gtk.Label(xalign=0, label=f'"{f.name}" is a vault of its own, {n} notes. Delete it from:'))
+        here = Gtk.CheckButton(label='This laptop (to the Trash, you can still get it back from there)',
+                               active=True)
+        obs = Gtk.CheckButton(label="Obsidian's list of vaults", active=True)
+        web = Gtk.CheckButton(label='Online (Obsidian Sync) and so also from your phone', active=True)
+        for w in (here, obs, web):
+            box.add(w)
+        warn = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        box.add(warn)
+
+        def check(*a):
+            need = here.get_active() or obs.get_active()
+            busy = need and obsidian_open()
+            warn.set_markup('<span foreground="#ff2a4a">Close Obsidian first (it is open), then press '
+                            'Delete.</span>' if busy else
+                            ('Online: Obsidian has no way for other apps to do this, so after Delete you '
+                             'get the 3 clicks to do it in Obsidian.' if web.get_active() else ''))
+        for w in (here, obs, web):
+            w.connect('toggled', check)
+        check()
+        dlg.show_all()
+        while True:
+            r = dlg.run()
+            if r != Gtk.ResponseType.OK:
+                dlg.destroy()
+                return
+            check()
+            if (here.get_active() or obs.get_active()) and obsidian_open():
+                continue
+            break
+        h, o, w = here.get_active(), obs.get_active(), web.get_active()
+        dlg.destroy()
+        done = []
+        try:
+            if o:
+                set_vault_path(f, None)
+                done.append("off Obsidian's list")
+            if h:
+                Gio.File.new_for_path(str(f)).trash(None)
+                done.append('in the Trash')
+        except (OSError, GLib.Error) as e:
+            self.message('Could not delete everything', str(e))
+        self.refresh(f'{f.name}: ' + ', '.join(done) if done else 'nothing deleted')
+        if w:
+            r = self.message(f'Now the online copy of "{f.name}"', (
+                '1. Open Obsidian (any vault).\n'
+                '2. Settings → Sync → next to "Remote vault": Manage.\n'
+                f'3. Press the trash icon next to "{f.name}" and confirm.\n\n'
+                'On your phone, Obsidian keeps its own copy: there, in the vault switcher, '
+                f'Manage vaults → "{f.name}" → Delete.'), Gtk.ButtonsType.OK_CANCEL)
+            if r == Gtk.ResponseType.OK:
+                subprocess.Popen(['xdg-open', 'obsidian://open'], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+
+    def tile_menu(self, d, ev):
+        m = Gtk.Menu()
+        for label, fn in (('Rename…', self.nb_rename), ('Delete…', self.nb_delete)):
+            it = Gtk.MenuItem(label=label)
+            it.connect('activate', lambda i, fn=fn: fn(d))
+            m.append(it)
+        m.show_all()
+        m.attach_to_widget(self.area)
+        m.popup_at_pointer(ev)
+
+    def notebooks(self):
+        """a small window listing the notebooks, to make, rename or delete them"""
+        if self.nb_win:
+            self.nb_win.present()
+            return
+        w = Gtk.Window(title='Notebooks', transient_for=self, default_width=520, default_height=420)
+        w.connect('destroy', lambda x: setattr(self, 'nb_win', None))
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=14)
+        sc = Gtk.ScrolledWindow(vexpand=True)
+        self.nb_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        sc.add(self.nb_list)
+        box.add(sc)
+        new = Gtk.Button(label=f'+ New notebook (a folder in {self.v.path.name})')
+        new.connect('clicked', lambda b: self.nb_new())
+        box.add(new)
+        w.add(box)
+        self.nb_win = w
+        self.nb_fill()
+        w.show_all()
+
+    def nb_fill(self):
+        for c in self.nb_list.get_children():
+            self.nb_list.remove(c)
+        for d in self.dests:
+            if not d['path']:
+                continue
+            row = Gtk.Box(spacing=8, margin=6)
+            lab = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+            lab.set_markup(f'{GLib.markup_escape_text(d["name"])}\n<small>{d["sub"]} · '
+                           f'{d.get("n", 0)} notes</small>')
+            row.add(lab)
+            for label, fn in (('Rename', self.nb_rename), ('Delete', self.nb_delete)):
+                b = Gtk.Button(label=label)
+                b.connect('clicked', lambda b, fn=fn, d=d: fn(d))
+                row.add(b)
+            self.nb_list.add(row)
+        self.nb_list.show_all()
+
     def do_undo(self):
         if not self.undo:
             self.say('nothing to undo')
             return
         u = self.undo.pop()
+        if u[0] == 'folder':                # notebook made / renamed / deleted
+            if u[3] and obsidian_open():
+                self.undo.append(u)
+                self.say('close Obsidian first, then undo')
+                return
+            try:
+                undo_ops(u[2])
+            except OSError as e:
+                self.say(f'could not undo: {e}')
+                return
+            self.v = Vault(self.v.path)
+            self.find_dests()
+            self.fill_pick()
+            self.say('undone')
+            self.next_card()
+            return
         p = u[1]
         try:
             if u[0] == 'keep':
@@ -644,6 +915,19 @@ class Sweep(Gtk.Window):
         self.v.notes.insert(0, p)
         self.say('undone')
         self.next_card()
+        # the card comes back from where it went
+        W, H = self.area.get_allocated_width(), self.area.get_allocated_height()
+        fx, fy = {'keep': (-W, 0), 'delete': (W, 0)}.get(u[0], (0, 0))
+        if u[0] in ('send', 'stay'):
+            i = next((j for j, d in enumerate(self.dests)
+                      if (d.get('stay') if u[0] == 'stay' else d is u[4])), None)
+            if i is not None:
+                tx, ty = self.tile_rects()[i][:2]
+                cx, cy = self.card_rect()[:2]
+                fx, fy = tx - cx, ty - cy
+        if self.card and (fx or fy):
+            self.dx, self.dy = fx, fy
+            self.fly = (time.monotonic(), fx, 0, 0, None)
 
     def decide(self, what, dest=None):
         """fly the card off, then act"""
@@ -706,6 +990,11 @@ class Sweep(Gtk.Window):
 
     def press(self, w, ev):
         self.area.grab_focus()
+        r = self.undo_rect
+        if ev.button == 1 and r and r[0] <= ev.x <= r[0] + r[2] and r[1] <= ev.y <= r[1] + r[3]:
+            if not self.fly:
+                self.do_undo()
+            return True
         if ev.button == 1 and self.card and not self.fly:
             x, y, cw, ch = self.card_rect()
             if abs(ev.x - x) < cw / 2 and abs(ev.y - y) < ch / 2:
@@ -714,11 +1003,21 @@ class Sweep(Gtk.Window):
                 t = self.tile_at(ev.x, ev.y)
                 if t is not None:
                     self.decide('dest', t)
+        if ev.button == 3 and self.mode == 'sort':      # right-click a notebook: its menu
+            t = self.tile_at(ev.x, ev.y)
+            if t is not None and self.dests[t]['path']:
+                self.tile_menu(self.dests[t], ev)
+                return True
         if ev.type == Gdk.EventType._2BUTTON_PRESS and self.card:
             self.open_obsidian(self.card['path'])
         return True
 
     def motion(self, w, ev):
+        r = self.undo_rect
+        hot = bool(r and r[0] <= ev.x <= r[0] + r[2] and r[1] <= ev.y <= r[1] + r[3])
+        if hot != self.undo_hot:
+            self.undo_hot = hot
+            self.area.queue_draw()
         if self.drag:
             self.dx = ev.x - self.drag[0]
             self.dy = (ev.y - self.drag[1]) if self.mode == 'sort' else (ev.y - self.drag[1]) * 0.25
@@ -805,7 +1104,7 @@ class Sweep(Gtk.Window):
             cw = min(560, W - 2 * 250)
         else:
             cw = min(700, W - 80)
-        ch = H - 160                       # room for the score above, the keys below
+        ch = H - 180                       # room for the score above, undo + keys below
         return W / 2, 62 + ch / 2, max(cw, 300), max(ch, 300)
 
     def tile_rects(self):
@@ -884,9 +1183,10 @@ class Sweep(Gtk.Window):
                 else 'drag onto a notebook   1-9 or Enter (best match)   space skip   Ctrl+Z undo')
         self.text(cr, hint, W / 2, H - 30, 9, DIM, align='center')
         self.draw_score(cr, W)
+        self.draw_undo(cr, W, H)
         if now - self.toast_at < 2.2 and self.toast and not self.banner:
             a = min(1, (2.2 - (now - self.toast_at)) / 0.5)
-            self.text(cr, self.toast, W / 2, H - 56, 10, FG, a, align='center')
+            self.text(cr, self.toast, W / 2, 30, 9, FG, a, align='center')
         if self.banner:
             self.draw_banner(cr, W, H, now)
         return False
@@ -929,6 +1229,43 @@ class Sweep(Gtk.Window):
         cr.rectangle(24, 46, (W - 48) * frac, 2)
         cr.set_source_rgba(*CYAN, 0.9)
         cr.fill()
+
+    def draw_undo(self, cr, W, H):
+        """the undo button under the card, saying what it takes back"""
+        if not self.undo:
+            self.undo_rect = None
+            return
+        u = self.undo[-1]
+        if u[0] == 'folder':
+            what, name = 'notebook', u[1]
+        else:
+            what = {'keep': 'kept', 'delete': 'deleted', 'stay': 'stays'}.get(u[0]) or '→ ' + u[4]['name']
+            name = u[1].stem
+        name = name if len(name) <= 34 else name[:33] + '…'
+        label = f'undo   {what} · {name}'
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription('DejaVu Sans Mono 9'))
+        lay.set_text(label, -1)
+        tw = lay.get_pixel_size()[0]
+        w, h = tw + 54, 30
+        x, y = W / 2 - w / 2, H - 82
+        self.undo_rect = (x, y, w, h)
+        hot = self.undo_hot
+        self.frame(cr, x, y, w, h, CYAN if hot else (1, 1, 1), 0.7 if hot else 0.2, 0.6)
+        # a turning-back arrow
+        ax, ay = x + 20, y + h / 2
+        cr.set_line_width(1.6)
+        cr.set_source_rgba(*(CYAN if hot else FG), 0.95)
+        cr.arc_negative(ax, ay, 6, math.pi * 1.75, math.pi * 0.75)
+        cr.stroke()
+        tx, ty = ax + 6 * math.cos(math.pi * 1.75), ay + 6 * math.sin(math.pi * 1.75)
+        cr.move_to(tx - 4, ty - 1)
+        cr.line_to(tx, ty)
+        cr.line_to(tx + 1, ty - 4)
+        cr.stroke()
+        cr.set_source_rgba(*(FG if hot else DIM), 1)
+        cr.move_to(x + 36, y + (h - lay.get_pixel_size()[1]) / 2)
+        PangoCairo.show_layout(cr, lay)
 
     def draw_banner(self, cr, W, H, now):
         t = now - self.banner[2]

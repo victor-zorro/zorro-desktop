@@ -38,8 +38,32 @@ The two buttons at the top left switch by hand, for example to sort a half-full 
 | Enter | | best match |
 | Space | skip (comes round again later) | skip |
 | O or double-click | open in Obsidian | open in Obsidian |
-| Ctrl+Z / Backspace | undo | undo |
+| Ctrl+Z / Backspace, or the undo button under the card | undo | undo |
 | Page Up/Down, scroll | scroll the note | scroll the note |
+
+## Undo
+The **undo** button under the card shows what it takes back (for example "kept · Mobile Unit
+TODO"). The card then flies back from where it went. You can undo step by step, for as long as
+the app is open. Notebook changes can be undone too.
+
+## Notebooks
+Open the **Notebooks** button at the top right, or right-click a notebook tile in Sort.
+
+- **New notebook**: a new folder in the vault you are sweeping.
+- **Rename**:
+  - A folder: Obsidian Sync takes the new name online.
+  - A vault: Obsidian must be closed, because it keeps its own list of vaults. The online copy
+    keeps its old name.
+- **Delete a folder**: its notes go back to be swept again, or to the vault's `.trash` folder.
+  Obsidian Sync removes the folder online and from your phone. Undo brings it all back.
+- **Delete a vault**: you choose what to delete it from:
+  - this laptop (to the Trash, where you can still get it back);
+  - Obsidian's list of vaults (Obsidian must be closed);
+  - online.
+
+  Obsidian has no way for other apps to delete the online copy. The app shows the three clicks
+  to do it in Obsidian (Settings → Sync → Manage → trash icon) and how to remove it from your
+  phone.
 
 ## What happens to the files
 - **Delete** moves the note into the vault's `.trash` folder, which is Obsidian's own trash.
