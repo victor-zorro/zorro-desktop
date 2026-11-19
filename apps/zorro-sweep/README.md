@@ -109,9 +109,8 @@ Then the **brush button** in the ribbon (or the command "Sweep notes: Open") ope
 - **Keep or delete**: swipe the card left to keep, right to delete (laptop: ← / →).
   Deleted notes, and pictures only they use, go to the vault's `.trash` folder.
 - **Sort**: after 10 kept notes, drag each one onto a notebook, or tap a notebook (laptop: 1–9).
-  The notebooks are the folders of this vault, plus "Stays in …" and "+ New folder". There's no
-  moving to another vault here: a plugin only sees its own vault. The
-  laptop app still does both.
+  The notebooks are the folders of this vault, plus "Stays in …" and "+ New folder". Moving a note
+  to another vault isn't possible here (a plugin only sees its own vault); the laptop app does it.
 - **Best match**: the notebook closest in meaning to the note is lit up ("best match"); tap it,
   or press Enter. `zorro-sweep-presort` works these out on the laptop from the zorro-search
   index and writes them into the plugin's data (`suggest`), so the phone gets them through Sync.
