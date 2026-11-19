@@ -1,4 +1,4 @@
-/* Sweep notes: the Zorro look (zorro_style.py), dark with cyan and red */
+/* Sweep or Keep: its own dark look with cyan and red; .zs-theme follows the Obsidian theme */
 .zs {
   --zs-bg: #05070a; --zs-fg: #d8d8de; --zs-dim: #6f7079; --zs-cyan: #19e6ff; --zs-red: #ff2a4a;
   --zs-green: #4dff9e; --zs-line: rgba(255, 255, 255, .16); --zs-mono: 'DejaVu Sans Mono', var(--font-monospace);
@@ -16,6 +16,22 @@
 .zs-btn { font: 12px var(--zs-mono); border: 1px solid rgba(255, 255, 255, .2); border-radius: 8px;
   padding: 6px 12px; cursor: pointer; display: inline-block; }
 .zs-btn:hover { border-color: var(--zs-cyan); }
+
+/* Look: theme colours (Settings → Sweep or Keep → Look) */
+.zs.zs-theme {
+  --zs-bg: var(--background-primary); --zs-fg: var(--text-normal); --zs-dim: var(--text-muted);
+  --zs-cyan: var(--interactive-accent); --zs-red: var(--text-error); --zs-green: var(--color-green);
+  --zs-line: var(--background-modifier-border); --zs-mono: var(--font-monospace);
+}
+.zs.zs-theme .zs-card { background: var(--background-secondary); box-shadow: var(--shadow-l); }
+.zs.zs-theme .zs-title { color: var(--text-normal); }
+.zs.zs-theme .zs-go { color: var(--text-on-accent) !important; }
+.zs.zs-theme .zs-stamp { text-shadow: none; background: var(--background-primary); }
+.zs.zs-theme .zs-big { text-shadow: none; }
+.zs.zs-theme .zs-banner { background: color-mix(in srgb, var(--background-primary) 85%, transparent); }
+.zs.zs-theme .zs-nb svg > * { fill: transparent; stroke: var(--background-modifier-border); }
+.zs.zs-theme .zs-nb.is-hot svg > *, .zs.zs-theme .zs-nb:hover svg > *, .zs.zs-theme .zs-nb.is-best svg > * {
+  fill: color-mix(in srgb, var(--interactive-accent) 12%, transparent); stroke: var(--interactive-accent); }
 
 /* start screen */
 .zs-start { max-width: 460px; margin: 0 auto; padding: 26px 22px 40px; height: 100%; overflow-y: auto; }
@@ -119,3 +135,6 @@
 .zs.is-narrow .zs-nb-t { font-size: 12px; }
 .is-mobile .zs-stage { bottom: calc(var(--view-bottom-spacing, 0px) + 50px); }
 .is-mobile .zs-undo { bottom: calc(var(--view-bottom-spacing, 0px) + 10px); }
+.zs.zs-theme .zs-row:hover { border-color: var(--interactive-accent); }
+.zs.zs-theme .zs-side-l { color: var(--interactive-accent); opacity: .6; }
+.zs.zs-theme .zs-side-r { color: var(--text-error); opacity: .5; }

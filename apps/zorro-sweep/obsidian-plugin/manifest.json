@@ -1,9 +1,10 @@
 {
-  "id": "zorro-sweep",
-  "name": "Sweep notes",
+  "id": "sweep-or-keep",
+  "name": "Sweep or Keep",
   "version": "1.0.0",
-  "minAppVersion": "1.4.0",
-  "description": "Clean up a notebook in rounds: swipe notes left to keep or right to delete, then drag every 10 kept ones into notebooks.",
+  "minAppVersion": "1.6.0",
+  "description": "Clean up a cluttered vault in rounds: swipe each note left to keep or right to delete, then drag the kept ones into notebooks.",
   "author": "Vincent Vriens",
+  "authorUrl": "https://github.com/victor-zorro",
   "isDesktopOnly": false
 }

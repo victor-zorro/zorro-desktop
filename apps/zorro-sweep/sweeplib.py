@@ -40,9 +40,10 @@ except ImportError:
 def state_file(vault):
     """where a vault's progress is kept: the Obsidian plugin's data.json when the plugin is in the
     vault (shared with Obsidian on the laptop and the phone), else our own state file"""
-    plugin = vault / '.obsidian/plugins/zorro-sweep'
-    if (plugin / 'manifest.json').exists():
-        return plugin / 'data.json'
+    for pid in ('sweep-or-keep', 'zorro-sweep'):      # Sweep or Keep (its first name: zorro-sweep)
+        plugin = vault / '.obsidian/plugins' / pid
+        if (plugin / 'manifest.json').exists():
+            return plugin / 'data.json'
     return STATE_DIR / (re.sub(r'[^\w.-]+', '_', vault.name) + '.json')
 
 

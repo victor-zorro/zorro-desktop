@@ -1,0 +1,19 @@
+# Push a tag equal to the version in manifest.json (for example 1.0.1): this makes the GitHub
+# release with the three files Obsidian downloads. No build step: main.js is the source.
+name: Release
+on:
+  push:
+    tags: ['*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match manifest.json
+        run: test "$(jq -r .version manifest.json)" = "${GITHUB_REF_NAME}"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css --title "${GITHUB_REF_NAME}" --notes-file <(awk -v v="## ${GITHUB_REF_NAME}" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md)

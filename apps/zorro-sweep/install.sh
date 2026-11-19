@@ -23,7 +23,12 @@ except (OSError, ValueError):
 vaults = sorted(v for v in vaults if (v / '.obsidian').is_dir())
 names = [v.name for v in vaults]
 for v in vaults:
-    dst = v / '.obsidian/plugins/zorro-sweep'
+    dst = v / '.obsidian/plugins/sweep-or-keep'
+    old_dir = v / '.obsidian/plugins/zorro-sweep'      # the plugin's first name
+    if old_dir.is_dir() and not dst.exists():
+        old_dir.rename(dst)                             # data.json (progress) comes along
+    elif old_dir.is_dir():
+        shutil.rmtree(old_dir)
     dst.mkdir(parents=True, exist_ok=True)
     for f in ('main.js', 'manifest.json', 'styles.css'):
         if not (dst / f).exists() or (dst / f).read_bytes() != (src / f).read_bytes():
@@ -33,8 +38,11 @@ for v in vaults:
         on = json.loads(cp.read_text())
     except (OSError, ValueError):
         on = []
-    if 'zorro-sweep' not in on:
-        cp.write_text(json.dumps(on + ['zorro-sweep'], indent=2))
+    new = [p for p in on if p != 'zorro-sweep']
+    if 'sweep-or-keep' not in new:
+        new.append('sweep-or-keep')
+    if new != on:
+        cp.write_text(json.dumps(new, indent=2))
     data = dst / 'data.json'
     try:
         d = json.loads(data.read_text())
@@ -53,7 +61,7 @@ for v in vaults:
         tmp = data.with_name('data.json.tmp')
         tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False))
         os.replace(tmp, data)
-print(f"Sweep notes plugin in {len(vaults)} vault(s): {', '.join(names)}")
+print(f"Sweep or Keep plugin in {len(vaults)} vault(s): {', '.join(names)}")
 PY
 "$here/zorro-sweep-presort" 2>/dev/null || true   # best-match suggestions (needs the search index)
-echo "Sweep notes installed (Dialer / rofi: Sweep notes; in Obsidian: the brush button)"
+echo "Sweep notes installed (Dialer / rofi: Sweep notes; in Obsidian: Sweep or Keep, the brush button)"

@@ -14,7 +14,7 @@ HERE = Path(os.path.realpath(__file__)).parent
 sys.path.insert(0, str(HERE))
 import gi                                       # noqa: E402
 gi.require_version('GLib', '2.0')
-from sweeplib import Meaning, attach_dir, vaults  # noqa: E402
+from sweeplib import Meaning, attach_dir, state_file, vaults  # noqa: E402
 
 
 MIN = 0.08                     # least likeness for a suggestion (after centring)
@@ -27,8 +27,8 @@ def folders(vault):
 
 
 def presort(vault, meaning):
-    data = vault / '.obsidian/plugins/zorro-sweep/data.json'
-    if not data.parent.joinpath('manifest.json').exists():
+    data = state_file(vault)
+    if data.parent.name not in ('sweep-or-keep', 'zorro-sweep'):   # no plugin in this vault
         return None
     np = meaning.np
     pre = str(vault) + '/'

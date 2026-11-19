@@ -92,8 +92,8 @@ zorro-sweep --vault PATH    another vault
 Install: `./install.sh` (user level, no sudo). It puts the app in the Dialer and in rofi as
 "Sweep notes".
 
-## Inside Obsidian (laptop and phone)
-`obsidian-plugin/` is Sweep as an Obsidian plugin: plain JavaScript (`main.js`, `styles.css`,
+## Inside Obsidian (laptop and phone): Sweep or Keep
+`obsidian-plugin/` is Sweep as an Obsidian plugin, published as **Sweep or Keep** (id `sweep-or-keep`): plain JavaScript (`main.js`, `styles.css`,
 `manifest.json`), no build step. `install.sh` copies it into every vault and switches it on in
 `community-plugins.json`. Obsidian Sync takes it to the phone.
 
@@ -103,7 +103,7 @@ Once per device:
 2. Settings → Sync → turn on **Installed community plugins** (and **Active community plugin
    list**). Do it on the laptop and the phone.
 
-Then the **brush button** in the ribbon (or the command "Sweep notes: Open") opens it.
+Then the **brush button** in the ribbon (or the command "Sweep or Keep: Open") opens it.
 - **Start screen**: choose the **vault** (another vault opens it, with Sweep on top) and the
   **notebook to clean up**: the loose notes at the top of the vault, or one of its folders.
 - **Keep or delete**: swipe the card left to keep, right to delete (laptop: ← / →).
@@ -117,10 +117,21 @@ Then the **brush button** in the ribbon (or the command "Sweep notes: Open") ope
   zorro-search runs it after every index update. Only folders of the same vault.
 - Undo under the card, two-finger pinch or Ctrl+scroll to zoom, double-tap to open the note.
 
-**Progress is shared.** The plugin keeps it in `.obsidian/plugins/zorro-sweep/data.json`, which
+**Progress is shared.** The plugin keeps it in `.obsidian/plugins/sweep-or-keep/data.json`, which
 Sync carries along. The laptop app reads and writes that same file when the plugin is in the
 vault, so the phone, Obsidian and the laptop app all continue where you left off. (The old
 progress in `~/.local/state/zorro-sweep/` is taken over once.) Keys are paths relative to the
 vault: `note.md` for loose notes, `Folder/note.md` for notes in a folder.
 
 After changing the plugin: rerun `install.sh` and reload Obsidian (or turn the plugin off/on).
+
+### Publishing and maintaining Sweep or Keep
+The plugin folder is the only source. It holds what the public repository needs: `README.md`
+(for Obsidian users), `LICENSE` (MIT), `CHANGELOG.md`, `versions.json` and a release workflow.
+`publish-plugin.sh` copies the folder to github.com/victor-zorro/sweep-or-keep with `git
+subtree` and tags the version; the workflow there makes the release Obsidian downloads.
+Steps for a release are at the top of the script. Keep the zorro-desktop parts optional
+(`vaults` and `suggest` in data.json): other users don't have them.
+
+Deleted notes follow Obsidian's Settings → Files and links → Deleted files (system trash by
+default); if that fails, the vault's `.trash`. The laptop app always uses `.trash`.

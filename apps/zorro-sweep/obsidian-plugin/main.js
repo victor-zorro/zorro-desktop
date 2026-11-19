@@ -1,15 +1,17 @@
-/* Sweep notes, inside Obsidian (laptop and phone). Plain JavaScript, no build step.
+/* Sweep or Keep: clean up a notebook in rounds (laptop and phone). Plain JavaScript, no build step.
  *
- * Rounds: keep (swipe left) or delete (swipe right) the oldest notes of a notebook; after 10
- * kept ones, drag each onto a notebook (a folder in this vault). Progress lives in this plugin's
- * data.json, which Obsidian Sync carries along, and which the laptop app (apps/zorro-sweep)
- * reads and writes too: keys are paths relative to the vault ('note.md', 'Folder/note.md').
- * Deleted notes go to the vault's .trash folder, like the laptop app. */
+ * Rounds: keep (swipe left) or delete (swipe right) the oldest notes of a notebook; after a
+ * round of kept ones, drag each onto a notebook (a folder in this vault). Progress lives in this
+ * plugin's data.json, which Obsidian Sync carries along. Keys are paths relative to the vault
+ * ('note.md', 'Folder/note.md'), so outside tools can share it: the zorro-desktop Sweep app on the
+ * laptop reads and writes the same file, and may add 'suggest' ({note path: folder}, shown as
+ * best match) and 'vaults' (names for the vault picker). Both are optional.
+ * Deleted notes go where Obsidian's "Deleted files" setting says (trash). */
 'use strict';
-const { Plugin, ItemView, MarkdownRenderer, Modal, Component, TFile, TFolder, Notice } = require('obsidian');
+const { Plugin, ItemView, MarkdownRenderer, Modal, Component, TFile, TFolder, Notice, PluginSettingTab, Setting } = require('obsidian');
 
-const VIEW = 'zorro-sweep';
-const ROUND = 10;
+const VIEW = 'sweep-or-keep';
+const DEFAULT_ROUND = 10;
 const SHAPES = ['hex', 'circle', 'blob', 'oct', 'squircle', 'diamond'];
 
 function hash(s) {
@@ -26,33 +28,37 @@ function ago(ts) {
   return `${Math.floor(days / 365.25)} years ago`;
 }
 
-function shapeSvg(kind, w, h) {
-  const p = (pts) => `<path d="M${pts.map(([x, y]) => `${(x * w).toFixed(1)},${(y * h).toFixed(1)}`).join(' L')}Z"/>`;
+function drawShape(parent, kind, w, h) {
+  const svg = parent.createSvg('svg', { attr: { width: w, height: h, viewBox: `-1 -1 ${w + 2} ${h + 2}` } });
+  const path = (pts) => 'M' + pts.map(([x, y]) => `${(x * w).toFixed(1)},${(y * h).toFixed(1)}`).join(' L') + 'Z';
   switch (kind) {
-    case 'circle': return `<ellipse cx="${w / 2}" cy="${h / 2}" rx="${w / 2}" ry="${h / 2}"/>`;
-    case 'squircle': return `<rect width="${w}" height="${h}" rx="${Math.min(w, h) * 0.3}"/>`;
-    case 'pill': return `<rect width="${w}" height="${h}" rx="${h / 2}"/>`;
-    case 'dash': return `<rect class="zs-dash" width="${w}" height="${h}" rx="12"/>`;
-    case 'hex': return p([[.25, 0], [.75, 0], [1, .5], [.75, 1], [.25, 1], [0, .5]]);
-    case 'oct': return p([[.3, 0], [.7, 0], [1, .3], [1, .7], [.7, 1], [.3, 1], [0, .7], [0, .3]]);
-    case 'diamond': return p([[.5, 0], [1, .5], [.5, 1], [0, .5]]);
+    case 'circle': svg.createSvg('ellipse', { attr: { cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2 } }); break;
+    case 'squircle': svg.createSvg('rect', { attr: { width: w, height: h, rx: Math.min(w, h) * 0.3 } }); break;
+    case 'pill': svg.createSvg('rect', { attr: { width: w, height: h, rx: h / 2 } }); break;
+    case 'dash': svg.createSvg('rect', { cls: 'zs-dash', attr: { width: w, height: h, rx: 12 } }); break;
+    case 'hex': svg.createSvg('path', { attr: { d: path([[.25, 0], [.75, 0], [1, .5], [.75, 1], [.25, 1], [0, .5]]) } }); break;
+    case 'oct': svg.createSvg('path', { attr: { d: path([[.3, 0], [.7, 0], [1, .3], [1, .7], [.7, 1], [.3, 1], [0, .7], [0, .3]]) } }); break;
+    case 'diamond': svg.createSvg('path', { attr: { d: path([[.5, 0], [1, .5], [.5, 1], [0, .5]]) } }); break;
     default:                                   // blob
-      return `<path d="M${w * .5},0 C${w * .85},0 ${w},${h * .25} ${w * .95},${h * .5} C${w * .9},${h * .8} ${w * .7},${h} ${w * .45},${h * .97} C${w * .15},${h * .95} 0,${h * .75} ${w * .05},${h * .45} C${w * .1},${h * .15} ${w * .25},0 ${w * .5},0Z"/>`;
+      svg.createSvg('path', { attr: { d: `M${w * .5},0 C${w * .85},0 ${w},${h * .25} ${w * .95},${h * .5} C${w * .9},${h * .8} ${w * .7},${h} ${w * .45},${h * .97} C${w * .15},${h * .95} 0,${h * .75} ${w * .05},${h * .45} C${w * .1},${h * .15} ${w * .25},0 ${w * .5},0Z` } });
   }
+  return svg;
 }
 
 module.exports = class SweepPlugin extends Plugin {
   async onload() {
     await this.loadState();
     this.registerView(VIEW, (leaf) => new SweepView(leaf, this));
-    this.addRibbonIcon('brush', 'Sweep notes', () => this.open());
+    this.addRibbonIcon('brush', 'Sweep or Keep', () => this.open());
+    this.addSettingTab(new SweepSettings(this.app, this));
     this.addCommand({ id: 'open', name: 'Open', callback: () => this.open() });
-    // obsidian://zorro-sweep?vault=NAME opens that vault with Sweep on top (the vault picker)
-    this.registerObsidianProtocolHandler('zorro-sweep', () => this.app.workspace.onLayoutReady(() => this.open()));
+    // obsidian://sweep-or-keep?vault=NAME opens that vault with Sweep on top (the vault picker)
+    this.registerObsidianProtocolHandler('sweep-or-keep', () => this.app.workspace.onLayoutReady(() => this.open()));
   }
 
   async loadState() {
-    const d = Object.assign({ kept: [], stays: [], batch: [], source: '', vaults: [] }, (await this.loadData()) || {});
+    const d = Object.assign({ kept: [], stays: [], batch: [], source: '', vaults: [], roundSize: DEFAULT_ROUND, look: 'sweep' },
+      (await this.loadData()) || {});
     d.stats = Object.assign({ deleted: 0, moved: 0 }, d.stats || {});
     this.data = d;
     this.kept = new Set(d.kept);
@@ -65,6 +71,7 @@ module.exports = class SweepPlugin extends Plugin {
     const d = this.data;
     await this.saveData(Object.assign(disk, {
       kept: [...this.kept], stays: [...this.stays], batch: d.batch, stats: d.stats, source: d.source,
+      roundSize: d.roundSize, look: d.look, vaults: d.vaults,
     }));
   }
 
@@ -74,6 +81,8 @@ module.exports = class SweepPlugin extends Plugin {
       if (leaf.view instanceof SweepView) leaf.view.refresh();
     }
   }
+
+  get roundSize() { return Math.max(3, Math.min(50, Number(this.data.roundSize) || DEFAULT_ROUND)); }
 
   async open() {
     let leaf = this.app.workspace.getLeavesOfType(VIEW)[0];
@@ -112,7 +121,7 @@ class SweepView extends ItemView {
     this.ages = new Map();
   }
   getViewType() { return VIEW; }
-  getDisplayText() { return 'Sweep notes'; }
+  getDisplayText() { return 'Sweep or Keep'; }
   getIcon() { return 'brush'; }
 
   get vault() { return this.app.vault; }
@@ -122,6 +131,7 @@ class SweepView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass('zs');
+    root.toggleClass('zs-theme', this.d.look === 'theme');
     root.tabIndex = 0;
     this.registerDomEvent(root, 'keydown', (e) => this.onKey(e));
     this.app.workspace.onLayoutReady(() => this.showStart());
@@ -173,7 +183,7 @@ class SweepView extends ItemView {
       && (!batch.size || batch.has(f.path)));
   }
 
-  round() { return Math.floor((this.d.stats.moved + this.p.stays.size) / ROUND) + 1; }
+  round() { return Math.floor((this.d.stats.moved + this.p.stays.size) / this.p.roundSize) + 1; }
 
   folderName() { return this.d.source ? this.d.source.split('/').pop() : this.vault.getName(); }
 
@@ -184,7 +194,7 @@ class SweepView extends ItemView {
     const root = this.contentEl;
     root.empty();
     const page = root.createDiv('zs-start');
-    page.createDiv({ cls: 'zs-label', text: 'SWEEP NOTES' });
+    page.createDiv({ cls: 'zs-label', text: 'SWEEP OR KEEP' });
 
     page.createDiv({ cls: 'zs-label zs-head', text: 'VAULT' });
     const here = this.vault.getName();
@@ -194,7 +204,7 @@ class SweepView extends ItemView {
       row.createSpan({ text: (name === here ? '● ' : '') + name });
       row.createSpan({ cls: 'zs-dim', text: name === here ? `${this.toScan(this.vault.getRoot()).length} loose notes to scan` : 'open' });
       if (name !== here) {
-        row.addEventListener('click', () => window.open(`obsidian://zorro-sweep?vault=${encodeURIComponent(name)}`));
+        row.addEventListener('click', () => window.open(`obsidian://sweep-or-keep?vault=${encodeURIComponent(name)}`));
       }
     }
 
@@ -224,7 +234,7 @@ class SweepView extends ItemView {
     const bar = page.createDiv('zs-bar zs-wide');
     bar.createEl('b').style.width = `${total ? (100 * (total - left) / total) : 100}%`;
     page.createDiv({ cls: 'zs-dim zs-small',
-      text: `${total ? Math.round(100 * (total - left) / total) : 100}% DONE · ROUND ${this.round()} · ${this.d.batch.length} / ${ROUND} KEPT` });
+      text: `${total ? Math.round(100 * (total - left) / total) : 100}% DONE · ROUND ${this.round()} · ${this.d.batch.length} / ${this.p.roundSize} KEPT` });
     const go = page.createEl('button', { cls: 'zs-go', text: 'CONTINUE' });
     go.addEventListener('click', () => this.play());
     root.focus();
@@ -241,7 +251,7 @@ class SweepView extends ItemView {
     this.hintEl = root.createDiv('zs-hint');
     this.toastEl = root.createDiv('zs-toast');
     this.bannerEl = root.createDiv('zs-banner');
-    this.mode = this.d.batch.length >= ROUND || (!this.toScan().length && this.d.batch.length) ? 'sort' : 'sweep';
+    this.mode = this.d.batch.length >= this.p.roundSize || (!this.toScan().length && this.d.batch.length) ? 'sort' : 'sweep';
     this.nextCard();
     root.focus();
   }
@@ -265,7 +275,7 @@ class SweepView extends ItemView {
       ? `ROUND ${this.round()} · ${this.d.batch.length - left} / ${this.d.batch.length}` : `ROUND ${this.round()}` });
     const dots = t.createDiv('zs-dots');
     const n = this.d.batch.length;
-    for (let i = 0; i < ROUND; i++) {
+    for (let i = 0; i < this.p.roundSize; i++) {
       const done = this.mode === 'sort' && i < n - left;
       dots.createEl('i', { cls: done ? 'is-done' : (i < n ? 'is-on' : '') });
     }
@@ -294,7 +304,7 @@ class SweepView extends ItemView {
         const n = this.d.batch.length;
         this.d.batch = [];
         this.p.save();
-        this.banner(`ROUND ${this.round() - 1} DONE`, `${n} notes sorted · on to the next ${ROUND}`);
+        this.banner(`ROUND ${this.round() - 1} DONE`, `${n} notes sorted · on to the next ${this.p.roundSize}`);
       }
       if (this.toScan().length) { this.setMode('sweep'); return; }
     }
@@ -537,12 +547,12 @@ class SweepView extends ItemView {
       const x = Math.max(4, Math.min(W - w - 4, cell.x + (cell.w - w) / 2 + jx));
       const y = Math.max(4, Math.min(H - h - 4, cell.y + (cell.h - h) / 2 + jy));
       el.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
-      el.innerHTML = `<svg width="${w}" height="${h}" viewBox="-1 -1 ${w + 2} ${h + 2}">${shapeSvg(kind, w, h)}</svg>`;
+      drawShape(el, kind, w, h);
       if (i < 9) el.createDiv({ cls: 'zs-nb-k', text: String(i + 1) });
       const t = el.createDiv('zs-nb-t');
       t.createDiv({ text: d.name });
       if (d.n != null) t.createDiv({ cls: 'zs-nb-n', text: `${d.n} notes` });
-      if (d.path && d.path === best) {             // the pre-sort's suggestion (zorro-sweep-presort)
+      if (d.path && d.path === best) {             // a suggestion written from outside (data.suggest)
         el.addClass('is-best');
         t.createDiv({ cls: 'zs-nb-best', text: 'best match' });
       }
@@ -602,11 +612,11 @@ class SweepView extends ItemView {
     this.undo.push({ what: 'keep', path: file.path, label: `kept “${file.basename}”` });
     await this.p.save();
     const n = this.d.batch.length;
-    if (n >= ROUND) {
+    if (n >= this.p.roundSize) {
       this.banner(`ROUND ${this.round()}`, `${n} kept · now sort them into notebooks`);
       this.mode = 'sort';
       this.skipped.clear();
-    } else this.toast(`kept · ${n} of ${ROUND}`);
+    } else this.toast(`kept · ${n} of ${this.p.roundSize}`);
   }
 
   ownAttachments(file) {
@@ -617,11 +627,15 @@ class SweepView extends ItemView {
   }
 
   async remove(file) {
-    // to the vault's .trash folder: gone everywhere (Sync), still on this device for a while
+    // where Obsidian's "Deleted files" setting says (system trash, the vault's .trash, or gone)
     const files = [...this.ownAttachments(file), file];
     const saved = [];
     for (const f of files) saved.push({ path: f.path, data: await this.vault.readBinary(f) });
-    for (const f of files) await this.vault.trash(f, false);
+    for (const f of files) {
+      await this.app.fileManager.trashFile(f);
+      // the system trash can fail without a word (other disk, no trash there): the vault's .trash then
+      if (this.vault.getAbstractFileByPath(f.path)) await this.vault.trash(f, false);
+    }
     this.d.stats.deleted++;
     this.undo.push({ what: 'delete', saved, label: `deleted “${file.basename}”` });
     await this.p.save();
@@ -655,7 +669,7 @@ class SweepView extends ItemView {
       if (u.what === 'keep') {
         this.p.kept.delete(u.path);
         this.d.batch = this.d.batch.filter((p) => p !== u.path);
-        if (this.mode === 'sort' && this.d.batch.length < ROUND) this.mode = 'sweep';
+        if (this.mode === 'sort' && this.d.batch.length < this.p.roundSize) this.mode = 'sweep';
       } else if (u.what === 'stay') {
         this.p.stays.delete(u.path);
       } else if (u.what === 'send') {
@@ -736,5 +750,31 @@ class SweepView extends ItemView {
       if (b) b.scrollBy(0, (k === 'PageDown' ? 1 : -1) * b.clientHeight * 0.8);
     } else used = false;
     if (used) e.preventDefault();
+  }
+}
+
+class SweepSettings extends PluginSettingTab {
+  constructor(app, plugin) { super(app, plugin); this.p = plugin; }
+  display() {
+    const el = this.containerEl;
+    el.empty();
+    const save = async () => {
+      await this.p.save();
+      for (const leaf of this.app.workspace.getLeavesOfType(VIEW)) {
+        if (leaf.view instanceof SweepView) { leaf.view.contentEl.toggleClass('zs-theme', this.p.data.look === 'theme'); leaf.view.refresh(); }
+      }
+    };
+    new Setting(el).setName('Notes per round')
+      .setDesc('Keep this many, then sort them into notebooks.')
+      .addSlider((s) => s.setLimits(3, 30, 1).setValue(this.p.roundSize).setDynamicTooltip()
+        .onChange(async (v) => { this.p.data.roundSize = v; await save(); }));
+    new Setting(el).setName('Look')
+      .setDesc('Sweep\'s own dark look, or the colours of your theme.')
+      .addDropdown((d) => d.addOptions({ sweep: 'Sweep (dark, neon)', theme: 'Theme colours' })
+        .setValue(this.p.data.look || 'sweep').onChange(async (v) => { this.p.data.look = v; await save(); }));
+    new Setting(el).setName('Other vaults')
+      .setDesc('Names of your other vaults, one per line, to switch to from the start screen. Each needs Sweep or Keep installed too.')
+      .addTextArea((t) => t.setValue((this.p.data.vaults || []).filter((n) => n !== this.app.vault.getName()).join('\n'))
+        .onChange(async (v) => { this.p.data.vaults = v.split('\n').map((n) => n.trim()).filter(Boolean); await save(); }));
   }
 }
