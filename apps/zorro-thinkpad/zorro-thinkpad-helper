@@ -52,7 +52,8 @@ def power(ac, bat, start, stop):
 
 
 LOOK_FILE = '/etc/zorro-dm/look.json'
-ANIMALS = ('whale', 'vaquita', 'hammerhead', 'turtle', 'manta', 'random')
+ANIMALS = ('bluewhale', 'whale', 'rightwhale', 'vaquita', 'hammerhead', 'whaleshark', 'sawfish',
+           'turtle', 'hawksbill', 'manta', 'dugong', 'seahorse', 'otter', 'random')
 LOOK_NUM = {   # key: (min, max)
     'density': (0.3, 3), 'size': (0.2, 3), 'swim_speed': (0.1, 5), 'pass_seconds': (10, 300),
     'gap_seconds': (0, 300), 'far': (0, 1), 'snow_amount': (0, 2000), 'snow_speed': (0, 10),

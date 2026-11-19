@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from .base import APPS, HOME, load_conf, osd, run, spawn, update_conf, write_atomic
 from .fxshim import Snow, zorro_fx
-from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS
+from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS, animal_id
 from .power import load_script
 from . import ui
 from .ui import Pages, heading, idle, in_bg, note, radios
@@ -542,7 +542,8 @@ class DesktopPages:
         except (OSError, ValueError):
             c = {}
         c = {**WALL_DEFAULTS, **c}
-        c['look'] = {**{'animal': 'whale', 'background': 'deep'}, **c.get('look', {})}
+        c['look'] = {**{'animal': 'bluewhale', 'background': 'deep'}, **c.get('look', {})}
+        c['look']['animal'] = animal_id(c['look']['animal'])
 
         def save(**kv):
             c.update(kv)

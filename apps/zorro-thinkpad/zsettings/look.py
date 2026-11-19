@@ -29,11 +29,22 @@ WALL_DEFAULTS = {'enabled': True, 'follow_login': True, 'fps_ac': 12, 'fps_batte
                  'fps_calm': 8, 'render_scale': 0.5, 'look': {}}
 LOOK_FILE = '/etc/zorro-dm/look.json'
 _look_draft = {}
-LOOK_ANIMALS = {'whale': 'Blue whale', 'vaquita': 'Vaquita (rarest porpoise)',
-                'hammerhead': 'Hammerhead shark', 'turtle': 'Leatherback sea turtle',
-                'manta': 'Giant manta ray', 'random': 'Random, a different one each time'}
+LOOK_ANIMALS = {'bluewhale': 'Blue whale', 'rightwhale': 'North Atlantic right whale',
+                'vaquita': 'Vaquita (rarest porpoise)', 'hammerhead': 'Hammerhead shark',
+                'whaleshark': 'Whale shark', 'sawfish': 'Sawfish',
+                'turtle': 'Leatherback sea turtle', 'hawksbill': 'Hawksbill turtle',
+                'manta': 'Giant manta ray', 'dugong': 'Dugong', 'seahorse': 'Seahorse',
+                'otter': 'Sea otter', 'random': 'Random, a different one each time'}
+OLD_ANIMALS = {'whale': 'bluewhale'}     # old names still in look.json files
+
+
+def animal_id(name):
+    """the animal name as listed in LOOK_ANIMALS (old names mapped to their new one)"""
+    return OLD_ANIMALS.get(name, name)
+
+
 LOOK_DEFAULTS = {
-    'animal': 'whale', 'line_colour': '#e6e6ec', 'density': 1.0, 'size': 1.0, 'swim_speed': 1.0,
+    'animal': 'bluewhale', 'line_colour': '#e6e6ec', 'density': 1.0, 'size': 1.0, 'swim_speed': 1.0,
     'pass_seconds': 70, 'gap_seconds': 0, 'far': 0.33,
     'snow_amount': 140, 'snow_speed': 1.0, 'snow_size': 1.0, 'snow_colour': '#9a9aa0',
     'snow_alpha': 1.0, 'grain': 1.0, 'scratches': 1.0, 'dust': 1.0, 'scanlines': 1.0,

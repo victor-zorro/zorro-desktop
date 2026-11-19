@@ -6,7 +6,7 @@ import subprocess
 import threading
 from pathlib import Path
 from .base import HOME, RUNTIME, load_conf, spawn, update_conf, write_atomic
-from .look import CBLUR_MODES, CUSTOM_PRESETS, DM_DIR, LOOK_ANIMALS, LOOK_BACKGROUNDS, LOOK_DEFAULTS, LOOK_FILE, _look_draft, custom_presets, theme_presets
+from .look import CBLUR_MODES, CUSTOM_PRESETS, DM_DIR, LOOK_ANIMALS, animal_id, LOOK_BACKGROUNDS, LOOK_DEFAULTS, LOOK_FILE, _look_draft, custom_presets, theme_presets
 from .power import LOOK_HELPER
 from . import ui
 from .ui import Pages, heading, idle, note
@@ -216,7 +216,7 @@ class LookPages:
         animals = Gtk.ComboBoxText()
         for k, label in LOOK_ANIMALS.items():
             animals.append(k, label)
-        animals.set_active_id(L['animal'])
+        animals.set_active_id(animal_id(L['animal']))
         animals.connect('changed', lambda w: setv('animal', w.get_active_id()))
         box.add(heading('Endangered sea animal (wireframe)', 'Animal'))
         box.add(grid([('Animal', animals), ('Line colour', colour('line_colour')),

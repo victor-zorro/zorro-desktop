@@ -10,7 +10,7 @@
 
   // ---------- settings -------------------------------------------------------
   const DEFAULTS = {
-    animal: 'whale',            // whale vaquita hammerhead turtle manta random
+    animal: 'whale',            // a name from ANIMALS below ('whale' = bluewhale), or random
     line_colour: '#e6e6ec', density: 1, size: 1, swim_speed: 1,
     pass_seconds: 70, gap_seconds: 0, far: 0.33,
     max_animals: 3,             // at most this many at once (on battery the screens ask for 1)
@@ -31,7 +31,8 @@
   const BG_MODES = { waves: 0, streaks: 1, deep: 2 };
   const CBLUR_MODES = { lens: 0, prism: 1, glow: 2 };
   const cfg = Object.assign({}, DEFAULTS, window.ZORRO_LOOK || {});
-  const ANIMALS = ['whale', 'vaquita', 'hammerhead', 'turtle', 'manta'];
+  const ANIMALS = ['bluewhale', 'rightwhale', 'vaquita', 'hammerhead', 'whaleshark', 'sawfish', 'turtle',
+                   'hawksbill', 'manta', 'dugong', 'seahorse', 'otter'];
   const hex = (h) => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); const n = parseInt(m ? m[1] : 'e6e6ec', 16);
                        return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
 
