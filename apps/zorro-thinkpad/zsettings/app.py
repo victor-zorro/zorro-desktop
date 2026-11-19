@@ -6,6 +6,7 @@ from .keyd import style_osd
 from .pages_desktop import DesktopPages
 from .pages_home import HomePages
 from .pages_look import LookPages
+from .pages_face import FacePages
 from .pages_accounts import AccountsPages
 from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
@@ -19,7 +20,7 @@ from gi.repository import GLib, Gtk
 
 # ---- the app window: Home (often used) + the gear: Theme, Desktop, Login screen, Hardware, Audio, Power, Network ---
 
-class Win(HomePages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
+class Win(HomePages, FacePages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
@@ -81,6 +82,7 @@ class Win(HomePages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, Mobi
         desk.section('applook', 'This app', self.fx_page('app'))
         login = Group()
         login.section('look', 'Login & lock screen', self.look_page())
+        login.section('face', 'Face unlock', self.face_page())
         theme = Group()
         theme.section('theme', 'Theme', self.theme_page())
         for name, title, g in (('theme', 'Theme', theme), ('desktop', 'Desktop', desk),

@@ -12,9 +12,13 @@ Lock:   the session runs `zorro-lock` (xss-lock) -> /run/zorro-dm/lock.sock.
 
 Greeter <-> daemon: JSON lines over a socketpair (fd in $ZORRO_DM_FD).
   greeter -> dm: authenticate{user}, respond{text}, cancel, start_session{session},
-                 power{action}
-  dm -> greeter: prompt{text,secret}, message{text,error}, complete{ok}, quit
+                 power{action}, face (the face icon was pressed)
+  dm -> greeter: prompt{text,secret}, message{text,error}, complete{ok}, quit,
+                 face{state: available|none|fail}
 Lock socket: client sends 'lock', gets 'locked' (screen is safe) and 'unlocked'.
+Face:   with zorro-face (IR camera) set up and a face learned, the greeter shows a face
+        icon; pressing it checks the face (the password keeps working meanwhile).
+        /etc/zorro-face.json: "lock" and "login" (both on) say where the icon shows.
 """
 import configparser
 import fcntl
@@ -56,6 +60,9 @@ PROFILE_WRAP = ['/bin/sh', '-c',
 PATH = '/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games'
 POWER = {'suspend', 'hibernate', 'reboot', 'poweroff'}
 VT_ACTIVATE, VT_WAITACTIVE, VT_LOCKSWITCH, VT_UNLOCKSWITCH = 0x5606, 0x5607, 0x560B, 0x560C
+FACE = '/usr/local/bin/zorro-face'
+FACE_CONF = '/etc/zorro-face.json'
+FACE_DATA = '/var/lib/zorro-face'
 
 
 def log(*a):
@@ -271,6 +278,62 @@ class Login:
         return self.pam.get_item(PAM.PAM_USER)
 
 
+class FaceCheck:
+    """zorro-face verify in a thread; a match goes to the event queue as 'face_ok'"""
+
+    def __init__(self, dm, rnd, user):
+        self.dm, self.rnd, self.user, self.proc, self.done = dm, rnd, user, None, False
+        threading.Thread(target=self.run, daemon=True).start()
+
+    @staticmethod
+    def wanted(user, mode):
+        try:
+            with open(FACE_CONF) as fh:
+                c = json.load(fh)
+        except (OSError, ValueError):
+            c = {}
+        on = c.get('lock', True) if mode == 'lock' else c.get('login', True)
+        return bool(on and user and os.access(FACE, os.X_OK)
+                    and os.path.exists(f'{FACE_DATA}/{user}.npy'))
+
+    def run(self):
+        ok = False
+        try:
+            self.proc = subprocess.Popen([FACE, 'verify', self.user, '--timeout', '7'],
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            for _line in self.proc.stdout:
+                pass
+            ok = self.proc.wait() == 0
+        except OSError as e:
+            log('face check failed:', e)
+        self.done = True
+        if ok:
+            self.dm.events.put(('face_ok', self.rnd, self))
+        else:
+            self.dm.send(type='face', state='fail')
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.kill()
+
+
+class FaceLogin:
+    """a login the face check made: a fresh PAM handle (account checked, no password)"""
+    ok = done = True
+
+    def __init__(self, user, tty):
+        self.user = user
+        self.pam = PAM.pam()
+        self.pam.start('zorro-dm')
+        self.pam.set_item(PAM.PAM_USER, user)
+        self.pam.set_item(PAM.PAM_TTY, tty)
+        self.pam.set_item(PAM.PAM_CONV, lambda *a: [('', 0)] * len(a[1]))
+        self.pam.acct_mgmt()
+
+    def cancel(self):
+        pass
+
+
 # ---- the display manager ---------------------------------------------------------------
 
 class DM:
@@ -361,8 +424,20 @@ class DM:
         child.close()
         threading.Thread(target=self.reader, args=(self.sock, rnd), daemon=True).start()
 
-        login, result = None, None
+        login, result, face, face_user, face_at = None, None, None, None, 0.0
         started = time.monotonic()
+
+        def offer(user):                # the face icon, when this user has a learned face
+            nonlocal face_user
+            face_user = user if FaceCheck.wanted(user, mode) else None
+            self.send(type='face', state='available' if face_user else 'none')
+
+        def look():
+            nonlocal face, face_at
+            if not face_user or (face and not face.done) or time.monotonic() - face_at < 1:
+                return
+            face_at = time.monotonic()
+            face = FaceCheck(self, rnd, face_user)
         told = mode != 'lock'
         while True:
             if not told and time.monotonic() - started > 8:
@@ -391,6 +466,23 @@ class DM:
                 if m is login:
                     self.send(type='complete', ok=m.ok)
                 continue
+            if kind == 'face_ok':
+                if m is not face:
+                    continue
+                log(f'face recognised: {m.user}')
+                if mode == 'lock':
+                    result = True
+                    break
+                try:
+                    fl = FaceLogin(m.user, display)
+                except PAM.error as e:
+                    log('face login refused:', e)
+                    continue
+                if login:
+                    login.cancel()
+                login = fl
+                self.send(type='complete', ok=True)
+                continue
             cmd = m.get('cmd')
             if cmd == 'ready' and not told:
                 told = True                 # lock screen is fully drawn: safe to sleep now
@@ -401,8 +493,12 @@ class DM:
                     login.cancel()
                 if mode == 'login':
                     login = Login(self, rnd, 'zorro-dm', m.get('user'), display)
+                    offer(m.get('user'))
                 else:                       # lock: always the session user, whatever is asked
                     login = Login(self, rnd, 'zorro-lock', session_pw.pw_name, display)
+                    offer(session_pw.pw_name)
+            elif cmd == 'face':
+                look()
             elif cmd == 'respond' and login and not login.done:
                 login.answers.put(str(m.get('text', '')))
             elif cmd == 'cancel' and login:
@@ -427,9 +523,11 @@ class DM:
                 log('power:', m['action'])
                 subprocess.Popen(['systemctl', m['action']])
 
+        if face:
+            face.stop()
         if result:
             self.send(type='quit')
-        elif login:
+        if login and login is not (result[0] if isinstance(result, tuple) else None):
             login.cancel()
         reap(gpid)
         try:

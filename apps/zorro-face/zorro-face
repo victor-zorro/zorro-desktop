@@ -1,0 +1,346 @@
+#!/usr/bin/python3 -I
+"""zorro-face: face unlock with the laptop's IR camera (the Windows Hello kind).
+
+  zorro-face enroll USER     learn USER's face (root; look at the camera for ~6 s)
+  zorro-face verify USER     exit 0 when USER looks at the camera (root; gives up after --timeout s)
+  zorro-face remove USER     forget USER's face (root)
+  zorro-face status [USER]   JSON: camera found, emitter, enrolled
+  zorro-face snapshot FILE   one lit IR frame as PNG (to check the camera)
+  zorro-face set lock|login on|off   use the face on the lock screen / at login (root)
+Through pkexec (the Zorro app) USER must be the one who asks, and it asks your password.
+(verify there is the app's Test button.)
+
+How it works: the IR camera with its IR light flashing on every other frame. A face is found
+with YuNet and turned into 128 numbers with SFace (OpenCV's own models, on the laptop, nothing
+leaves it). A frame only counts when the face is clearly lit by the IR light compared to the
+dark frame next to it: a photo on a phone screen shows up black in infrared.
+The learned faces live in /var/lib/zorro-face/USER.npy (root only). Settings: /etc/zorro-face.json
+  {"threshold": 0.5, "device": "/dev/v4l/by-path/...", "emitter": [14, 6, [1, 3, 3, 0, 0, 0, 0, 0, 0]]}
+"""
+import ctypes
+import fcntl
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+import numpy as np
+
+TESTING = os.geteuid() != 0          # the overrides below are for trying it out as yourself
+SHARE = os.environ.get('ZORRO_FACE_SHARE', '') if TESTING else ''
+SHARE = SHARE or '/usr/local/share/zorro-face'
+DATA = (os.environ.get('ZORRO_FACE_DATA', '') if TESTING else '') or '/var/lib/zorro-face'
+CONF = '/etc/zorro-face.json'
+DEFAULTS = {'threshold': 0.5, 'device': '', 'emitter': [14, 6, [1, 3, 3, 0, 0, 0, 0, 0, 0]],
+            'min_light': 12, 'need': 2, 'lock': True, 'login': True}
+W, H = 640, 360
+
+
+def conf():
+    c = dict(DEFAULTS)
+    try:
+        c.update({k: v for k, v in json.load(open(CONF)).items() if k in DEFAULTS})
+    except (OSError, ValueError):
+        pass
+    return c
+
+
+# ---- camera --------------------------------------------------------------------------
+
+class FmtDesc(ctypes.Structure):
+    _fields_ = [('index', ctypes.c_uint32), ('type', ctypes.c_uint32), ('flags', ctypes.c_uint32),
+                ('description', ctypes.c_char * 32), ('pixelformat', ctypes.c_uint32),
+                ('mbus_code', ctypes.c_uint32), ('reserved', ctypes.c_uint32 * 3)]
+
+
+class XuQuery(ctypes.Structure):
+    _fields_ = [('unit', ctypes.c_uint8), ('selector', ctypes.c_uint8), ('query', ctypes.c_uint16),
+                ('size', ctypes.c_uint16), ('data', ctypes.POINTER(ctypes.c_uint8))]
+
+
+def _iowr(t, nr, size):
+    return (3 << 30) | (size << 16) | (ord(t) << 8) | nr
+
+
+ENUM_FMT = _iowr('V', 2, ctypes.sizeof(FmtDesc))
+XU_QUERY = _iowr('u', 0x21, ctypes.sizeof(XuQuery))
+GREY = int.from_bytes(b'GREY', 'little')
+
+
+def formats(dev):
+    out = []
+    try:
+        fd = os.open(dev, os.O_RDWR | os.O_NONBLOCK)
+    except OSError:
+        return out
+    try:
+        for i in range(16):
+            f = FmtDesc(index=i, type=1)
+            try:
+                fcntl.ioctl(fd, ENUM_FMT, f)
+            except OSError:
+                break
+            out.append(f.pixelformat)
+    finally:
+        os.close(fd)
+    return out
+
+
+def find_camera():
+    """the IR camera: the video device that only gives greyscale (by its stable path)"""
+    c = conf()
+    if c['device'] and os.path.exists(c['device']):
+        return c['device']
+    links = sorted(glob.glob('/dev/v4l/by-path/*')) or sorted(glob.glob('/dev/video*'))
+    for dev in links:
+        f = formats(dev)
+        if f and all(x == GREY for x in f):
+            return dev
+    return None
+
+
+def emitter(dev, on=True):
+    """switch the IR light on (flashes with the frames); a vendor control, reset by suspend"""
+    unit, sel, val = conf()['emitter']
+    if not on:
+        val = [val[0], val[1], 1] + list(val[3:])
+    try:
+        fd = os.open(dev, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        buf = (ctypes.c_uint8 * len(val))(*val)
+        fcntl.ioctl(fd, XU_QUERY, XuQuery(unit, sel, 0x01, len(val), buf))
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+class Camera:
+    """greyscale frames from ffmpeg; yields (lit, dark) pairs"""
+
+    def __init__(self, dev):
+        self.p = subprocess.Popen(
+            ['ffmpeg', '-loglevel', 'quiet', '-f', 'v4l2', '-input_format', 'gray', '-framerate', '30',
+             '-video_size', f'{W}x{H}', '-i', dev, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'],
+            stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+
+    def frame(self):
+        buf = b''
+        while len(buf) < W * H:
+            chunk = self.p.stdout.read(W * H - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return np.frombuffer(buf, np.uint8).reshape(H, W)
+
+    def pairs(self):
+        prev = self.frame()
+        while prev is not None:
+            cur = self.frame()
+            if cur is None:
+                return
+            a, b = (cur, prev) if cur.mean() >= prev.mean() else (prev, cur)
+            yield a, b
+            prev = self.frame()
+
+    def close(self):
+        self.p.kill()
+        self.p.wait()
+
+
+# ---- faces -----------------------------------------------------------------------------
+
+class Faces:
+    def __init__(self):
+        import cv2
+        self.cv2 = cv2
+        cv2.setNumThreads(2)
+        self.det = cv2.FaceDetectorYN.create(f'{SHARE}/face_detection_yunet_2023mar.onnx', '', (W, H),
+                                             0.8, 0.3, 5)
+        self.rec = cv2.FaceRecognizerSF.create(f'{SHARE}/face_recognition_sface_2021dec.onnx', '')
+
+    def look(self, lit, dark):
+        """(embedding, why-not): the biggest face, only when the IR light really lights it"""
+        bgr = self.cv2.cvtColor(lit, self.cv2.COLOR_GRAY2BGR)
+        _, found = self.det.detect(bgr)
+        if found is None or not len(found):
+            return None, 'no face'
+        f = max(found, key=lambda r: r[2] * r[3])
+        x, y, w, h = (int(v) for v in f[:4])
+        if w < 70:
+            return None, 'too far'
+        x0, y0, x1, y1 = max(x, 0), max(y, 0), min(x + w, W), min(y + h, H)
+        light = float(lit[y0:y1, x0:x1].mean()) - float(dark[y0:y1, x0:x1].mean())
+        if light < conf()['min_light']:
+            return None, 'not lit'                  # a screen or a far-away photo
+        crop = self.rec.alignCrop(bgr, f)
+        e = self.rec.feature(crop).flatten().astype(np.float32)
+        return e / np.linalg.norm(e), 'ok'
+
+
+def user_file(user):
+    if not user or '/' in user or user.startswith('.'):
+        sys.exit('zorro-face: bad user name')
+    return f'{DATA}/{user}.npy'
+
+
+def say(*a):
+    print(*a, flush=True)
+
+
+def enroll(user, seconds=8, want=24):
+    dev = find_camera()
+    if not dev:
+        sys.exit('zorro-face: no IR camera found')
+    emitter(dev)
+    faces, got, why = Faces(), [], {}
+    cam, t0 = Camera(dev), time.time()
+    say('look at the camera, move your head a little')
+    try:
+        for lit, dark in cam.pairs():
+            if time.time() - t0 > seconds or len(got) >= want:
+                break
+            e, w = faces.look(lit, dark)
+            why[w] = why.get(w, 0) + 1
+            if e is not None:
+                got.append(e)
+                say(f'progress {len(got)}/{want}')
+    finally:
+        cam.close()
+    if len(got) < 8:
+        sys.exit(f'zorro-face: only {len(got)} good views ({why}); come closer, look straight at the camera')
+    os.makedirs(DATA, mode=0o711, exist_ok=True)   # others may see that a face exists, not read it
+    old = []
+    try:
+        old = list(np.load(user_file(user)))
+    except OSError:
+        pass
+    arr = np.array((old + got)[-96:], np.float32)     # adding again (glasses, light) keeps both
+    tmp = user_file(user) + '.tmp'
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'wb') as fh:
+        np.save(fh, arr)
+    os.replace(tmp, user_file(user))
+    say(f'done: {len(got)} views learned ({len(arr)} in total)')
+
+
+def verify(user, timeout=6.0):
+    try:
+        known = np.load(user_file(user))
+    except OSError:
+        say('not enrolled')
+        return 2
+    dev = find_camera()
+    if not dev:
+        say('no camera')
+        return 3
+    emitter(dev)
+    c = conf()
+    faces, hits, t0 = Faces(), 0, time.time()
+    cam = Camera(dev)
+    say('looking')
+    try:
+        for lit, dark in cam.pairs():
+            if time.time() - t0 > timeout:
+                break
+            e, why = faces.look(lit, dark)
+            if e is None:
+                continue
+            score = float((known @ e).max())
+            if score >= c['threshold']:
+                hits += 1
+                if hits >= c['need']:
+                    say(f'match {score:.2f}')
+                    return 0
+            else:
+                hits = 0
+    finally:
+        cam.close()
+    say('no match')
+    return 1
+
+
+def status(user):
+    dev = find_camera()
+    c = conf()
+    out = {'camera': dev, 'models': os.path.exists(f'{SHARE}/face_recognition_sface_2021dec.onnx'),
+           'lock': c['lock'], 'login': c['login']}
+    if user:
+        out['enrolled'] = os.path.exists(user_file(user))     # the folder is 0711: visible, not readable
+    return out
+
+
+def snapshot(path):
+    import cv2
+    dev = find_camera()
+    if not dev:
+        sys.exit('zorro-face: no IR camera found')
+    emitter(dev)
+    cam = Camera(dev)
+    try:
+        best = None
+        for i, (lit, _) in enumerate(cam.pairs()):
+            best = lit
+            if i >= 6:
+                break
+    finally:
+        cam.close()
+    cv2.imwrite(path, best)
+
+
+def set_option(key, on):
+    try:
+        c = json.load(open(CONF))
+    except (OSError, ValueError):
+        c = {}
+    c[key] = on
+    tmp = CONF + '.tmp'
+    with open(tmp, 'w') as fh:
+        json.dump(c, fh, indent=1)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, CONF)
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    cmd, user = a[0], (a[1] if len(a) > 1 and not a[1].startswith('-') else '')
+    timeout = float(a[a.index('--timeout') + 1]) if '--timeout' in a else 6.0
+    if cmd in ('enroll', 'verify', 'remove', 'set') and TESTING and 'ZORRO_FACE_DATA' not in os.environ:
+        sys.exit('zorro-face: needs root (the faces are kept where only root can read them)')
+    if 'PKEXEC_UID' in os.environ:          # from the app: only your own face, no verify
+        import pwd
+        me = pwd.getpwuid(int(os.environ['PKEXEC_UID'])).pw_name
+        if cmd not in ('enroll', 'remove', 'verify', 'set', 'status') or (cmd != 'set' and user != me):
+            sys.exit('zorro-face: through pkexec only your own face (enroll, verify, remove), or set')
+    if cmd == 'enroll' and user:
+        enroll(user)
+    elif cmd == 'verify' and user:
+        return verify(user, timeout)
+    elif cmd == 'remove' and user:
+        try:
+            os.unlink(user_file(user))
+        except FileNotFoundError:
+            pass
+        say('removed')
+    elif cmd == 'set' and len(a) == 3 and a[1] in ('lock', 'login') and a[2] in ('on', 'off'):
+        set_option(a[1], a[2] == 'on')
+        say(f'{a[1]}: {a[2]}')
+    elif cmd == 'status':
+        print(json.dumps(status(user)))
+    elif cmd == 'snapshot' and user:
+        snapshot(user)
+    else:
+        print(__doc__.strip())
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

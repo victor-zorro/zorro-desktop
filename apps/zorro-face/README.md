@@ -1,0 +1,27 @@
+# zorro-face
+
+Face unlock with the laptop's infrared camera (the Windows Hello kind), for the zorro-dm
+lock screen and, if you want, the login. The password always works too.
+
+- **Camera:** the video device that only gives greyscale frames (found by its stable
+  `/dev/v4l/by-path` name). Its IR light is switched on with a vendor control
+  (UVC extension unit 14, selector 6 → `1 3 3 …` on the T14 Gen 1's Chicony camera) and
+  then flashes on every other frame.
+- **Recognition:** OpenCV's YuNet (finds the face) and SFace (128 numbers per face), both
+  from the OpenCV model zoo, downloaded and checked by sha256 in `install.sh`.
+- **Not fooled by a phone:** a frame only counts when the face is clearly brighter in the
+  lit frame than in the dark frame next to it. A screen shows black in infrared.
+- **Faces:** `/var/lib/zorro-face/USER.npy`, root only. Learning again (glasses, other
+  light) adds to what is there.
+- **Settings:** `/etc/zorro-face.json`: `lock` and `login` (both on: where the face icon
+  shows; after a face login the keyring stays closed, a face can't open it), `threshold`
+  (0.5), `need` (2 frames in a row).
+
+```
+sudo apps/zorro-face/install.sh      # models, /usr/local/bin/zorro-face, polkit rule
+zorro-face status zorro
+```
+Learn your face in the Zorro app → Login screen → Face unlock (asks your password).
+The login and lock screen show a small face icon under the password field (only when a
+face is learned); pressing it runs `zorro-face verify USER` in zorro-dm. Nothing scans by
+itself, and the password keeps working while it looks.

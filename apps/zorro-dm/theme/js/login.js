@@ -3,7 +3,7 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
-  const login = $('login'), entry = $('entry'), msg = $('msg'), userEl = $('user');
+  const login = $('login'), entry = $('entry'), msg = $('msg'), userEl = $('user'), face = $('face');
   let ready = false, user = null, appeared = false;
 
   // ---- glitch sync: CSS jitter while the shader glitches ----------------
@@ -107,6 +107,25 @@
     say('');
     L.respond(entry.value);
     entry.value = '';
+  });
+
+  // face icon (zorro-face): only shown when a face is learned; scans only when pressed
+  face.addEventListener('click', () => {
+    const L = window.lightdm;
+    if (!L || !L.face || face.classList.contains('looking')) return;
+    face.classList.add('looking');
+    say('look at the camera');
+    L.face();
+    setTimeout(() => entry.focus(), 0);
+  });
+  window.addEventListener('zorroface', (e) => {
+    const st = e.detail;
+    if (st === 'available') face.hidden = false;
+    else if (st === 'none') face.hidden = true;
+    else if (st === 'fail') {
+      face.classList.remove('looking');
+      say('face not recognised', true);
+    }
   });
 
   document.addEventListener('mousedown', (e) => {

@@ -61,11 +61,13 @@ SHIM = r"""
     hibernate() { post({cmd: 'power', action: 'hibernate'}); return true; },
     restart() { post({cmd: 'power', action: 'reboot'}); return true; },
     shutdown() { post({cmd: 'power', action: 'poweroff'}); return true; },
+    face() { post({cmd: 'face'}); return true; },
   });
   window.lightdm = L;
   window.__zorro = (m) => {
     if (m.type === 'prompt') L.show_prompt._emit(m.text, m.secret ? 1 : 0);
     else if (m.type === 'message') L.show_message._emit(m.text, m.error ? 1 : 0);
+    else if (m.type === 'face') window.dispatchEvent(new CustomEvent('zorroface', {detail: m.state}));
     else if (m.type === 'complete') {
       L.in_authentication = false; L.is_authenticated = !!m.ok;
       L.authentication_complete._emit();
@@ -139,8 +141,11 @@ class PreviewBackend:
     def handle(self, m):
         cmd = m.get('cmd')
         if cmd == 'authenticate':
+            GLib.timeout_add(60, lambda: self.emit({'type': 'face', 'state': 'available'}) and False)
             GLib.timeout_add(50, lambda: self.emit({'type': 'prompt', 'text': 'Password:',
                                                     'secret': True}) and False)
+        elif cmd == 'face':            # preview: pretend to look, then fail
+            GLib.timeout_add(1500, lambda: self.emit({'type': 'face', 'state': 'fail'}) and False)
         elif cmd == 'respond':
             ok = m.get('text') == 'test'
             GLib.timeout_add(400, lambda: self.emit({'type': 'complete', 'ok': ok}) and False)

@@ -39,3 +39,6 @@ gir1.2-gst-plugins-base-1.0
 mpv
 mpv-mpris
 pipx
+# zorro-face: face unlock with the IR camera (OpenCV's YuNet + SFace models)
+python3-opencv
+ffmpeg
