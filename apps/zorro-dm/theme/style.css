@@ -67,7 +67,7 @@ html, body {
 #msg.error { color: var(--fg); text-shadow: -2px 0 var(--red), 2px 0 var(--cyan); }
 
 #face {
-  display: block; margin: 14px auto 0; width: 34px; height: 34px; padding: 4px;
+  display: block; margin: 14px auto 0; width: 68px; height: 68px; padding: 8px;
   background: none; border: 0; cursor: pointer; color: var(--dim);
 }
 #face[hidden] { display: none; }
