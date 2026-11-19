@@ -179,6 +179,8 @@ log "Info circle on the desktop (apps/zorro-orb)"
 apps/zorro-orb/install.sh
 log "Search by meaning (apps/zorro-search)"
 apps/zorro-search/install.sh
+log "Sweep notes (apps/zorro-sweep)"
+apps/zorro-sweep/install.sh
 
 # Scripts in ~/.local/bin on PATH for every shell
 grep -qF 'PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" \

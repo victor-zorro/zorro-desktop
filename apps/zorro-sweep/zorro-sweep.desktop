@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sweep notes
+Comment=Keep or delete notes one by one, then sort them into notebooks
+Exec=zorro-sweep
+Icon=edit-clear-all
+Terminal=false
+Categories=Office;Utility;

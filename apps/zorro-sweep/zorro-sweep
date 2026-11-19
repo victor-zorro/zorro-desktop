@@ -1,0 +1,917 @@
+#!/usr/bin/python3
+"""zorro-sweep: clean up a big notes vault one note at a time.
+
+  Keep or delete   a note fills the screen; swipe it left to keep, right to delete
+  Sort             the kept notes, one by one; drag each onto the notebook it belongs in
+                   (another vault, or a folder in this one); the best match by meaning lights up
+
+Swipe = drag with the mouse or a finger on the touch screen, or two fingers on the touchpad.
+Keys: ← keep · → delete · Space skip · Ctrl+Z undo · O open in Obsidian · 1-9 notebook (Sort)
+      Enter: best notebook (Sort)
+
+Delete moves the note (and pictures only it uses) to the vault's .trash folder, Obsidian's own
+trash: gone from the vault and from your phone, still on this laptop if you need it back.
+Moving to another vault takes the note's pictures along.
+
+  zorro-sweep [--vault PATH]     default: the vault called Notes (else the biggest one)
+
+Progress: ~/.local/state/zorro-sweep/<vault>.json (which notes you kept)
+"""
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.parse
+from datetime import datetime
+from pathlib import Path
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('PangoCairo', '1.0')
+from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, Pango, PangoCairo  # noqa: E402
+
+HERE = Path(os.path.realpath(__file__)).parent
+HOME = Path.home()
+OBSIDIAN_JSON = HOME / '.config/obsidian/obsidian.json'
+STATE_DIR = Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state')) / 'zorro-sweep'
+INDEX = Path(os.environ.get('XDG_CACHE_HOME', HOME / '.cache')) / 'zorro-search'
+
+BG = (0.02, 0.027, 0.04)
+FG = (0.85, 0.85, 0.87)
+DIM = (0.44, 0.44, 0.47)
+RED = (1.0, 0.16, 0.29)
+CYAN = (0.10, 0.90, 1.0)
+GREEN = (0.30, 1.0, 0.62)
+SWIPE = 150                     # px past which a let-go counts as a swipe
+IMG = re.compile(r'\.(png|jpe?g|gif|webp|bmp|svg)$', re.I)
+GAP = '<span size="4000"> </span>'     # an empty line, made small
+LINKS = re.compile(r'!?\[\[([^\]|#^]+)|!?\[[^\]]*\]\(<?([^)>]+)>?\)')
+
+
+# ---- vaults and notes ----------------------------------------------------------------------
+def vaults():
+    try:
+        v = json.loads(OBSIDIAN_JSON.read_text())['vaults'].values()
+        return [Path(x['path']) for x in v if Path(x['path']).is_dir()]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def attach_dir(vault):
+    try:
+        sub = json.loads((vault / '.obsidian/app.json').read_text()).get('attachmentFolderPath', '')
+    except (OSError, ValueError):
+        sub = ''
+    sub = sub.strip('/') if sub and not sub.startswith('.') else ''
+    return vault / sub if sub else vault
+
+
+def front(text):
+    """(front matter dict of simple key: value lines, body)"""
+    meta = {}
+    if text.startswith('---\n'):
+        end = text.find('\n---', 4)
+        if end > 0:
+            for ln in text[4:end].splitlines():
+                k, _, v = ln.partition(':')
+                if v:
+                    meta[k.strip()] = v.strip()
+            text = text[end + 4:].lstrip('\n')
+    return meta, text
+
+
+def refs(text):
+    """the file names a note links to or embeds (lower case, no folders)"""
+    out = set()
+    for a, b in LINKS.findall(text):
+        name = a or urllib.parse.unquote(b)
+        if '://' in name:
+            continue
+        out.add(Path(name.strip()).name.lower())
+    return out
+
+
+def when(meta, path):
+    for k in ('created', 'date'):
+        try:
+            return datetime.fromisoformat(meta[k][:16]).timestamp()
+        except (KeyError, ValueError):
+            pass
+    return path.stat().st_mtime
+
+
+def ago(ts):
+    days = (time.time() - ts) / 86400
+    if days < 1:
+        return 'today'
+    if days < 60:
+        return f'{int(days)} days ago'
+    if days < 730:
+        return f'{int(days / 30.4)} months ago'
+    return f'{int(days / 365.25)} years ago'
+
+
+def markup(body, limit=7000):
+    """a rough Pango rendering of markdown, enough to recognise a note"""
+    out = []
+    for ln in body[:limit].splitlines():
+        ln = re.sub(r'<[^>]+>', '', ln)
+        ln = re.sub(r'!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)', '', ln)
+        if not ln.strip():
+            if out and out[-1] != GAP:
+                out.append(GAP)
+            continue
+        e = GLib.markup_escape_text(ln)
+        e = re.sub(r'\[\[([^\]|]+)\|([^\]]+)\]\]', r'\2', e)
+        e = re.sub(r'\[\[([^\]]+)\]\]', r'<span foreground="#19e6ff">\1</span>', e)
+        e = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<span foreground="#19e6ff">\1</span>', e)
+        e = re.sub(r'\*\*(.+?)\*\*|__(.+?)__', lambda m: f'<b>{m[1] or m[2]}</b>', e)
+        e = re.sub(r'(?<![\w*])\*(?!\s)(.+?)\*(?!\w)', r'<i>\1</i>', e)
+        e = re.sub(r'`([^`]+)`', r'<tt>\1</tt>', e)
+        e = re.sub(r'^(\s*)[-*+] \[ \] ', r'\1☐ ', e)
+        e = re.sub(r'^(\s*)[-*+] \[[xX]\] ', r'\1☑ ', e)
+        e = re.sub(r'^(\s*)[-*+] ', r'\1•  ', e)
+        h = re.match(r'^(#{1,6}) (.*)', e)
+        if h:
+            e = f'<span size="{"x-large" if len(h[1]) == 1 else "large"}" weight="bold">{h[2]}</span>'
+        if re.fullmatch(r'\s*(-{3,}|\*{3,})\s*', ln):
+            e = '<span foreground="#6f7079">────────</span>'
+        out.append(e)
+    while out and out[-1] == GAP:
+        out.pop()
+    text = '\n'.join(out).strip()
+    if len(body) > limit:
+        text += '\n<span foreground="#6f7079">…</span>'
+    return text or '<span foreground="#6f7079">(empty note)</span>'
+
+
+class Vault:
+    """the vault being swept: its notes, its pictures and who uses them"""
+
+    def __init__(self, path):
+        self.path = path
+        self.state_file = STATE_DIR / (re.sub(r'[^\w.-]+', '_', path.name) + '.json')
+        try:
+            st = json.loads(self.state_file.read_text())
+        except (OSError, ValueError):
+            st = {}
+        self.kept = set(st.get('kept', []))      # names relative to the vault
+        self.stays = set(st.get('stays', []))    # kept and sorted: stays where it is
+        self.files = {}                          # lower-case name: path, for pictures and pdfs
+        self.uses = {}                           # lower-case name: set of notes that link to it
+        for p in self.path.rglob('*'):
+            rel = p.relative_to(self.path)
+            if rel.parts[0].startswith('.') or not p.is_file():
+                continue
+            if p.suffix.lower() == '.md':
+                for r in refs(self.read(p)):
+                    self.uses.setdefault(r, set()).add(p)
+            else:
+                self.files.setdefault(p.name.lower(), p)
+        self.notes = sorted((p for p in self.path.glob('*.md')), key=self.age)
+
+    @staticmethod
+    def read(p):
+        try:
+            return p.read_text(errors='replace')
+        except OSError:
+            return ''
+
+    def age(self, p):
+        return when(front(self.read(p)[:600])[0], p)
+
+    def save(self):
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        live = {p.name for p in self.path.glob('*.md')}
+        tmp = self.state_file.with_suffix('.tmp')
+        tmp.write_text(json.dumps({'kept': sorted(self.kept & live), 'stays': sorted(self.stays & live)},
+                                  indent=0))
+        os.replace(tmp, self.state_file)
+
+    def attachments(self, note, text):
+        return [self.files[r] for r in refs(text) if r in self.files and self.files[r].exists()]
+
+    def only_mine(self, note, f):
+        return self.uses.get(f.name.lower(), set()) <= {note}
+
+    def forget(self, note, text):
+        for r in refs(text):
+            self.uses.get(r, set()).discard(note)
+
+    def learn(self, note, text):
+        for r in refs(text):
+            self.uses.setdefault(r, set()).add(note)
+
+
+def free_name(path):
+    if not path.exists():
+        return path
+    for i in range(2, 1000):
+        p = path.with_name(f'{path.stem} {i}{path.suffix}')
+        if not p.exists():
+            return p
+    raise OSError(f'no free name for {path}')
+
+
+def move(src, dst, ops):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    ops.append(('mv', src, dst))
+
+
+def undo_ops(ops):
+    for op in reversed(ops):
+        if op[0] == 'mv':
+            op[1].parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(op[2]), str(op[1]))
+        elif op[0] == 'cp':
+            op[1].unlink(missing_ok=True)
+        elif op[0] == 'write':
+            op[1].write_text(op[2])
+
+
+# ---- the meaning of notes (the search app's index) -------------------------------------------
+class Meaning:
+    """note vectors from zorro-search's index: a note is the mean of its pieces, a notebook the
+    mean of its notes. Without the index there are simply no suggestions."""
+
+    def __init__(self):
+        self.ok = False
+        try:
+            import numpy as np
+            self.np = np
+            meta = json.loads((INDEX / 'meta.json').read_text())
+            vecs = np.load(INDEX / 'vecs.npy').astype(np.float32)
+            if len(meta) != len(vecs):
+                return
+        except Exception:               # noqa: BLE001 - no index, no numpy: no suggestions
+            return
+        rows = {}
+        for i, m in enumerate(meta):
+            rows.setdefault(m['p'], []).append(i)
+        self.note = {p: self.unit(vecs[ix].mean(0)) for p, ix in rows.items()}
+        self.ok = True
+
+    def unit(self, v):
+        n = self.np.linalg.norm(v)
+        return v / n if n else v
+
+    def of(self, path):
+        return self.note.get(str(path)) if self.ok else None
+
+    def centre(self, folder, flat=False):
+        if not self.ok:
+            return None
+        pre = str(folder) + '/'
+        vs = [v for p, v in self.note.items() if p.startswith(pre) and (not flat or '/' not in p[len(pre):])]
+        return self.unit(self.np.mean(vs, 0)) if vs else None
+
+
+# ---- the window ------------------------------------------------------------------------------
+class Sweep(Gtk.Window):
+    def __init__(self, vault):
+        super().__init__(title='Sweep notes')
+        self.set_default_size(1180, 820)
+        self.set_icon_name('edit-clear-all')
+        self.v = Vault(vault)
+        self.meaning = Meaning()
+        self.mode = 'sweep'
+        self.dx = self.dy = 0.0            # how far the card is dragged
+        self.drag = None                   # (x, y) where the drag started
+        self.wheel_at = 0.0                # touchpad swipe: last scroll event
+        self.scroll = 0.0                  # the preview, scrolled down
+        self.fly = None                    # (start, from dx, to dx, to dy, then)
+        self.enter_at = time.monotonic()   # new card zooms in
+        self.toast, self.toast_at = '', 0.0
+        self.undo = []
+        self.skipped = set()
+        self.hover = None                  # Sort: the notebook under the card
+        self.card = None                   # cached rendering of the current note
+        self.dests = []
+        self.find_dests()
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        top = Gtk.Box(spacing=6, margin=10)
+        self.b_sweep = Gtk.RadioButton(label='Keep or delete', draw_indicator=False)
+        self.b_sort = Gtk.RadioButton(label='Sort into notebooks', group=self.b_sweep, draw_indicator=False)
+        for b, m in ((self.b_sweep, 'sweep'), (self.b_sort, 'sort')):
+            b.connect('toggled', lambda b, m=m: b.get_active() and self.set_mode(m))
+            top.add(b)
+        self.count = Gtk.Label(xalign=1, hexpand=True)
+        top.add(self.count)
+        ub = Gtk.Button(label='Undo')
+        ub.set_tooltip_text('Ctrl+Z')
+        ub.connect('clicked', lambda b: self.do_undo())
+        top.add(ub)
+        box.add(top)
+
+        self.area = Gtk.DrawingArea(vexpand=True, can_focus=True)
+        self.area.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK |
+                             Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.SCROLL_MASK |
+                             Gdk.EventMask.SMOOTH_SCROLL_MASK)
+        self.area.connect('draw', self.draw_bg)
+        self.snow = None
+        try:                                # the theme's particles (apps/zorro-fx)
+            sys.path.insert(0, str(HERE.parent / 'zorro-fx'))
+            import zorro_fx
+            self.snow = zorro_fx.Snow(self.area, radius=0, profile='overlay')
+        except Exception:                   # noqa: BLE001 - without it: just dark
+            pass
+        self.area.connect('draw', self.draw)
+        self.area.connect('button-press-event', self.press)
+        self.area.connect('motion-notify-event', self.motion)
+        self.area.connect('button-release-event', self.release)
+        self.area.connect('scroll-event', self.wheel)
+        box.add(self.area)
+        self.add(box)
+        self.connect('key-press-event', self.key)
+        self.connect('destroy', lambda w: (self.v.save(), Gtk.main_quit()))
+        css = Gtk.CssProvider()
+        css.load_from_data(b'window, box { background: #05070a; } label { color: #9a9aa3; }')
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css, 800)
+        self.show_all()
+        self.area.grab_focus()
+        self.next_card()
+        GLib.timeout_add(16, self.tick)
+
+    # ---- what is shown -------------------------------------------------------------------
+    def find_dests(self):
+        """other vaults, and the folders in this one"""
+        out = []
+        for f in sorted(self.v.path.iterdir()):
+            if f.is_dir() and not f.name.startswith(('.', '_')) and f != attach_dir(self.v.path):
+                out.append({'name': f.name, 'sub': 'folder in ' + self.v.path.name, 'path': f, 'vault': False})
+        for vp in sorted(vaults()):
+            if vp != self.v.path:
+                out.append({'name': vp.name, 'sub': 'vault', 'path': vp, 'vault': True})
+        for d in out:
+            d['vec'] = self.meaning.centre(d['path'])
+        out.append({'name': 'Stays in ' + self.v.path.name, 'sub': 'keep it where it is', 'path': None,
+                    'vault': False, 'vec': None, 'stay': True})
+        out.append({'name': '+ New folder', 'sub': 'in ' + self.v.path.name, 'path': None,
+                    'vault': False, 'vec': None, 'new': True})
+        self.dests = out
+
+    def queue(self):
+        live = [p for p in self.v.notes if p.exists()]
+        if self.mode == 'sweep':
+            return [p for p in live if p.name not in self.v.kept and p not in self.skipped]
+        return [p for p in live if p.name in self.v.kept and p.name not in self.v.stays
+                and p not in self.skipped]
+
+    def next_card(self):
+        q = self.queue()
+        if not q and self.skipped:          # all seen: the skipped ones come round again
+            self.skipped.clear()
+            q = self.queue()
+        self.dx = self.dy = self.scroll = 0.0
+        self.hover = None
+        self.enter_at = time.monotonic()
+        self.card = self.load(q[0]) if q else None
+        self.left = len(q)
+        if self.mode == 'sweep':
+            self.count.set_text(f'{len(q)} to go · {len(self.v.kept)} kept')
+        else:
+            self.count.set_text(f'{len(q)} kept notes to sort')
+        self.area.queue_draw()
+
+    def load(self, path):
+        text = self.v.read(path)
+        meta, body = front(text)
+        pics = [f for f in self.v.attachments(path, text) if IMG.search(f.name)]
+        pix = None
+        for f in pics[:3]:
+            try:
+                pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(f), 560, 240, True)
+                break
+            except GLib.Error:
+                pass
+        n_att = len(self.v.attachments(path, text))
+        sub = ago(when(meta, path))
+        if n_att:
+            sub += f' · {n_att} attachment{"s" if n_att > 1 else ""}'
+        words = len(body.split())
+        sub += f' · {words} word{"s" if words != 1 else ""}'
+        card = {'path': path, 'title': path.stem, 'sub': sub, 'markup': markup(body), 'pix': pix,
+                'scores': {}}
+        vec = self.meaning.of(path)
+        if vec is not None:
+            for i, d in enumerate(self.dests):
+                if d['vec'] is not None:
+                    card['scores'][i] = float(vec @ d['vec'])
+        card['best'] = max(card['scores'], key=card['scores'].get) if card['scores'] else None
+        return card
+
+    def set_mode(self, m):
+        if m != self.mode:
+            self.mode = m
+            self.skipped.clear()
+            self.fly = None
+            self.next_card()
+            self.area.grab_focus()
+
+    def say(self, text):
+        self.toast, self.toast_at = text, time.monotonic()
+
+    # ---- actions -------------------------------------------------------------------------
+    def keep(self, p):
+        self.v.kept.add(p.name)
+        self.undo.append(('keep', p))
+        self.v.save()
+        self.say('kept')
+
+    def delete(self, p):
+        text = self.v.read(p)
+        trash = self.v.path / '.trash'
+        ops = []
+        try:
+            for f in self.v.attachments(p, text):
+                if self.v.only_mine(p, f):
+                    move(f, free_name(trash / f.name), ops)
+            move(p, free_name(trash / p.name), ops)
+        except OSError as e:
+            undo_ops(ops)
+            self.say(f'could not delete: {e}')
+            return
+        self.v.forget(p, text)
+        self.undo.append(('delete', p, ops, text))
+        self.say('deleted · Ctrl+Z brings it back')
+
+    def send(self, p, d):
+        """move a kept note to a folder or another vault (pictures go along)"""
+        text = self.v.read(p)
+        ops = []
+        try:
+            if not d['vault']:                       # a folder here: links keep working
+                move(p, free_name(d['path'] / p.name), ops)
+            else:
+                adir = attach_dir(d['path'])
+                new = text
+                for f in self.v.attachments(p, text):
+                    dst = adir / f.name
+                    if dst.exists() and dst.stat().st_size == f.stat().st_size:
+                        continue
+                    dst = free_name(dst)
+                    if dst.name != f.name:
+                        new = new.replace(f.name, dst.name)
+                    if self.v.only_mine(p, f):
+                        move(f, dst, ops)
+                    else:
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(f, dst)
+                        ops.append(('cp', dst))
+                target = free_name(d['path'] / p.name)
+                move(p, target, ops)
+                if new != text:
+                    ops.append(('write', target, text))
+                    target.write_text(new)
+        except OSError as e:
+            undo_ops(ops)
+            self.say(f'could not move: {e}')
+            return
+        if d['vault']:
+            self.v.forget(p, text)
+        self.v.kept.discard(p.name)
+        self.undo.append(('send', p, ops, text))
+        self.v.save()
+        self.say(f'→ {d["name"]}')
+
+    def stay(self, p):
+        self.v.stays.add(p.name)
+        self.undo.append(('stay', p))
+        self.v.save()
+        self.say(f'stays in {self.v.path.name}')
+
+    def new_folder(self, p):
+        dlg = Gtk.Dialog(title='New folder', transient_for=self, modal=True)
+        dlg.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Create and move', Gtk.ResponseType.OK)
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        e = Gtk.Entry(activates_default=True, margin=12, placeholder_text='folder name')
+        dlg.get_content_area().add(e)
+        dlg.show_all()
+        ok = dlg.run() == Gtk.ResponseType.OK
+        name = e.get_text().strip().strip('/.').replace('/', '-')
+        dlg.destroy()
+        if not ok or not name:
+            return False
+        f = self.v.path / name
+        f.mkdir(exist_ok=True)
+        self.find_dests()
+        d = next(x for x in self.dests if x['path'] == f)
+        self.send(p, d)
+        return True
+
+    def do_undo(self):
+        if not self.undo:
+            self.say('nothing to undo')
+            return
+        u = self.undo.pop()
+        p = u[1]
+        try:
+            if u[0] == 'keep':
+                self.v.kept.discard(p.name)
+            elif u[0] == 'stay':
+                self.v.stays.discard(p.name)
+            else:
+                undo_ops(u[2])
+                self.v.learn(p, u[3])
+                if u[0] == 'send':
+                    self.v.kept.add(p.name)
+        except OSError as e:
+            self.say(f'could not undo: {e}')
+            return
+        self.v.save()
+        self.skipped.discard(p)
+        want = 'sort' if u[0] in ('send', 'stay') else 'sweep'
+        if want != self.mode:
+            (self.b_sort if want == 'sort' else self.b_sweep).set_active(True)
+        # bring that note back on top
+        if p in self.v.notes:
+            self.v.notes.remove(p)
+        self.v.notes.insert(0, p)
+        self.say('undone')
+        self.next_card()
+
+    def decide(self, what, dest=None):
+        """fly the card off, then act"""
+        if not self.card or self.fly:
+            return
+        p = self.card['path']
+        W = self.area.get_allocated_width()
+        if what == 'keep':
+            self.fly = (time.monotonic(), self.dx, -W, self.dy, lambda: self.keep(p))
+        elif what == 'delete':
+            self.fly = (time.monotonic(), self.dx, W, self.dy, lambda: self.delete(p))
+        elif what == 'skip':
+            self.skipped.add(p)
+            self.fly = (time.monotonic(), self.dx, self.dx, -self.area.get_allocated_height(), lambda: None)
+        elif what == 'dest':
+            d = self.dests[dest]
+            if d.get('new'):
+                if not self.new_folder(p):
+                    self.dx = self.dy = 0
+                    return
+                self.next_card()
+                return
+            act = (lambda: self.stay(p)) if d.get('stay') else (lambda: self.send(p, d))
+            x, y = self.tile_rects()[dest][:2]
+            cx, cy = self.card_rect()[:2]
+            self.fly = (time.monotonic(), self.dx, x - cx, y - cy, act)
+
+    # ---- input ---------------------------------------------------------------------------
+    def key(self, w, ev):
+        k = Gdk.keyval_name(ev.keyval)
+        ctrl = ev.state & Gdk.ModifierType.CONTROL_MASK
+        if ctrl and k in ('z', 'Z'):
+            self.do_undo()
+        elif k == 'BackSpace':
+            self.do_undo()
+        elif k == 'Escape':
+            self.destroy()
+        elif not self.card:
+            return False
+        elif k in ('o', 'O'):
+            self.open_obsidian(self.card['path'])
+        elif k in ('space', 'Down'):
+            self.decide('skip')
+        elif k in ('Page_Down',):
+            self.scroll += 300
+        elif k in ('Page_Up',):
+            self.scroll = max(0, self.scroll - 300)
+        elif self.mode == 'sweep' and k == 'Left':
+            self.decide('keep')
+        elif self.mode == 'sweep' and k == 'Right':
+            self.decide('delete')
+        elif self.mode == 'sort' and k in ('Return', 'KP_Enter') and self.card['best'] is not None:
+            self.decide('dest', self.card['best'])
+        elif self.mode == 'sort' and len(k) == 1 and k.isdigit() and 0 < int(k) <= len(self.dests):
+            self.decide('dest', int(k) - 1)
+        else:
+            return False
+        self.area.queue_draw()
+        return True
+
+    def press(self, w, ev):
+        self.area.grab_focus()
+        if ev.button == 1 and self.card and not self.fly:
+            x, y, cw, ch = self.card_rect()
+            if abs(ev.x - x) < cw / 2 and abs(ev.y - y) < ch / 2:
+                self.drag = (ev.x - self.dx, ev.y - self.dy)
+            elif self.mode == 'sort':           # a click on a notebook
+                t = self.tile_at(ev.x, ev.y)
+                if t is not None:
+                    self.decide('dest', t)
+        if ev.type == Gdk.EventType._2BUTTON_PRESS and self.card:
+            self.open_obsidian(self.card['path'])
+        return True
+
+    def motion(self, w, ev):
+        if self.drag:
+            self.dx = ev.x - self.drag[0]
+            self.dy = (ev.y - self.drag[1]) if self.mode == 'sort' else (ev.y - self.drag[1]) * 0.25
+            if self.mode == 'sort':
+                self.hover = self.tile_at(ev.x, ev.y)
+            self.area.queue_draw()
+        return True
+
+    def release(self, w, ev):
+        if not self.drag:
+            return True
+        self.drag = None
+        self.let_go()
+        return True
+
+    def let_go(self):
+        if self.mode == 'sweep':
+            if self.dx < -SWIPE:
+                return self.decide('keep')
+            if self.dx > SWIPE:
+                return self.decide('delete')
+        elif self.hover is not None:
+            return self.decide('dest', self.hover)
+        self.fly = (time.monotonic(), self.dx, 0, 0, None)     # spring back
+
+    def wheel(self, w, ev):
+        ok, dx, dy = ev.get_scroll_deltas()
+        if not ok:                              # a mouse wheel: up / down / left / right
+            d = ev.direction
+            dx = {Gdk.ScrollDirection.LEFT: -1, Gdk.ScrollDirection.RIGHT: 1}.get(d, 0)
+            dy = {Gdk.ScrollDirection.UP: -1, Gdk.ScrollDirection.DOWN: 1}.get(d, 0)
+            if dx and self.mode == 'sweep' and self.card:
+                self.decide('keep' if dx < 0 else 'delete')
+                return True
+            self.scroll = max(0, self.scroll + dy * 60)
+            self.area.queue_draw()
+            return True
+        # touchpad: two fingers sideways move the card, up/down scrolls the preview
+        if self.mode == 'sweep' and self.card and not self.fly and (abs(dx) > abs(dy) or self.dx):
+            self.dx += dx * 14
+            self.wheel_at = time.monotonic()
+        else:
+            self.scroll = max(0, self.scroll + dy * 30)
+        self.area.queue_draw()
+        return True
+
+    def open_obsidian(self, p):
+        url = 'obsidian://open?vault={}&file={}'.format(
+            urllib.parse.quote(self.v.path.name), urllib.parse.quote(str(p.relative_to(self.v.path))))
+        subprocess.Popen(['xdg-open', url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # ---- animation -----------------------------------------------------------------------
+    def tick(self):
+        now = time.monotonic()
+        busy = False
+        if self.dx and not self.drag and not self.fly and self.wheel_at and now - self.wheel_at > 0.18:
+            self.wheel_at = 0
+            self.let_go()
+        if self.fly:
+            t0, fx, tx, ty, then = self.fly
+            k = min(1.0, (now - t0) / (0.22 if then else 0.18))
+            e = 1 - (1 - k) ** 3
+            self.dx = fx + (tx - fx) * e
+            self.dy = self.dy + (ty - self.dy) * e if then else self.dy * (1 - e)
+            busy = True
+            if k >= 1:
+                self.fly = None
+                if then:
+                    then()
+                    self.next_card()
+                else:
+                    self.dx = self.dy = 0
+        if busy or self.drag or now - self.enter_at < 0.3 or now - self.toast_at < 2.2:
+            self.area.queue_draw()
+        return True
+
+    # ---- layout --------------------------------------------------------------------------
+    def card_rect(self):
+        W, H = self.area.get_allocated_width(), self.area.get_allocated_height()
+        if self.mode == 'sort':
+            cw = min(560, W - 2 * 250)
+        else:
+            cw = min(700, W - 80)
+        ch = H - 110
+        return W / 2, (H - 40) / 2, max(cw, 300), max(ch, 300)
+
+    def tile_rects(self):
+        """Sort: the notebooks, left and right of the card: (centre x, centre y, w, h)"""
+        W, H = self.area.get_allocated_width(), self.area.get_allocated_height()
+        cx, cy, cw, ch = self.card_rect()
+        tw, th, gap = min(220, (W - cw) / 2 - 30), 62, 12
+        n = len(self.dests)
+        rows = math.ceil(n / 2)
+        top = cy - (rows * (th + gap) - gap) / 2 + th / 2
+        out = []
+        for i in range(n):
+            side = -1 if i % 2 == 0 else 1
+            x = cx + side * (cw / 2 + 24 + tw / 2)
+            out.append((x, top + (i // 2) * (th + gap), tw, th))
+        return out
+
+    def tile_at(self, x, y):
+        for i, (tx, ty, tw, th) in enumerate(self.tile_rects()):
+            if abs(x - tx) < tw / 2 and abs(y - ty) < th / 2:
+                return i
+        return None
+
+    # ---- drawing -------------------------------------------------------------------------
+    def draw_bg(self, w, cr):
+        cr.set_source_rgb(*BG)
+        cr.paint()
+
+    def text(self, cr, s, x, y, size=10, rgb=FG, a=1.0, bold=False, mono=True, align=None, width=None):
+        lay = PangoCairo.create_layout(cr)
+        fd = Pango.FontDescription(f'{"DejaVu Sans Mono" if mono else "DejaVu Sans"} {size}')
+        if bold:
+            fd.set_weight(Pango.Weight.BOLD)
+        lay.set_font_description(fd)
+        if width:
+            lay.set_width(int(width * Pango.SCALE))
+            lay.set_ellipsize(Pango.EllipsizeMode.END)
+        lay.set_text(s, -1)
+        tw, th = lay.get_pixel_size()
+        if align == 'center':
+            x -= tw / 2
+        elif align == 'right':
+            x -= tw
+        cr.set_source_rgba(*rgb, a)
+        cr.move_to(x, y)
+        PangoCairo.show_layout(cr, lay)
+        return tw, th
+
+    def frame(self, cr, x, y, w, h, line=(1, 1, 1), a=0.16, fill=0.62):
+        cr.rectangle(x, y, w, h)
+        cr.set_source_rgba(0, 0, 0, fill)
+        cr.fill_preserve()
+        cr.set_source_rgba(*line, a)
+        cr.set_line_width(1)
+        cr.stroke()
+        cr.set_source_rgba(*FG, 0.7)             # corner ticks, like the lock screen
+        for px, py, sx, sy in ((x, y, 1, 1), (x + w, y + h, -1, -1)):
+            cr.move_to(px + 10 * sx, py)
+            cr.line_to(px, py)
+            cr.line_to(px, py + 10 * sy)
+            cr.stroke()
+
+    def draw(self, w, cr):
+        W, H = w.get_allocated_width(), w.get_allocated_height()
+        now = time.monotonic()
+        if self.mode == 'sort':
+            self.draw_tiles(cr)
+        if not self.card:
+            msg = ('Every note is seen. Kept notes are waiting under Sort.' if self.mode == 'sweep'
+                   else 'Nothing to sort. Keep notes first under Keep or delete.')
+            self.text(cr, msg, W / 2, H / 2 - 10, 12, DIM, align='center')
+        else:
+            self.draw_card(cr, now)
+        # bottom line: what the keys do
+        hint = ('← keep   → delete   space skip   O open in Obsidian   Ctrl+Z undo' if self.mode == 'sweep'
+                else 'drag onto a notebook   1-9 or Enter (best match)   space skip   Ctrl+Z undo')
+        self.text(cr, hint, W / 2, H - 30, 9, DIM, align='center')
+        if now - self.toast_at < 2.2 and self.toast:
+            a = min(1, (2.2 - (now - self.toast_at)) / 0.5)
+            self.text(cr, self.toast, W / 2, 14, 11, FG, a, align='center')
+        return False
+
+    def draw_card(self, cr, now):
+        c = self.card
+        cx, cy, cw, ch = self.card_rect()
+        grow = min(1, (now - self.enter_at) / 0.25)
+        scale = 0.94 + 0.06 * (1 - (1 - grow) ** 3)
+        p = max(-1, min(1, self.dx / SWIPE)) if self.mode == 'sweep' else 0
+        cr.save()
+        cr.translate(cx + self.dx, cy + self.dy)
+        cr.rotate(self.dx * 0.00045 if self.mode == 'sweep' else 0)
+        cr.scale(scale, scale)
+        cr.push_group()
+        x, y = -cw / 2, -ch / 2
+        edge = RED if p > 0 else CYAN
+        self.frame(cr, x, y, cw, ch, edge if abs(p) > 0.05 else (1, 1, 1), 0.16 + 0.6 * abs(p), 0.72)
+        cr.set_source_surface(self.contents(cw, ch), x, y)
+        cr.paint()
+        # the stamp while swiping
+        if abs(p) > 0.15:
+            word, col = ('DELETE', RED) if p > 0 else ('KEEP', CYAN)
+            cr.save()
+            cr.translate(x + (cw - 150 if p > 0 else 150), y + 120)
+            cr.rotate(-0.25 if p > 0 else 0.25)
+            a = min(1, (abs(p) - 0.15) / 0.6)
+            for off, rgb in ((-2, RED), (2, CYAN), (0, col)):   # the glitch split
+                self.text(cr, word, off, -14, 26, rgb, a * (0.5 if off else 1), bold=True, align='center')
+            cr.restore()
+        cr.pop_group_to_source()
+        fade = 1.0
+        if self.fly and self.fly[4]:
+            fade = max(0, 1 - (now - self.fly[0]) / 0.22)
+        cr.paint_with_alpha(fade * (0.4 + 0.6 * grow))
+        cr.restore()
+
+    def contents(self, cw, ch):
+        """the note drawn flat into a picture once (cheap to redraw, and clipping text in a
+        tilted card goes wrong on some X servers)"""
+        import cairo
+        c = self.card
+        key = (id(c), int(self.scroll), cw, ch)
+        if c.get('surf_key') == key:
+            return c['surf']
+        s = cairo.ImageSurface(cairo.FORMAT_ARGB32, int(cw), int(ch))
+        cr = cairo.Context(s)
+        pad = 26
+        self.text(cr, c['title'], pad, 20, 15, FG, width=cw - 2 * pad)
+        self.text(cr, c['sub'], pad, 50, 9, DIM, width=cw - 2 * pad)
+        top = 80
+        cr.rectangle(1, top, cw - 2, ch - top - 1)
+        cr.clip()
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(Pango.FontDescription('DejaVu Sans 10.5'))
+        lay.set_width(int((cw - 2 * pad) * Pango.SCALE))
+        lay.set_wrap(Pango.WrapMode.WORD_CHAR)
+        try:
+            lay.set_markup(c['markup'], -1)
+        except GLib.Error:
+            lay.set_text(re.sub(r'<[^>]+>', '', c['markup']), -1)
+        lh = lay.get_pixel_size()[1]
+        ph = c['pix'].get_height() + 16 if c['pix'] else 0
+        most = max(0, ph + lh + 30 - (ch - top))        # scrolled no further than the end
+        if self.scroll > most:
+            self.scroll = most
+        oy = top - int(self.scroll)
+        if c['pix']:
+            pw = c['pix'].get_width()
+            if c['pix'].get_has_alpha():                # a logo on see-through: light backing
+                cr.rectangle(pad, oy, pw, ph - 16)
+                cr.set_source_rgba(1, 1, 1, 0.85)
+                cr.fill()
+            Gdk.cairo_set_source_pixbuf(cr, c['pix'], pad, oy)
+            cr.paint_with_alpha(0.92)
+            oy += ph
+        cr.set_source_rgba(*FG, 0.92)
+        cr.move_to(pad, oy)
+        PangoCairo.show_layout(cr, lay)
+        if ph + lh - self.scroll > ch - top:            # more below: fade the bottom out
+            cr.reset_clip()
+            cr.set_operator(cairo.OPERATOR_DEST_OUT)
+            g = cairo.LinearGradient(0, ch - 60, 0, ch - 1)
+            g.add_color_stop_rgba(0, 0, 0, 0, 0)
+            g.add_color_stop_rgba(1, 0, 0, 0, 1)
+            cr.rectangle(0, ch - 60, cw, 60)
+            cr.set_source(g)
+            cr.fill()
+        c['surf'], c['surf_key'] = s, (id(c), int(self.scroll), cw, ch)
+        return s
+
+    def draw_tiles(self, cr):
+        best = self.card['best'] if self.card else None
+        scores = self.card['scores'] if self.card else {}
+        for i, (tx, ty, tw, th) in enumerate(self.tile_rects()):
+            d = self.dests[i]
+            x, y = tx - tw / 2, ty - th / 2
+            hot = i == self.hover
+            line = CYAN if (i == best or hot) else (1, 1, 1)
+            self.frame(cr, x, y, tw, th, line, 0.8 if hot else (0.55 if i == best else 0.16), 0.55)
+            if hot:
+                cr.rectangle(x, y, tw, th)
+                cr.set_source_rgba(*CYAN, 0.12)
+                cr.fill()
+            self.text(cr, f'{i + 1}', x + 8, y + 8, 8, DIM)
+            self.text(cr, d['name'], x + 24, y + 8, 10, FG, width=tw - 32)
+            self.text(cr, 'best match' if i == best else d['sub'], x + 24, y + 28, 8,
+                      CYAN if i == best else DIM, width=tw - 32)
+            s = scores.get(i)
+            if s is not None:                   # how close in meaning: a thin bar
+                k = max(0.0, min(1.0, (s - 0.70) / 0.2))
+                cr.rectangle(x + 24, y + th - 10, (tw - 40) * k, 2)
+                cr.set_source_rgba(*(CYAN if i == best else DIM), 0.9)
+                cr.fill()
+
+
+def pick_vault(arg):
+    if arg:
+        return Path(arg).expanduser().resolve()
+    vs = vaults()
+    for v in vs:
+        if v.name == 'Notes':
+            return v
+    if vs:
+        return max(vs, key=lambda v: sum(1 for _ in v.glob('*.md')))
+    sys.exit('no Obsidian vault found')
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return
+    vault = pick_vault(args[1] if args[:1] == ['--vault'] and len(args) > 1 else None)
+    if not vault.is_dir():
+        sys.exit(f'no such vault: {vault}')
+    Sweep(vault)
+    Gtk.main()
+
+
+if __name__ == '__main__':
+    main()
