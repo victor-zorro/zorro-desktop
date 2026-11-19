@@ -393,11 +393,20 @@ class DesktopPages:
             return box
         c = dial.load_conf()
 
+        assigned = {}                   # slice choices made on this page (None = automatic)
+
         def save(order=None, hide=None):
-            # the dial writes the dragged order and its bin itself: keep what it wrote meanwhile
+            # the dial writes the dragged order, slice moves and its bin itself: keep what it
+            # wrote meanwhile, and add only what was changed here
             now = dial.load_conf()
             c['order'] = now.get('order', {}) if order is None else order
             c['hide'] = now.get('hide', []) if hide is None else hide
+            c['assign'] = dict(now.get('assign', {}))
+            for app, v in assigned.items():
+                if v:
+                    c['assign'][app] = v
+                else:
+                    c['assign'].pop(app, None)
             c['notes_hide_vaults'] = now.get('notes_hide_vaults', [])     # set in Accounts → Obsidian
             write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
@@ -413,9 +422,11 @@ class DesktopPages:
         sizes = ui.form([
             ('Place', place),
             ('Dialer size', ui.scale(0.7, 1.6, 0.05, c.get('size', 1.0),
-                                     lambda v: (c.__setitem__('size', v), save()), lambda v: f'{v * 100:.0f}%')),
+                                     lambda v: (c.__setitem__('size', v), ui.later('dial-size', save, 300)),
+                                     lambda v: f'{v * 100:.0f}%')),
             ('Icon size', ui.scale(0.7, 1.6, 0.05, c.get('icon_size', 1.0),
-                                   lambda v: (c.__setitem__('icon_size', v), save()), lambda v: f'{v * 100:.0f}%'))])
+                                   lambda v: (c.__setitem__('icon_size', v), ui.later('dial-size', save, 300)),
+                                   lambda v: f'{v * 100:.0f}%'))])
         box.add(sizes)
         box.add(note('From the clock, the rings fan into the screen: the apps you use most '
                      'sit right next to the clock, the outer rings hold more. In a corner the '
@@ -469,11 +480,7 @@ class DesktopPages:
             cb.set_active_id(c.get('assign', {}).get(a['id'], ''))
 
             def pick(w, app=a['id']):
-                v = w.get_active_id()
-                if v:
-                    c.setdefault('assign', {})[app] = v
-                else:
-                    c.setdefault('assign', {}).pop(app, None)
+                assigned[app] = w.get_active_id() or None
                 save()
             cb.connect('changed', pick)
             grid.attach(Gtk.Label(label=a['name'], xalign=0, ellipsize=3, max_width_chars=32,

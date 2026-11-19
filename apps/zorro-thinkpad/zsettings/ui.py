@@ -201,8 +201,19 @@ _later = {}
 def later(key, fn, ms=400):
     """run fn once typing / sliding has rested for ms (one config write, not one per key)"""
     if _later.get(key):
-        GLib.source_remove(_later[key])
-    _later[key] = GLib.timeout_add(ms, lambda: (_later.pop(key, None), fn()) and False)
+        GLib.source_remove(_later[key][0])
+    _later[key] = (GLib.timeout_add(ms, lambda: (_later.pop(key, None), fn()) and False), fn)
+
+
+def flush_later():
+    """the window closes: do what was still waiting now"""
+    for key, (tid, fn) in list(_later.items()):
+        GLib.source_remove(tid)
+        _later.pop(key, None)
+        try:
+            fn()
+        except Exception as e:      # noqa: BLE001
+            print('zorro: on close:', e)
 
 
 def in_bg(fn, *args):

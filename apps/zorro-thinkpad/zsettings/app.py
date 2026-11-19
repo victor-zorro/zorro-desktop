@@ -112,7 +112,7 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
         stack.connect('notify::visible-child-name', lambda *a: self.run_first_shown())
         self.top.connect('notify::visible-child-name', lambda *a: self.run_first_shown())
         self.run_first_shown()
-        GLib.timeout_add(300, self.build_rest)
+        self.rest_id = GLib.timeout_add(300, self.build_rest)
         self.timers.append(GLib.timeout_add_seconds(5, self.refresh))
         self.connect('destroy', self.on_destroy)
 
@@ -120,7 +120,7 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
     def tab(self, name):
         """this tab's Group, built now if it was not yet"""
         g = self.groups.get(name)
-        if g is None and name in self.tab_builders:
+        if g is None and name in self.tab_builders and not getattr(self, 'dead', False):
             g = self.tab_builders.pop(name)()
             self.groups[name] = g
             w = g.widget()
@@ -136,9 +136,10 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
 
     def build_rest(self):
         """one more tab per idle moment, until all are there"""
-        if self.tab_builders:
+        self.rest_id = None
+        if self.tab_builders and not getattr(self, 'dead', False):
             self.tab(next(iter(self.tab_builders)))
-            GLib.idle_add(self.build_rest)
+            self.rest_id = GLib.idle_add(self.build_rest)
         return False
 
     def build_network(self):
@@ -204,6 +205,11 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
 
     def on_destroy(self, _w):
         """stop this window's timers; write slider changes that were still waiting"""
+        from .ui import flush_later
+        flush_later()
+        self.dead = True                # build_rest / tab: nothing more into this window
+        if getattr(self, 'rest_id', None):
+            GLib.source_remove(self.rest_id)
         for tid in self.timers:
             GLib.source_remove(tid)
         self.timers = []

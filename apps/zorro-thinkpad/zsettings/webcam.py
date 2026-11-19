@@ -70,23 +70,28 @@ def reset(dev=DEV):
 
 _pending = {}
 _worker = []
+import threading as _threading      # noqa: E402
+_lock = _threading.Lock()
 
 
 def set_soon(name, value, dev=DEV):
     """for sliders: the newest value per control is applied by one background thread, so
     dragging never waits for v4l2-ctl and in-between values are skipped"""
-    import threading
-    _pending[name] = value
-    if _worker:
-        return
+    with _lock:
+        _pending[name] = value
+        if _worker:
+            return
+        _worker.append(1)
 
     def work():
-        while _pending:
-            n, v = _pending.popitem()
+        while True:
+            with _lock:
+                if not _pending:
+                    _worker.clear()     # under the lock: a new value starts a new worker
+                    return
+                n, v = _pending.popitem()
             set_control(n, v, dev)
-        _worker.clear()
-    _worker.append(1)
-    threading.Thread(target=work, daemon=True).start()
+    _threading.Thread(target=work, daemon=True).start()
 
 
 def restore(dev=DEV):

@@ -170,6 +170,7 @@ class HomePages:
 
     def home_refresh(self):
         if getattr(self, 'home_busy', False):
+            self.home_again = True      # one more round when this one is done (its facts are older)
             return False                # the last round is still running (netbird can take 8 s)
         self.home_busy = True
 
@@ -244,6 +245,9 @@ class HomePages:
         def show(d):
             self.home_busy = False
             self.home_show(d)
+            if getattr(self, 'home_again', False):
+                self.home_again = False
+                self.home_refresh()
         self.bg(gather, show)
         return False
 
@@ -337,7 +341,7 @@ class HomePages:
     # connections
     def show_conn(self, d):
         sig = ('conn', d['wifi'] and d['wifi'][0], d['wifi_on'], d['cable'], d['bt_on'], tuple(d['bt_dev']),
-               d['nb'] and d['nb'][0], d['airplane'])
+               d['nb'] and d['nb'][0], d['airplane'], d.get('mobile'))
         wifi = f'Wi-Fi  {d["wifi"][0]} {d["wifi"][1]}%' if d['wifi'] else ('Wi-Fi  on' if d['wifi_on'] else 'Wi-Fi  off')
         if self.home_seen.get('conn') == sig:            # only numbers changed: just the text
             if getattr(self, 'wifi_pill', None):
@@ -365,12 +369,18 @@ class HomePages:
         f.add(self.pill('Airplane', d['airplane'], self.airplane))
         self.fill(self.h_conn, [f])
 
+    def home_fresh(self, *names):
+        """after an action: read these slow facts again now (else they are kept 30 s)"""
+        for n in names:
+            self.__dict__.get('home_slow', {}).pop(n, None)
+        GLib.timeout_add(800, lambda: self.home_refresh() and False)
+
     def conn_do(self, cmd):
-        self.bg(lambda: run(*cmd, timeout=30), lambda _r: GLib.timeout_add(800, lambda: self.home_refresh() and False))
+        self.bg(lambda: run(*cmd, timeout=30), lambda _r: self.home_fresh('netbird'))
 
     def airplane(self):
         from .keys import key_airplane
-        self.bg(key_airplane, lambda _r: GLib.timeout_add(800, lambda: self.home_refresh() and False))
+        self.bg(key_airplane, lambda _r: self.home_fresh('netbird'))
 
     # power
     def show_power(self, d):

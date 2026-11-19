@@ -211,8 +211,11 @@ def write_dpi(c):
     except (TypeError, ValueError):
         scale = 1.0
     dpi = round(96 * scale)
-    subprocess.run(['xrdb', '-merge'], input=f'Xft.dpi: {dpi}\n', text=True,
-                   capture_output=True, timeout=5)
+    try:                                # never in the way of the rest of apply_windows
+        subprocess.run(['xrdb', '-merge'], input=f'Xft.dpi: {dpi}\n', text=True,
+                       capture_output=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def picom_running():
@@ -255,7 +258,15 @@ def winpos_conf():
         return {}
 
 
+_winpos_lock = __import__('threading').Lock()
+
+
 def set_winpos(key, value):
+    with _winpos_lock:                  # two switches flipped quickly: both are kept
+        _set_winpos(key, value)
+
+
+def _set_winpos(key, value):
     """save, switch Firefox's own session restore along, and restart zorro-winpos (it reads its
     settings when it starts; it does not reopen anything when restarted within a login)"""
     c = winpos_conf()

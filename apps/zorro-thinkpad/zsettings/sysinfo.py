@@ -67,13 +67,13 @@ def collect_fixed():
     osr = dict(re.findall(r'^(\w+)="?([^"\n]*)"?', sysread('/etc/os-release'), re.M))
     info['os'] = osr.get('PRETTY_NAME', 'Linux')
     info['kernel'] = os.uname().release
-    m = re.search(r'(\d+x\d+)\+\d+\+\d+', run('xrandr', '--current'))
-    info['screen'] = m.group(1) if m else ''
     return info
 
 
 def collect_live():
     info = {}
+    m = re.search(r'(\d+x\d+)\+\d+\+\d+', run('xrandr', '--current'))   # a monitor can come or go
+    info['screen'] = m.group(1) if m else ''
     mem = meminfo()
     info['mem_total'], info['mem_used'] = mem.get('MemTotal', 0), mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)
     info['swap_total'], info['swap_used'] = mem.get('SwapTotal', 0), mem.get('SwapTotal', 0) - mem.get('SwapFree', 0)

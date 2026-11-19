@@ -81,6 +81,7 @@ class PrinterPages:
             except Exception as e:          # noqa: BLE001 - show it, keep the app alive
                 res = e
             idle(lambda: then(res) and False)
+            idle(lambda: self.__dict__.get('home_slow', {}).pop('printer', None) and False)   # Home too
         threading.Thread(target=work, daemon=True).start()
 
     def pr_refresh(self):
