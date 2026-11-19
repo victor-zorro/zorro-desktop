@@ -338,6 +338,7 @@ IGNORE = re.compile(r'(\.partial$|\.tmp$|~$|\.swp$|\.swx$|/\.~lock\.|\.part$)')
 def cmd_watch(_args):
     if not shutil.which('inotifywait'):
         sys.exit('zorro-drive watch: needs inotify-tools')
+    pending, dirty = {}, set()          # kept when the folders change and the watch restarts
     while True:
         cfg = load()
         roots = {}
@@ -357,7 +358,7 @@ def cmd_watch(_args):
              '-e', 'close_write,moved_to,moved_from,create,delete', *roots, str(CONF_DIR)],
             stdout=subprocess.PIPE)                 # the config folder too: no polling for it
         fd, buf = proc.stdout.fileno(), b''
-        pending, running, dirty = {}, {}, set()
+        running = {}
         next_check = 0
 
         def work(f):
@@ -384,10 +385,12 @@ def cmd_watch(_args):
                         break                   # inotifywait died: restart it
                     buf += chunk
                     *lines, buf = buf.split(b'\n')
-                    if any(ln.decode(errors='replace').partition(' ')[2] == str(CONF) for ln in lines):
-                        break                   # folders changed: rewatch
+                    rewatch = False
                     for ln in lines:
                         events, _, path = ln.decode(errors='replace').partition(' ')
+                        if path == str(CONF):
+                            rewatch = True      # folders changed: rewatch, after this chunk
+                            continue
                         if IGNORE.search(path):
                             continue
                         for root, f in roots.items():
@@ -399,6 +402,8 @@ def cmd_watch(_args):
                                     # a file written in place is a save of yours: sync again after
                                     dirty.add(f['id'])
                                 break
+                    if rewatch:
+                        break                   # folders changed: rewatch (the queue stays)
                 now = time.monotonic()
                 if now >= next_check:
                     # resume syncs cut off by a reboot, retry after Google's rate limit
@@ -409,13 +414,15 @@ def cmd_watch(_args):
                              and (st.get('retry_at') or 0) <= time.time())
                                 or st.get('message') == 'sync was interrupted'):
                             pending.setdefault(f['id'], now)
-                for fid in [x for x in dirty if x not in running and not is_locked(x)]:
+                for fid in [x for x in list(dirty) if x not in running and not is_locked(x)]:
                     dirty.discard(fid)          # the timer's sync (another process) ended
                     pending[fid] = now + DEBOUNCE
                 for fid, due in list(pending.items()):
                     if now >= due and fid not in running:
                         del pending[fid]
-                        f = next(x for x in roots.values() if x['id'] == fid)
+                        f = next((x for x in roots.values() if x['id'] == fid), None)
+                        if f is None:
+                            continue            # that folder is no longer synced
                         t = threading.Thread(target=work, args=(f,))
                         running[fid] = t
                         t.start()

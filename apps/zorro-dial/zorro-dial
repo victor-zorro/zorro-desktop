@@ -373,17 +373,29 @@ class Dial(Gtk.Window):
         GLib.timeout_add(150, lambda: [self.start_fetch(p) for p in self.parts.values()] and False)
 
     def start_fetch(self, part):
-        if part.key not in self.fetching:
+        # once per opening, and never twice at the same time (the daemon keeps the parts
+        # between openings: a second Super press must not start a second read of Notes)
+        with FETCH_LOCK:
+            if part.key in self.fetching or part.key in FETCHING:
+                return
             self.fetching.add(part.key)
-            threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
+            FETCHING.add(part.key)
+        threading.Thread(target=self.fetch_part, args=(part,), daemon=True).start()
 
     def fetch_part(self, part):
+        """read the part's data into a fresh copy and swap it in when complete, so the dial
+        never draws a half-filled part (the old one stays until then)"""
         try:
-            part.fetch()
+            fresh = type(part)()
+            fresh.fetch()
+            self.parts[part.key] = fresh
         except Exception as e:          # noqa: BLE001 - one broken part must not stop the dial
             print(f'zorro-dial: {part.key}: {e}', file=sys.stderr)
+        finally:
+            with FETCH_LOCK:
+                FETCHING.discard(part.key)
         # the window may not be built yet when a quick part is done: redraw once it is
-        GLib.idle_add(lambda: hasattr(self, 'area') and self.area.queue_draw() and False)
+        GLib.idle_add(lambda: [d.area.queue_draw() for d in [self] + OPEN if hasattr(d, 'area')] and False)
 
     def hub_at(self, x, y):
         """which part of the hub is under (x, y): a part's key, 'centre', or None"""
@@ -408,6 +420,8 @@ class Dial(Gtk.Window):
     def grab(self, tries=20):
         """keyboard and mouse to the dial; Openbox may still hold the key that started us, so
         try again a little later (without blocking the main loop: no sleep here)"""
+        if self.get_window() is None:
+            return False                # closed meanwhile
         seat = Gdk.Display.get_default().get_default_seat()
         if seat.grab(self.get_window(), Gdk.SeatCapabilities.ALL, True,
                      None, None, None) != Gdk.GrabStatus.SUCCESS and tries > 1:
@@ -1249,7 +1263,8 @@ class Dial(Gtk.Window):
     def bin_at(self):
         """the bin's centre: the top-left corner, or top-right when the dial sits top-left"""
         W = self.geo.width
-        return (W - 70, 70) if self.conf.get('anchor') == 'top-left' else (70, 70)
+        cx, cy = self.fan()[:2]          # the dial's clock in the top-left quarter: top-right
+        return (W - 70, 70) if cx < W / 2 and cy < self.geo.height / 2 else (70, 70)
 
     def over_bin(self, x, y):
         bx, by = self.bin_at()
@@ -1464,6 +1479,8 @@ class Dial(Gtk.Window):
 
 
 RESIDENT = False                        # True in 'zorro-dial --daemon'
+FETCHING = set()                        # parts being read now (any opening)
+FETCH_LOCK = threading.Lock()
 OPEN = []                               # the dial window now shown by the daemon
 
 
@@ -1472,7 +1489,6 @@ def daemon():
     or closes the one that is open"""
     global RESIDENT
     RESIDENT = True
-    DAEMON_PID.write_text(str(os.getpid()))
 
     def toggle():
         if OPEN:
@@ -1482,6 +1498,7 @@ def daemon():
         return True
     GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGUSR1, toggle)
     GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, lambda: Gtk.main_quit() or False)
+    DAEMON_PID.write_text(str(os.getpid()))     # only now: a Super press finds a handler
     try:
         Gtk.main()
     finally:
