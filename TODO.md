@@ -311,19 +311,9 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   apps only when the application folders' mtime changes. Cheaper first step: cache the app
   list as JSON keyed on those mtimes.
 
-- [ ] **4.2 Settings app: build tabs lazily** (M-L)
-  Done: the slow probes wait for their tab (hardware scan, SoundCloud check via yt-dlp, the
-  WebGL login preview; the modem query already did). Open: building the pages themselves
-  lazily (the sidebar names come from the built pages, so Group needs a builder + titles).
-  `zsettings/app.py` 53-93. Every F9 runs the hardware scan, a root modem query, a yt-dlp
-  network check and a WebKit view. Let `Group.section` take a builder and build a tab on
-  first show; create the WebKit view only when the Login page opens. Replace "destroy and
-  rebuild the window" refreshes with `refill()` (`pages_desktop.py` 252, `pages_look.py`
-  115-146, 322); name sub-pages instead of positional `'hw:2'` targets.
-
-- [x] **4.3 Delete the second particle engine** (S-M)
-  `apps/zorro-fx/zorro_fx.py` 126-239 vs 316-383 and 431-482. Keep the numpy `Swarm`,
-  delete the plain-Python path (about 130 lines); numpy is in `packages/common.txt`.
+- [x] **4.2 Settings app: build tabs lazily** (M-L)
+  Done: tabs are built when opened or linked to, the rest one per idle moment after Home shows;
+  F9 to Home 0.63 s -> 0.23 s on the test screen. The slow probes wait for their tab.
 
 - [ ] **4.4 Split the big files** (M-L)
   `zorro-dial/zorro-dial` (one 1,000-line class) and `dialmodes.py` → `parts/<name>.py` +

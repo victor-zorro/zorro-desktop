@@ -202,6 +202,8 @@ class ThinkpadPages:
         return False
 
     def refresh(self):
+        if not hasattr(self, 'bat_label'):
+            return True                 # the Power tab is not built yet
         self.bat_label.set_text(battery_text())
         prof = sysread('/sys/firmware/acpi/platform_profile', '?')
         src = 'battery' if sysread('/sys/class/power_supply/AC/online', '1') == '0' else 'charger'

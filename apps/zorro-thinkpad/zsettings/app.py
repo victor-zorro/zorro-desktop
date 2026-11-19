@@ -21,6 +21,17 @@ from gi.repository import GLib, Gtk
 
 # ---- the app window: Home (often used) + the gear: Network, Audio, Power, Hardware, Desktop, Look, Accounts ---
 
+TABS = (('network', 'Network'), ('audio', 'Audio'), ('power', 'Power'), ('hardware', 'Hardware'),
+        ('desktop', 'Desktop'), ('login', 'Look'), ('accounts', 'Accounts'))
+SECTION_TAB = {'wifi': 'network', 'eth': 'network', 'lte': 'network', 'nb': 'network',
+               'aout': 'audio', 'ain': 'audio', 'aplay': 'audio', 'atog': 'audio',
+               'power': 'power', 'hw': 'hardware', 'keys': 'hardware', 'lights': 'hardware',
+               'sys': 'hardware', 'wall': 'desktop', 'dial': 'desktop', 'orb': 'desktop',
+               'fx': 'desktop', 'windows': 'desktop', 'text': 'desktop', 'lang': 'desktop',
+               'applook': 'desktop', 'theme': 'login', 'look': 'login', 'face': 'login',
+               'sc': 'accounts', 'ob': 'accounts'}
+
+
 class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
@@ -51,49 +62,20 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         style_osd(self.get_screen())
         self.groups = {}
 
-        hw = Group()                    # devices, and the ThinkPad's own keys and lights
-        hw.section('hw', 'Hardware', self.hw_page())
-        hw.section('keys', 'ThinkPad', self.keys_page())
-        hw.section('lights', None, self.lights_page())
-        hw.section('sys', 'System', self.sysinfo_page())
-        snd = Group()                   # outputs, inputs, per app, several at once
-        a_out, a_in, a_play, a_tog = self.audio_pages()
-        snd.section('aout', 'Audio', a_out)
-        snd.section('ain', None, a_in)
-        snd.section('aplay', None, a_play)
-        snd.section('atog', None, a_tog)
-        power = Group()
-        power.section('power', 'Power', self.power_page())
-        acc = Group()                   # the logins the desktop borrows: SoundCloud, Obsidian
-        sc, ob = self.accounts_pages()
-        acc.section('sc', 'Accounts', sc)
-        acc.section('ob', None, ob)
-        net = Group()                   # Wi-Fi, Ethernet, mobile data, NetBird
-        wifi, eth, nb = self.network_pages()
-        net.section('wifi', 'Wi-Fi', wifi)
-        net.section('eth', 'Ethernet', eth)
-        net.section('lte', 'Mobile (LTE)', self.mobile_page())
-        net.section('nb', 'NetBird', nb)
-        desk = Group()
-        desk.section('wall', 'Wallpaper', self.wall_page())
-        desk.section('dial', 'Dialer', self.dial_page())
-        desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
-        desk.section('fx', 'Overlays', self.fx_page('overlay'))
-        desk.section('windows', 'Windows', self.windows_page())
-        desk.section('text', 'Text & colours', self.text_page())
-        desk.section('lang', 'Languages', self.lang_page())
-        desk.section('applook', 'This app', self.fx_page('app'))
-        login = Group()                 # Look: the theme presets, then the login / lock screen itself
-        login.section('theme', 'Theme', self.theme_page())
-        login.section('look', 'Login & lock screen', self.look_page())
-        login.section('face', 'Face unlock', self.face_page())
-        for name, title, g in (('network', 'Network', net), ('audio', 'Audio', snd),
-                               ('power', 'Power', power), ('hardware', 'Hardware', hw),
-                               ('desktop', 'Desktop', desk), ('login', 'Look', login),
-                               ('accounts', 'Accounts', acc)):
-            stack.add_titled(g.widget(), name, title)
-            self.groups[name] = g
-            g.select(select)
+        # each tab is built when it is first needed (opened, or a link points into it), the
+        # rest one by one once the window is on screen: F9 shows Home without waiting for them
+        self.tab_builders = {'network': self.build_network, 'audio': self.build_audio,
+                             'power': self.build_power, 'hardware': self.build_hardware,
+                             'desktop': self.build_desktop, 'login': self.build_look,
+                             'accounts': self.build_accounts}
+        self.tab_boxes = {}
+        for name, title in TABS:
+            holder = Gtk.Box(hexpand=True, vexpand=True)
+            stack.add_titled(holder, name, title)
+            self.tab_boxes[name] = holder
+        stack.connect('notify::visible-child-name', lambda st, _p: self.tab_on_screen())
+        if select:
+            self.tab(SECTION_TAB.get(select.split(':')[0], 'hardware'))
 
         # the app's own look: particles behind everything (Desktop → This app)
         outer = Gtk.Box()
@@ -128,9 +110,92 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         stack.connect('notify::visible-child-name', lambda *a: self.run_first_shown())
         self.top.connect('notify::visible-child-name', lambda *a: self.run_first_shown())
         self.run_first_shown()
-        self.custom_box.set_visible(load_conf().get('star') == 'custom')
+        GLib.timeout_add(300, self.build_rest)
         self.timers.append(GLib.timeout_add_seconds(5, self.refresh))
         self.connect('destroy', self.on_destroy)
+
+    # -- the tabs, built on demand
+    def tab(self, name):
+        """this tab's Group, built now if it was not yet"""
+        g = self.groups.get(name)
+        if g is None and name in self.tab_builders:
+            g = self.tab_builders.pop(name)()
+            self.groups[name] = g
+            w = g.widget()
+            self.tab_boxes[name].add(w)
+            w.show_all()
+            g.select(None)
+        return g
+
+    def tab_on_screen(self):
+        """the tab you now see is built (not while Home is in front)"""
+        if getattr(self, 'top', None) and self.top.get_visible_child_name() == 'setup':
+            self.tab(self.stack.get_visible_child_name())
+
+    def build_rest(self):
+        """one more tab per idle moment, until all are there"""
+        if self.tab_builders:
+            self.tab(next(iter(self.tab_builders)))
+            GLib.idle_add(self.build_rest)
+        return False
+
+    def build_network(self):
+        net = Group()                   # Wi-Fi, Ethernet, mobile data, NetBird
+        wifi, eth, nb = self.network_pages()
+        net.section('wifi', 'Wi-Fi', wifi)
+        net.section('eth', 'Ethernet', eth)
+        net.section('lte', 'Mobile (LTE)', self.mobile_page())
+        net.section('nb', 'NetBird', nb)
+        return net
+
+    def build_audio(self):
+        snd = Group()                   # outputs, inputs, per app, several at once
+        a_out, a_in, a_play, a_tog = self.audio_pages()
+        snd.section('aout', 'Audio', a_out)
+        snd.section('ain', None, a_in)
+        snd.section('aplay', None, a_play)
+        snd.section('atog', None, a_tog)
+        return snd
+
+    def build_power(self):
+        power = Group()
+        power.section('power', 'Power', self.power_page())
+        return power
+
+    def build_hardware(self):
+        hw = Group()                    # devices, and the ThinkPad's own keys and lights
+        hw.section('hw', 'Hardware', self.hw_page())
+        hw.section('keys', 'ThinkPad', self.keys_page())
+        hw.section('lights', None, self.lights_page())
+        hw.section('sys', 'System', self.sysinfo_page())
+        self.custom_box.set_visible(load_conf().get('star') == 'custom')
+        return hw
+
+    def build_desktop(self):
+        desk = Group()
+        desk.section('wall', 'Wallpaper', self.wall_page())
+        desk.section('dial', 'Dialer', self.dial_page())
+        desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
+        desk.section('fx', 'Overlays', self.fx_page('overlay'))
+        desk.section('windows', 'Windows', self.windows_page())
+        desk.section('text', 'Text & colours', self.text_page())
+        desk.section('lang', 'Languages', self.lang_page())
+        desk.section('applook', 'This app', self.fx_page('app'))
+        return desk
+
+    def build_look(self):
+        login = Group()                 # Look: the theme presets, then the login / lock screen itself
+        login.section('theme', 'Theme', self.theme_page())
+        login.section('look', 'Login & lock screen', self.look_page())
+        login.section('face', 'Face unlock', self.face_page())
+        return login
+
+    def build_accounts(self):
+        acc = Group()                   # the logins the desktop borrows: SoundCloud, Obsidian
+        sc, ob = self.accounts_pages()
+        acc.section('sc', 'Accounts', sc)
+        acc.section('ob', None, ob)
+        return acc
 
     def on_destroy(self, _w):
         """stop this window's timers; write slider changes that were still waiting"""
@@ -149,15 +214,19 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
 
     def show_page(self, pid):
         """open a sub-page by id, e.g. power:0 (sidebar + top tab), in all setup"""
+        if ':' not in pid:
+            pid += ':0'
+        self.tab(SECTION_TAB.get(pid.split(':')[0], ''))     # built now if it was not yet
         grp = next((n for n, g in self.groups.items() if pid in g.ids), None)
         if grp:
+            self.stack.set_visible_child_name(grp)       # first: so only this tab is built
             self.show_setup()
-            self.stack.set_visible_child_name(grp)
             self.groups[grp].select(pid)
 
     def show_setup(self):
         self.cam_stop()
         self.top.set_visible_child_name('setup')
+        self.tab_on_screen()
         self.sync_header()
 
     def show_home(self):
