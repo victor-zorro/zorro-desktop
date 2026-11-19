@@ -357,9 +357,37 @@
   // ---------- camera / projection -------------------------------------------
   const CAM = 3;                            // camera distance
   let pass = null, nextPassAt = 0, firstPass = true;
+  // 'random' deals the animals like cards: a shuffled round of all of them, so every one comes by
+  // before any repeats, and never the same twice in a row. The round is remembered between
+  // locks (localStorage) where the page may keep it; otherwise it lasts this page.
+  let memBag = null;
+  function shuffled() {
+    let bag = memBag, last = '';
+    if (!bag) {
+      try {
+        const s = JSON.parse(localStorage.getItem('zorro-animals') || '{}');
+        bag = (s.bag || []).filter((x) => ANIMALS.includes(x));
+        last = s.last || '';
+      } catch (e) { bag = []; }
+    }
+    if (!bag.length) {
+      bag = ANIMALS.slice();
+      for (let i = bag.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [bag[i], bag[j]] = [bag[j], bag[i]];
+      }
+      if (bag[0] === (last || lastAnimal)) bag.push(bag.shift());
+    }
+    const r = bag.shift();
+    memBag = bag;
+    lastAnimal = r;
+    try { localStorage.setItem('zorro-animals', JSON.stringify({ bag, last: r })); } catch (e) { /* not kept */ }
+    return r;
+  }
+  let lastAnimal = '';
   function pickAnimal() {
     const a = cfg.animal;
-    if (a === 'random') return ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+    if (a === 'random') return shuffled();
     return MODELS[a] ? a : 'whale';
   }
   function newPass(now) {
