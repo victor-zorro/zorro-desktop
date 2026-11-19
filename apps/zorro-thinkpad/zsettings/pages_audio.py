@@ -1,5 +1,6 @@
 """app: Audio tab: outputs, inputs, what plays where, several outputs together (audio.py)"""
 import threading
+import time
 
 from . import audio
 from .base import load_conf
@@ -98,6 +99,8 @@ class AudioPages:
         sig = (tuple((d['name'], d['default'], d['muted']) for d in sinks),
                tuple((d['name'], d['default'], d['muted']) for d in sources),
                tuple((s['id'], s['sink']) for s in streams))
+        self.vol_sync('sinks', sinks)
+        self.vol_sync('sources', sources)
         if sig == self.au_seen and not force:
             return True
         self.au_seen = sig
@@ -130,6 +133,7 @@ class AudioPages:
             vol.add_mark(100, Gtk.PositionType.BOTTOM, None)
             vol.connect('format-value', lambda w, v: f'{v:.0f}%')
             vol.connect('value-changed', lambda w, n=d['name']: self.au_volume(kind, n, w.get_value()))
+            self.vol_follow(vol, kind, d['name'])
             txt.add(vol)
             row.add(txt)
             mute = Gtk.ToggleButton(label='Muted' if d['muted'] else 'Mute', active=d['muted'],
@@ -148,9 +152,33 @@ class AudioPages:
             box.add(note('None found'))
         box.show_all()
 
+    def vol_follow(self, scale, kind, name):
+        """keep this slider in step with the real volume (F2 / F3 change it outside the app)"""
+        sliders = self.__dict__.setdefault('vol_sliders', {})
+        sliders.setdefault((kind, name), []).append(scale)
+        scale.connect('destroy', lambda w: sliders.get((kind, name), []).remove(w)
+                      if w in sliders.get((kind, name), []) else None)
+
+    def vol_sync(self, kind, devs):
+        """move the sliders to the volume read now; not one the user is moving"""
+        touched = self.__dict__.setdefault('vol_touched', {})
+        self.vol_setting = True
+        try:
+            for d in devs:
+                if time.monotonic() - touched.get((kind, d['name']), 0) < 2:
+                    continue
+                for s in self.__dict__.get('vol_sliders', {}).get((kind, d['name']), []):
+                    if abs(s.get_value() - d['volume']) >= 1:
+                        s.set_value(d['volume'])
+        finally:
+            self.vol_setting = False
+
     def au_volume(self, kind, name, value):
         """apply after the slider rests a moment (no pactl per pixel)"""
+        if getattr(self, 'vol_setting', False):
+            return                      # moved by vol_sync, not by the user
         key = (kind, name)
+        self.__dict__.setdefault('vol_touched', {})[key] = time.monotonic()
         ids = self.__dict__.setdefault('au_vol_ids', {})
         if ids.get(key):
             GLib.source_remove(ids[key])

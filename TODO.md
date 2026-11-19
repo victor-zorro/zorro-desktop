@@ -74,7 +74,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: `|| true` on the pipeline so the check runs; in install.sh call it as
   `./update-extras.sh || echo "extras failed, continuing"`.
 
-- [ ] **1.8 Settings app: three small bugs** (S)
+- [x] **1.8 Settings app: three small bugs** (S)
   `apps/zorro-thinkpad/zsettings/pages_home.py`, `pages_audio.py`.
   a) Volume sliders show the old value after F2/F3 (`pages_home.py` about 216-219,
      `pages_audio.py` about 98-102): `set_value` on the existing slider when not dragged.

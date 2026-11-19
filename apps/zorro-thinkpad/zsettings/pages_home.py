@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import threading
 from pathlib import Path
 
@@ -165,16 +166,34 @@ class HomePages:
         return sw
 
     def home_refresh(self):
-        def gather():
-            d = {'sinks': audio.devices('sinks'), 'eq': eq.settings(), 'eq_running': bool(eq.running())}
+        if getattr(self, 'home_busy', False):
+            return False                # the last round is still running (netbird can take 8 s)
+        self.home_busy = True
+
+        def part(d, fn, *keys):
+            """one card's facts; a failing command leaves that card's defaults, not all six"""
+            try:
+                fn(d)
+            except Exception as e:      # noqa: BLE001
+                print('zorro: home refresh:', keys, e, file=sys.stderr)
+
+        def sound(d):
+            d.update(sinks=audio.devices('sinks'), eq=eq.settings(), eq_running=bool(eq.running()))
+
+        def printer(d):
             d['printers'] = printers.installed() if printers.available() else None
             d['queue'] = len([ln for ln in run('lpstat', '-o').splitlines() if ln.strip()])
+
+        def conn(d):
             wifi = re.search(r'^yes:(\d+):(.*)$', run('nmcli', '-t', '-f', 'ACTIVE,SIGNAL,SSID', 'dev', 'wifi'), re.M)
             d['wifi'] = (wifi.group(2), wifi.group(1)) if wifi else None
             d['wifi_on'] = 'enabled' in run('nmcli', 'radio', 'wifi')
-            d['cable'] = any(ln.split(':')[1] == 'ethernet' and ln.split(':')[2] in ('connected', 'connected (externally)')
-                             for ln in run('nmcli', '-t', '-f', 'DEVICE,TYPE,STATE', 'dev').splitlines()
-                             if ln.count(':') >= 2) or bool(re.search(r'default .*dev en', run('ip', 'route')))
+            devs = [ln.split(':') for ln in run('nmcli', '-t', '-f', 'DEVICE,TYPE,STATE', 'dev').splitlines()
+                    if ln.count(':') >= 2]
+            up = ('connected', 'connected (externally)')
+            d['cable'] = any(x[1] == 'ethernet' and x[2] in up for x in devs) \
+                or bool(re.search(r'default .*dev en', run('ip', 'route')))
+            d['mobile'] = any(x[1] == 'gsm' and x[2] in up for x in devs)
             d['bt_on'] = 'Powered: yes' in run('bluetoothctl', 'show')
             d['bt_dev'] = [ln.split(' ', 2)[2] for ln in run('bluetoothctl', 'devices', 'Connected').splitlines()
                            if ln.startswith('Device ')]
@@ -187,22 +206,35 @@ class HomePages:
             soft = [sysread(r / 'soft') == '1' for r in Path('/sys/class/rfkill').glob('rfkill*')]
             from .keys import airplane_on
             d['airplane'] = airplane_on() if soft else False
+
+        def power(d):
             d['bat'] = sysread('/sys/class/power_supply/BAT0/capacity')
             d['bat_text'] = battery_text()
             d['profile'] = sysread('/sys/firmware/acpi/platform_profile')
             d['ac'] = sysread('/sys/class/power_supply/AC/online', '1') == '1'
+
+        def info(d):
             d['info'] = sysinfo.collect()
+
+        def gather():
+            d = {}
+            for fn in (sound, printer, conn, power, info):
+                part(d, fn, fn.__name__)
             return d
-        self.bg(gather, self.home_show)
+
+        def show(d):
+            self.home_busy = False
+            self.home_show(d)
+        self.bg(gather, show)
         return False
 
     def home_show(self, d):
         self.home_data = d
-        self.show_sound(d)
-        self.show_printer(d)
-        self.show_conn(d)
-        self.show_power(d)
-        self.show_info(d)
+        for show in (self.show_sound, self.show_printer, self.show_conn, self.show_power, self.show_info):
+            try:
+                show(d)
+            except KeyError:            # its facts could not be read this round: keep the card
+                pass
         return True
 
     # sound
@@ -215,6 +247,7 @@ class HomePages:
         cur = e['target'] if on else next((s['name'] for s in d['sinks'] if s['default']), '')
         sig = ('sound', tuple(s['name'] for s in self.real_sinks(d)), cur, on)   # not the volume: no rebuild under the mouse
         if self.home_seen.get('sound') == sig:
+            self.vol_sync('sinks', d['sinks'])      # the volume itself: move the slider
             return
         self.home_seen['sound'] = sig
         outs = flow(1)
@@ -227,6 +260,8 @@ class HomePages:
         vol.set_value(vol_dev['volume'] if vol_dev else 0)
         vol.connect('format-value', lambda w, v: f'{v:.0f}%')
         vol.connect('value-changed', lambda w: vol_dev and self.au_volume('sinks', vol_dev['name'], w.get_value()))
+        if vol_dev:
+            self.vol_follow(vol, 'sinks', vol_dev['name'])
         eqrow = flow()
         sw = Gtk.Switch(active=on, valign=Gtk.Align.CENTER)
         sw.connect('notify::active', lambda w, _p: self.eq_turn(w.get_active()))
@@ -302,7 +337,8 @@ class HomePages:
         bt = 'Bluetooth  ' + (', '.join(x[:14] for x in d['bt_dev']) or ('on' if d['bt_on'] else 'off'))
         f.add(self.pill(bt, d['bt_on'], lambda: self.conn_do(['bluetoothctl', 'power',
                                                               'off' if d['bt_on'] else 'on'])))
-        f.add(self.pill('Mobile', False, lambda: self.show_page('lte:0')))
+        f.add(self.pill('Mobile' + ('  connected' if d['mobile'] else ''), d['mobile'],
+                        lambda: self.show_page('lte:0')))
         if d['nb']:
             up, n, total = d['nb']
             self.nb_pill = self.pill(f'NetBird  {n}/{total}' if up else 'NetBird  off', bool(up),
