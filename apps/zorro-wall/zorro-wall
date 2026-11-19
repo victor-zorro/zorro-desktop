@@ -2,7 +2,7 @@
 """zorro-wall: the living wallpaper. The login screen's engine (apps/zorro-dm/theme, fx.js)
 running as the desktop background: iridescent deep sea with the wireframe animal.
 
-Calm on purpose: 24 frames a second on the charger, 8 on battery, half resolution, nothing while
+Calm on purpose: 12 frames a second on the charger, 8 on battery, half resolution, nothing while
 windows cover the desktop. The look follows the login screen (/etc/zorro-dm/look.json)
 with the TV effects toned down, unless set otherwise in the Zorro app → Desktop → Wallpaper.
 

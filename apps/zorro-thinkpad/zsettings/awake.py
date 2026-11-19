@@ -86,9 +86,3 @@ class Awake:
 
     def check_call(self):
         self.call = camera_or_mic_in_use()
-
-    def status(self):
-        """why the screen stays on right now ('' = it may lock)"""
-        if self.call:
-            return 'camera or microphone in use'
-        return ', '.join(sorted({v[1] for v in self.inhibits.values()}))

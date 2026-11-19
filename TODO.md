@@ -248,6 +248,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   button style, one word per action ("Check again" vs "Refresh" vs "Scan").
 
 - [ ] **3.4 Settings app: tab order and one home per setting** (M)
+  Done: d ("Zorro" everywhere, tooltip, README). Open: a, b, c: they move where things are; ask Vincent.
   `zsettings/app.py` 53-93.
   a) Tabs: Network, Audio, Power, Hardware, Desktop, Look, Accounts. Merge Theme and Login
      screen into "Look", Presets first.
@@ -337,7 +338,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   calls to `bg()`. Drive: `systemctl enable --now`, `rclone config dump`, `systemctl
   is-active` through `in_thread()` (`zorro-drive` 735-881).
 
-- [ ] **4.7 Dead and stale bits** (S)
+- [x] **4.7 Dead and stale bits** (S)
   zsettings: `HW_GROUPS` in the wrong class with 5 dead entries (`pages_desktop.py`
   257-260), `load_orb` duplicate (`power.py` 60-70), unused `descs` (`audio.py` 87),
   `Awake.status`, `cpu_max`, `home_data`, `flow()`, the file `lteprobe`.

@@ -41,9 +41,9 @@ class FacePages:
 
         row = Gtk.Box(spacing=8, margin_top=6)
         self.face_learn = Gtk.Button(label='Learn my face')
-        self.face_learn.set_tooltip_text('Opens a window: look at the screen and turn your head a little; '
-                                         'learning again (glasses, other light) adds to it. '
-                                         'or in other light, makes it better')
+        self.face_learn.set_tooltip_text('Opens a window: look at the screen and turn your head a little. '
+                                         'Learning again (with glasses, or in other light) adds to it '
+                                         'and makes it better.')
         self.face_test = Gtk.Button(label='Test')
         self.face_forget = Gtk.Button(label='Delete all my face data')
         self.face_look = Gtk.Button(label='Camera view')

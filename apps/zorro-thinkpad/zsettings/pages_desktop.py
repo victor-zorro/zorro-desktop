@@ -7,7 +7,7 @@ from pathlib import Path
 from .base import APPS, HOME, load_conf, osd, run, spawn, update_conf, write_atomic
 from .fxshim import Snow, zorro_fx
 from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS
-from .power import load_orb, load_script
+from .power import load_script
 from .ui import Pages, heading, idle, note, radios
 from .windows import TITLE_SIZES, apply_windows, set_winpos, win_conf, winpos_conf
 import gi
@@ -22,7 +22,7 @@ class DesktopPages:
     def orb_page(self):
         """the round info area (apps/zorro-orb): what it shows, size and place"""
         box = Pages()
-        orb = load_orb()
+        orb = load_script('zorro-orb')
         if not orb:
             box.add(note('apps/zorro-orb is missing.'))
             return box
@@ -253,12 +253,6 @@ class DesktopPages:
         self.destroy()                  # rebuild with the default values
         type(self)(app, select=sec).present()
 
-    # -- hardware
-    HW_GROUPS = {'Webcam': 'Camera & sound', 'Microphone': 'Camera & sound',
-                 'Speakers': 'Camera & sound', 'Sound output': 'Camera & sound',
-                 'Sound input': 'Camera & sound', 'Bluetooth': 'Bluetooth',
-                 'Wi-Fi': 'Network', 'Mobile data (LTE)': 'Network'}
-
     # -- text and colours: GTK apps, terminal, window theme, info circle
     def text_page(self):
         box = Pages()
@@ -268,7 +262,7 @@ class DesktopPages:
             c[key] = value
             update_conf('windows', **{key: value})
             if key == 'text':           # the info circle's text too
-                orb = load_orb()
+                orb = load_script('zorro-orb')
                 if orb:
                     cur = orb.load_conf()
                     cur['text_colour'] = value

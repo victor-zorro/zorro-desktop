@@ -1,4 +1,4 @@
-"""app: ThinkPad, Hardware and Power tabs"""
+"""app: the ThinkPad pages (keys, lights), Hardware and Power"""
 import os
 import re
 import shutil
@@ -64,8 +64,12 @@ def bt_session(mac, timeout=40):
     return state, ''.join(out)
 
 
+
+# which section of Hardware a device row goes in (the rest: Other devices)
+HW_GROUPS = {'Webcam': 'Camera & sound', 'Microphone': 'Camera & sound', 'Bluetooth': 'Bluetooth'}
+
 class ThinkpadPages:
-    """ThinkPad tab (keys, lights), Hardware tab, Power tab (a mixin of the app window)"""
+    """keys and lights pages, the Hardware tab, the Power tab (a mixin of the app window)"""
 
     # -- keys
     def keys_page(self):
@@ -403,7 +407,7 @@ class ThinkpadPages:
             if not icon:
                 row.set_margin_start(28)    # a Bluetooth device under its adapter
             else:
-                group = self.HW_GROUPS.get(title.strip(), 'Other devices')
+                group = HW_GROUPS.get(title.strip(), 'Other devices')
             self.hw_lists.get(group, self.hw_lists['Other devices']).add(row)
         for lst in self.hw_lists.values():
             lst.show_all()

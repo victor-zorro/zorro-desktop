@@ -189,7 +189,7 @@ def key_star():
     if act == 'custom':
         cmd = c.get('star_command', '').strip()
         if not cmd:
-            osd('starred-symbolic', None, 'Star key: choose an action in the ThinkPad app')
+            osd('starred-symbolic', None, 'Star key: choose an action in the Zorro app (F9)')
             return
         spawn(['sh', '-c', cmd])
     else:

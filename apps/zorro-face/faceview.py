@@ -173,7 +173,6 @@ class View(Gtk.Window):
         self.connect('destroy', self.bye)
         self.lock = threading.Lock()
         self.running = True
-        self.frame = None               # last lit IR picture (uint8 H x W)
         self.pts = None                 # 68 points on it, when a face is seen
         self.views, self.shapes = [], []
         self.bins = {p: 0 for p in POSES}
@@ -249,7 +248,6 @@ class View(Gtk.Window):
                     if ok:
                         pts = lm[0][0].astype(np.float32)
                 with self.lock:             # shown as a mirror, like looking into one
-                    self.frame = True
                     if pts is not None:
                         pts = np.column_stack([lit.shape[1] - 1 - pts[:, 0], pts[:, 1]])
                         self.smooth = pts if self.smooth is None else 0.55 * self.smooth + 0.45 * pts

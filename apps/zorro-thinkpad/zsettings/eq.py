@@ -31,7 +31,7 @@ PIDFILE = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-eq.pid'
 def settings():
     s = load_conf().get('eq', {})
     return {'on': s.get('on', False), 'target': s.get('target', ''),
-            'gains': s.get('gains', {}), 'preset': s.get('preset', {})}
+            'gains': s.get('gains', {})}
 
 
 def gains_for(target):

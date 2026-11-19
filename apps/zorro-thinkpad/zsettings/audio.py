@@ -84,7 +84,7 @@ def together_module():
     return None
 
 
-def together_set(names, descs):
+def together_set(names):
     """(re)make the Together output from these outputs; [] removes it. Remembered for login."""
     old = together_module()
     if old is not None:
@@ -102,5 +102,4 @@ def together_restore():
     """at login (keyd): make the Together output again if it was set up"""
     names = load_conf().get('audio', {}).get('together', [])
     if len(names) >= 2 and together_module() is None:
-        have = {d['name']: d['desc'] for d in devices('sinks')}
-        together_set(names, [have.get(n, n.split('.')[0]) for n in names])
+        together_set(names)

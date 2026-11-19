@@ -103,11 +103,9 @@ def find_camera():
     return None
 
 
-def emitter(dev, on=True):
+def emitter(dev):
     """switch the IR light on (flashes with the frames); a vendor control, reset by suspend"""
     unit, sel, val = conf()['emitter']
-    if not on:
-        val = [val[0], val[1], 1] + list(val[3:])
     try:
         fd = os.open(dev, os.O_RDWR)
     except OSError:
@@ -350,7 +348,7 @@ def main():
     timeout = float(a[a.index('--timeout') + 1]) if '--timeout' in a else 6.0
     if cmd in ('enroll', 'save', 'verify', 'remove', 'set') and TESTING and 'ZORRO_FACE_DATA' not in os.environ:
         sys.exit('zorro-face: needs root (the faces are kept where only root can read them)')
-    if 'PKEXEC_UID' in os.environ:          # from the app: only your own face, no verify
+    if 'PKEXEC_UID' in os.environ:          # from the app: only your own face, or the settings
         import pwd
         me = pwd.getpwuid(int(os.environ['PKEXEC_UID'])).pw_name
         if cmd not in ('enroll', 'save', 'remove', 'verify', 'set', 'status') or (cmd != 'set' and user != me):

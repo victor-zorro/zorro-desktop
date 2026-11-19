@@ -229,4 +229,4 @@ class AudioPages:
             self.au_say('Tick at least two outputs')
             return
         self.au_bg('Setting up…' if on else 'Stopping…',
-                   lambda: audio.together_set([n for n, _ in picked], [t for _, t in picked]))
+                   lambda: audio.together_set([n for n, _ in picked]))

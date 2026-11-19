@@ -5,7 +5,7 @@
   <vendor>zorro-desktop</vendor>
   <action id="org.zorro.thinkpad.helper">
     <description>Change ThinkPad power mode and battery charge limits</description>
-    <message>The ThinkPad app wants to change the power settings</message>
+    <message>The Zorro app wants to change the power settings</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

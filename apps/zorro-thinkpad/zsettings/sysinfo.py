@@ -47,8 +47,6 @@ def collect_fixed():
     info['threads'] = os.cpu_count()
     cores = {l for l in re.findall(r'core id\s*:\s*(\d+)', cpu)}
     info['cores'] = len(cores) or info['threads']
-    mx = sysread('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq')
-    info['cpu_max'] = f'{int(mx) / 1e6:.1f} GHz' if mx.isdigit() else ''
     vga = next((l.split(': ', 1)[-1] for l in run('lspci').splitlines()
                 if re.search(r'VGA|3D|Display', l)), '?')
     info['gpu'] = re.sub(r'\s*\(rev \w+\)', '', vga)
@@ -100,5 +98,4 @@ def collect_live():
             temps[{'k10temp': 'Processor', 'amdgpu': 'Graphics', 'nvme': 'SSD', 'thinkpad': 'ThinkPad',
                    'acpitz': 'Board'}[name]] = int(t) / 1000
     info['temps'] = temps
-    info['time'] = time.time()
     return info

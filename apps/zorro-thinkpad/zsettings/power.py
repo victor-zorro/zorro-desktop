@@ -57,14 +57,3 @@ def load_script(name):
     return mod
 
 
-def load_orb():
-    """the zorro-orb script as a module (its item list and config), or None"""
-    import importlib.machinery
-    import importlib.util
-    p = APPS / 'zorro-orb' / 'zorro-orb'
-    if not p.exists():
-        return None
-    spec = importlib.util.spec_from_loader('zorro_orb', importlib.machinery.SourceFileLoader('zorro_orb', str(p)))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod

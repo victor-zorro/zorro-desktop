@@ -248,7 +248,6 @@ class HomePages:
         return False
 
     def home_show(self, d):
-        self.home_data = d
         for show in (self.show_sound, self.show_printer, self.show_conn, self.show_power, self.show_info):
             try:
                 show(d)

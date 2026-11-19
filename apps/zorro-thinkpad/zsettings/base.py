@@ -101,7 +101,7 @@ def osd(icon, value, text=''):
         hints = ['-h', 'string:x-dunst-stack-tag:zorro-osd']
         if value is not None:
             hints += ['-h', f'int:value:{value}']
-        run('notify-send', '-a', 'ThinkPad', '-t', '1500', *hints, '-i', icon, body or ' ')
+        run('notify-send', '-a', 'Zorro', '-t', '1500', *hints, '-i', icon, body or ' ')
 
 
 

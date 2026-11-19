@@ -8,14 +8,12 @@
 The theme (index.html + js/login.js) talks to a 'window.lightdm' object, the same
 API nody-greeter offers, so it runs unchanged here and there.
 """
-import glob
 import json
 import os
 import pwd
 import socket
 import subprocess
 import sys
-import configparser
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -65,7 +63,6 @@ SHIM = r"""
     respond(t) { post({cmd: 'respond', text: String(t)}); return true; },
     start_session(k) { post({cmd: 'start_session', session: k || this.default_session}); return true; },
     suspend() { post({cmd: 'power', action: 'suspend'}); return true; },
-    hibernate() { post({cmd: 'power', action: 'hibernate'}); return true; },
     restart() { post({cmd: 'power', action: 'reboot'}); return true; },
     shutdown() { post({cmd: 'power', action: 'poweroff'}); return true; },
     face() { post({cmd: 'face'}); return true; },
@@ -94,19 +91,6 @@ def login_users():
                           'display_name': p.pw_gecos.split(',')[0] or p.pw_name})
     return users
 
-
-def xsessions():
-    out = []
-    for f in sorted(glob.glob('/usr/share/xsessions/*.desktop')):
-        cp = configparser.ConfigParser(interpolation=None, strict=False)
-        try:
-            cp.read(f)
-            e = cp['Desktop Entry']
-        except Exception:
-            continue
-        if e.get('exec', 'default') != 'default':
-            out.append({'key': os.path.basename(f)[:-8], 'name': e.get('name', '')})
-    return out
 
 
 # ---- backends: who checks the password -------------------------------------------
@@ -178,8 +162,9 @@ class Greeter:
             users = login_users()
         info = {
             'hostname': socket.gethostname(), 'users': users,
-            'sessions': xsessions(), 'default_session': 'openbox',
-            'can_suspend': True, 'can_hibernate': True,
+            # always Openbox; zorro-dm reads /usr/share/xsessions itself to start it
+            'sessions': [{'key': 'openbox', 'name': 'Openbox'}], 'default_session': 'openbox',
+            'can_suspend': True,
             'can_restart': not lock, 'can_shutdown': not lock, 'lock_hint': lock,
         }
         self.shim = SHIM.replace('__INFO__', json.dumps(info))

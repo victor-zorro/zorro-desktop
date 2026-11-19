@@ -1,10 +1,12 @@
 # ThinkPad (zorro-thinkpad)
 
 ThinkPad T14 (Gen 1 AMD) under Openbox: every Fn key works and shows a small indicator at
-the bottom centre of the screen. The app is called **Zorro** (F9, rofi "Zorro", `zorro-settings`). Tabs: **Theme** (presets like
-Chromatic sea for login, lock screen and wallpaper together, plus your own), **Desktop**
-(wallpaper, info circle, overlays, windows, this app), **Login screen** (every effect),
-**ThinkPad** with these pages:
+the bottom centre of the screen. The app is called **Zorro** (F9, rofi "Zorro", `zorro-settings`). It opens on **Home**
+(cards for sound, camera, printer, network, power, system); the sidebar has the tabs **Theme**
+(presets like Chromatic sea for login, lock screen and wallpaper together, plus your own),
+**Desktop** (wallpaper, Dialer, info circle, overlays, windows, languages, this app), **Login
+screen** (every effect), **Hardware**, **Audio**, **Power**, **Network** and **Accounts**. The
+ThinkPad-specific pages:
 
 - **Keys**: what each Fn key does, and what the star key (F12 ★) does.
 - **Power**: power mode on charger / battery (TLP platform profile), charge limit
@@ -42,7 +44,7 @@ Settings: `~/.config/zorro-thinkpad/config.json` (star key, lights) and
 | F5 / F6 | brightness (finer steps when dark) | X → Openbox |
 | F7 | external screen: extend → mirror → external only → laptop only | X → Openbox |
 | F8 | airplane mode: all radios off / on | X → Openbox |
-| F9 | open the ThinkPad app | keyd |
+| F9 | open the Zorro app | keyd |
 | F10 / F11 | mobile data (LTE) on / off | keyd |
 | F12 ★ | your choice (default: screenshot) | X → Openbox |
 | Fn+Space | keyboard light off/low/high (firmware); indicator shows the level | keyd |
@@ -83,3 +85,6 @@ a tiny `zorro-thinkpad key NAME` that sends one message over a unix socket.
 | `install.sh` | system part (sudo): udev rule, LED blink modules, helper + polkit |
 | `install-user.sh` | user part: links into ~/.local |
 | `keytest` | key code tester |
+
+`lteprobe` (in this folder, run with sudo) asks the built-in XMM7360 LTE modem a few
+read-only questions and writes the answers to `/tmp/zorro-lteprobe.log`: a diagnostic, changes nothing.
