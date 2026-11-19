@@ -10,6 +10,7 @@ Usage counts: ~/.local/state/zorro-dial/usage.json (the more and the more recent
 is started, the closer to the clock).
 """
 import configparser
+import hashlib
 import json
 import math
 import os
@@ -141,11 +142,41 @@ def score(u, app_id):
     return e.get('n', 0) * 0.5 ** (age_days / 14)
 
 
+APPS_CACHE = Path(os.environ.get('XDG_CACHE_HOME', HOME / '.cache')) / 'zorro-dial' / 'apps.json'
+
+
 def apps():
-    """installed apps: [{id, name, icon, cats, path}] from the .desktop files"""
+    """installed apps: [{id, name, icon, cats, path}] from the .desktop files. Parsing them
+    takes ~60 ms on every Super press; the result is kept until a .desktop file changes
+    (only their names and times are looked at, ~1 ms)."""
     dirs = [HOME / '.local/share/applications'] + [
         Path(d) / 'applications' for d in
         os.environ.get('XDG_DATA_DIRS', '/usr/local/share:/usr/share').split(':')]
+    files = []
+    for d in dirs:
+        try:
+            files += [(str(f), f.stat().st_mtime_ns) for f in sorted(d.glob('*.desktop'))]
+        except OSError:
+            continue
+    key = hashlib.sha1(json.dumps(files).encode()).hexdigest()
+    try:
+        cached = json.loads(APPS_CACHE.read_text())
+        if cached.get('key') == key:
+            return cached['apps']
+    except (OSError, ValueError, AttributeError):
+        pass
+    out = read_apps(dirs)
+    try:
+        APPS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = APPS_CACHE.with_suffix('.tmp')
+        tmp.write_text(json.dumps({'key': key, 'apps': out}))
+        os.replace(tmp, APPS_CACHE)
+    except OSError:
+        pass
+    return out
+
+
+def read_apps(dirs):
     seen, out = set(), []
     for d in dirs:
         for f in sorted(d.glob('*.desktop')) if d.is_dir() else []:
