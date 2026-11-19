@@ -63,6 +63,7 @@ VT_ACTIVATE, VT_WAITACTIVE, VT_LOCKSWITCH, VT_UNLOCKSWITCH = 0x5606, 0x5607, 0x5
 FACE = '/usr/local/bin/zorro-face'
 FACE_CONF = '/etc/zorro-face.json'
 FACE_DATA = '/var/lib/zorro-face'
+FACE_TRIES = 3                          # face checks per login / unlock round, then password only
 
 
 def log(*a):
@@ -281,8 +282,9 @@ class Login:
 class FaceCheck:
     """zorro-face verify in a thread; a match goes to the event queue as 'face_ok'"""
 
-    def __init__(self, dm, rnd, user):
+    def __init__(self, dm, rnd, user, last=False):
         self.dm, self.rnd, self.user, self.proc, self.done = dm, rnd, user, None, False
+        self.last = last                # the last try this round: on failure the icon goes
         threading.Thread(target=self.run, daemon=True).start()
 
     @staticmethod
@@ -316,6 +318,9 @@ class FaceCheck:
         self.done = True
         if rc == 0:
             self.dm.events.put(('face_ok', self.rnd, self))
+        elif self.last:
+            self.dm.send(type='face', state='none',
+                         why=f'face unlock is off after {FACE_TRIES} tries: type your password')
         else:
             self.dm.send(type='face', state='fail', why=self.WHY.get(rc, 'face check stopped'))
 
@@ -432,6 +437,7 @@ class DM:
         threading.Thread(target=self.reader, args=(self.sock, rnd), daemon=True).start()
 
         login, result, face, face_user, face_at = None, None, None, None, 0.0
+        face_tries = 0                  # per round: after FACE_TRIES only the password works
         started = time.monotonic()
 
         def offer(user):                # the face icon, when this user has a learned face
@@ -440,14 +446,18 @@ class DM:
             self.send(type='face', state='available' if face_user else 'none')
 
         def look():
-            nonlocal face, face_at
+            nonlocal face, face_at, face_tries
             if face and not face.done:
                 return                  # still looking: its answer comes
+            if face_tries >= FACE_TRIES:
+                self.send(type='face', state='none', why='type your password')
+                return
             if not face_user or time.monotonic() - face_at < 1:
                 self.send(type='face', state='fail', why='')    # the page waits for an answer
                 return
             face_at = time.monotonic()
-            face = FaceCheck(self, rnd, face_user)
+            face_tries += 1
+            face = FaceCheck(self, rnd, face_user, last=face_tries >= FACE_TRIES)
         told = mode != 'lock'
         while True:
             if not told and time.monotonic() - started > 8:

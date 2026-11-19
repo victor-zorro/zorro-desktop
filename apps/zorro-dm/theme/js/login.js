@@ -132,9 +132,12 @@
     if (st === 'available') face.hidden = false;
     else if (st === 'none') face.hidden = true;
     if (st === 'fail' || st === 'none') {
+      const wasLooking = face.classList.contains('looking');
       face.classList.remove('looking');
-      if (m.why !== '') say(m.why || 'face not recognised', true);
-      else say('');
+      // a reason when there is one; 'none' at the start (no face learned) stays silent
+      if (m.why) say(m.why, true);
+      else if (st === 'fail' && m.why === undefined) say('face not recognised', true);
+      else if (wasLooking) say('');
     }
   });
 
