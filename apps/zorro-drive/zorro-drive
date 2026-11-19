@@ -701,13 +701,12 @@ def run_app():
             self.set_wmclass('zorro-drive', 'Drive')
             hb = Gtk.HeaderBar(show_close_button=True, title='Drive')
             self.set_titlebar(hb)
-            self.sync_all = Gtk.Button(label='Sync all')
+            # what concerns the selected account sits on its heading line (right pane)
+            self.sync_all = Gtk.Button(label='Sync this account')
             self.sync_all.connect('clicked', lambda b: start_sync_detached(
                 [f['id'] for f in self.folders_of(self.acc)]))
-            hb.pack_end(self.sync_all)
             self.add_folder_btn = Gtk.Button(label='Choose folders…')
             self.add_folder_btn.connect('clicked', self.on_add_folder)
-            hb.pack_end(self.add_folder_btn)
 
             paned = Gtk.Paned()
             self.add(paned)
@@ -725,11 +724,19 @@ def run_app():
             left.add(self.key_btn)
             self.key_warn = Gtk.Label(xalign=0, wrap=True, max_width_chars=30)
             left.add(self.key_warn)
+            self.rm_acc = Gtk.Button(label='Remove account…')    # the dialog's button is the red one
+            self.rm_acc.connect('clicked', lambda b: self.acc and self.remove_account(self.acc))
+            left.add(self.rm_acc)
             paned.pack1(left, False, False)
 
             right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, border_width=8)
-            self.heading = Gtk.Label(xalign=0, use_markup=True)
-            right.add(self.heading)
+            self.heading = Gtk.Label(xalign=0, use_markup=True, hexpand=True,
+                                     ellipsize=Pango.EllipsizeMode.END)
+            head = Gtk.Box(spacing=6)
+            head.pack_start(self.heading, True, True, 0)
+            head.add(self.add_folder_btn)
+            head.add(self.sync_all)
+            right.add(head)
             vpaned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL)
             self.folders = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
             sw = Gtk.ScrolledWindow(vexpand=True)
@@ -785,7 +792,7 @@ def run_app():
                 sw = Gtk.Switch(active=mount_active(a['name']), valign=Gtk.Align.CENTER,
                                 tooltip_text=f"Whole Drive online in ~/Drive/{a['name']}/Online")
                 sw.connect('notify::active', self.on_mount, a['name'])
-                box.add(Gtk.Label(label='online'))
+                box.add(Gtk.Label(label='Online'))
                 box.add(sw)
                 row.add(box)
                 self.accounts.add(row)
@@ -917,11 +924,9 @@ def run_app():
                 self.reload_accounts(select=load()['accounts'][-1]['name'])
 
         def remove_account(self, acc):
-            d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
-                                  buttons=Gtk.ButtonsType.OK_CANCEL,
-                                  text=f'Remove account "{acc}"?',
-                                  secondary_text='Its folders stop syncing. Files on this laptop and '
-                                                 'on Drive stay where they are.')
+            d = self.ask(f'Remove account "{acc}"?', 'Remove account',
+                         'Its folders stop syncing. Files on this laptop and on Drive stay where '
+                         'they are.')
             if d.run() == Gtk.ResponseType.OK:
                 systemctl('disable', '--now', f'zorro-drive-mount@{acc}.service')
                 cfg = load()
@@ -940,6 +945,7 @@ def run_app():
             self.status_labels = {}
             self.add_folder_btn.set_sensitive(bool(acc))
             self.sync_all.set_sensitive(bool(acc))
+            self.rm_acc.set_sensitive(bool(acc))
             if not acc:
                 self.heading.set_markup('<b>No account yet</b>')
                 self.hint.set_text('Add a Google account on the left to get started.')
@@ -955,12 +961,6 @@ def run_app():
             self.hint.set_text('Saved files go up about 30 s after you stop editing. '
                                'Changes made on Drive come in every 30 min while on the charger, '
                                'or when you press Sync.')
-            rm = Gtk.Button(label=f'Remove account “{acc}”…', halign=Gtk.Align.START)
-            rm.get_style_context().add_class('destructive-action')
-            rm.connect('clicked', lambda b: self.remove_account(acc))
-            row = Gtk.ListBoxRow(activatable=False, selectable=False)
-            row.add(rm)
-            self.folders.add(row)
             self.folders.show_all()
             self.refresh_status()
 
@@ -984,15 +984,23 @@ def run_app():
             self.status_labels[f['id']] = (st, bar, cur)
             box.pack_start(text, True, True, 0)
             for label, cb in (('Sync', lambda b: self.sync(f['id'])),
-                              ('Open', lambda b: subprocess.Popen(['xdg-open', str(local_path(f))])),
-                              ('Log', lambda b: self.show_log(f)),
-                              ('Resync', lambda b: self.resync(f)),
-                              ('Remove', lambda b: self.remove_folder(f))):
+                              ('Open', lambda b: subprocess.Popen(['xdg-open', str(local_path(f))]))):
                 b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
                 b.connect('clicked', cb)
                 if label == 'Sync':
                     b.get_style_context().add_class('suggested-action')
                 box.add(b)
+            menu = Gtk.Menu()                   # the rarer ones, away from Sync
+            for label, cb in (('Last sync log', lambda m: self.show_log(f)),
+                              ('Resync (after an error)…', lambda m: self.resync(f)),
+                              ('Stop syncing this folder…', lambda m: self.remove_folder(f))):
+                it = Gtk.MenuItem(label=label)
+                it.connect('activate', cb)
+                menu.append(it)
+            menu.show_all()
+            more = Gtk.MenuButton(label='⋯', popup=menu, valign=Gtk.Align.CENTER)
+            more.set_tooltip_text('Log, Resync, Stop syncing')
+            box.add(more)
             row.add(box)
             return row
 
@@ -1020,20 +1028,17 @@ def run_app():
             GLib.timeout_add(300, lambda: self.refresh_status() and False)
 
         def resync(self, f):
-            d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
-                                  buttons=Gtk.ButtonsType.OK_CANCEL, text='Resync this folder?',
-                                  secondary_text='Compares everything again and merges both sides: '
-                                                 'nothing is deleted, files that differ are copied '
-                                                 'the newest way. Use it after an error.')
+            d = self.ask('Resync this folder?', 'Resync',
+                         'Compares everything again and merges both sides: nothing is deleted, '
+                         'files that differ are copied the newest way. Use it after an error.',
+                         destructive=False)
             if d.run() == Gtk.ResponseType.OK:
                 start_sync_detached(f['id'], resync=True)
             d.destroy()
 
         def remove_folder(self, f):
-            d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
-                                  buttons=Gtk.ButtonsType.OK_CANCEL,
-                                  text=f'Stop syncing {folder_title(f)}?',
-                                  secondary_text=f"The files stay on Drive and in {f['local']}.")
+            d = self.ask(f'Stop syncing {folder_title(f)}?', 'Stop syncing',
+                         f"The files stay on Drive and in {f['local']}.")
             if d.run() == Gtk.ResponseType.OK:
                 cfg = load()
                 cfg['folders'] = [x for x in cfg['folders'] if x['id'] != f['id']]
@@ -1078,7 +1083,7 @@ def run_app():
                 if drop and not self.confirm(
                         f"Stop syncing {len(drop)} folder{'s' if len(drop) > 1 else ''}?",
                         '\n'.join(folder_title(f) for f in drop)
-                        + '\n\nThe files stay on Drive and on this laptop.'):
+                        + '\n\nThe files stay on Drive and on this laptop.', verb='Stop syncing'):
                     continue
                 cfg['folders'] = [f for f in cfg['folders'] if f['account'] != self.acc] + keep + add
                 save(cfg)
@@ -1089,10 +1094,18 @@ def run_app():
             dlg.destroy()
             self.show_folders(self.acc)
 
-        def confirm(self, text, secondary):
+        def ask(self, text, verb, secondary='', destructive=True):
+            """a question whose buttons say what they do (Cancel / verb), OK = the verb"""
             d = Gtk.MessageDialog(transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
-                                  buttons=Gtk.ButtonsType.OK_CANCEL, text=text,
-                                  secondary_text=secondary)
+                                  text=text, secondary_text=secondary or None)
+            d.add_button('Cancel', Gtk.ResponseType.CANCEL)
+            b = d.add_button(verb, Gtk.ResponseType.OK)
+            b.get_style_context().add_class('destructive-action' if destructive else 'suggested-action')
+            d.set_default_response(Gtk.ResponseType.CANCEL)
+            return d
+
+        def confirm(self, text, secondary, verb='Continue'):
+            d = self.ask(text, verb, secondary, destructive=False)
             ok = d.run() == Gtk.ResponseType.OK
             d.destroy()
             return ok
@@ -1123,7 +1136,12 @@ def run_app():
                         txt += '  · next try ' + time.strftime('%H:%M', time.localtime(st['retry_at']))
                 else:
                     txt = 'not synced yet'
-                lbl.set_text(txt)
+                col = {'error': '#ff2a4a', 'needs_resync': '#ff2a4a', 'syncing': '#19e6ff',
+                       'rate_limited': '#ff2a4a'}.get(s)
+                if col:                          # trouble in red, busy in cyan, fine stays dim
+                    lbl.set_markup(f'<span foreground="{col}">{GLib.markup_escape_text(txt)}</span>')
+                else:
+                    lbl.set_text(txt)
                 if s == 'syncing':
                     bar.show()
                     if frac is None:

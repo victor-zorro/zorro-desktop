@@ -280,7 +280,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
      916); the hint falls off screens under 960 px high now.
   d) Sleep gets a moon icon; Wi-Fi appears twice with the same icon (`dialmodes.py` 276-294).
 
-- [ ] **3.7 Drive arrangement** (S)
+- [x] **3.7 Drive arrangement** (S)
   `apps/zorro-drive/zorro-drive` about 654-675, 908-945, 1056-1074.
   Rows: Sync and Open visible, Log / Resync / Remove in a "⋯" menu. Account actions on the
   right pane's heading line; "Remove account…" on the left. Errors in red, syncing in cyan.

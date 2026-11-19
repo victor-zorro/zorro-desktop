@@ -14,8 +14,8 @@ optional online mount per account. rclone does the work underneath.
   the last rclone run.
 - **Google's request limit** ("quota exceeded") pauses a folder and retries after 15 min;
   syncs cut off by a reboot resume by themselves (both done by the watcher).
-- **Own Google API key** per account (*Own Google client ID…*): without it rclone's shared key is
-  used, which hits Google's limits and is being retired in 2026. The key and tokens live in
+- **Own Google client ID** per account (*Own Google client ID…*): without it rclone's shared one is
+  used, which hits Google's limits and is being retired in 2026. The client ID and tokens live in
   `~/.config/rclone/rclone.conf` only.
 - **Battery friendly**: saved files go up ~30 s after the last change (inotify, no polling);
   Drive → laptop runs every 30 min **only on the charger**; on battery press Sync.
