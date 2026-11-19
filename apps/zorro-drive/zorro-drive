@@ -135,6 +135,7 @@ def notify(title, body, urgency='normal'):
 QUEUE_LOCK = STATE / 'queue.lock'      # one rclone sync at a time (Google rate limits)
 ACTIVITY = STATE / 'activity.jsonl'    # recent file changes, shown in the app
 RETRY_AFTER = 15 * 60                  # seconds to wait after Google's rate limit
+BACKOFF = (30 * 60, 12 * 3600)         # after a failed sync: 30 min, doubling, at most 12 h
 PHASES = (('Building Path1 and Path2 listings', 'listing'),
           ('checking for diffs', 'comparing'),
           ('Applying changes', 'transferring'),
@@ -197,11 +198,12 @@ def sync_folder(f, resync=False):
         local = local_path(f)
         local.mkdir(parents=True, exist_ok=True)
         first = not (d / 'baseline').exists()
+        before = read_status(fid)           # for the back-off and to notify only on news
         write_status(fid, state='syncing', started=time.time(), message='',
                      progress={'phase': 'starting'}, retry_at=None)
         cmd = ['rclone', 'bisync', remote_spec(f), str(local),
                '--workdir', str(d / 'bisync'), '--create-empty-src-dirs',
-               '--drive-skip-gdocs', '--resilient', '--recover', '--max-lock', '2m',
+               '--drive-skip-gdocs', '--drive-skip-dangling-shortcuts', '--resilient', '--recover', '--max-lock', '2m',
                '--conflict-resolve', 'newer', '--conflict-loser', 'num',
                '--tpslimit', '8', '--color', 'NEVER', '--use-json-log',
                '--stats', '2s', '--stats-log-level', 'NOTICE', '-v']
@@ -245,7 +247,8 @@ def sync_folder(f, resync=False):
         text = '\n'.join(log)
         if p.returncode == 0:
             (d / 'baseline').touch()
-            write_status(fid, state='ok', last_ok=time.time(), message='', progress=None)
+            write_status(fid, state='ok', last_ok=time.time(), message='', progress=None,
+                         fails=0, notified='')
             return 'ok'
         if re.search(r'rateLimitExceeded|Quota exceeded|userRateLimit|Error 429', text):
             write_status(fid, state='rate_limited', last_error=time.time(), progress=None,
@@ -257,9 +260,14 @@ def sync_folder(f, resync=False):
         msg = next((ln.split(': ', 1)[-1] for ln in reversed(log)
                     if ' error: ' in ln and 'Bisync aborted' not in ln), f'rclone exit {p.returncode}')
         state = 'needs_resync' if needs else 'error'
-        write_status(fid, state=state, last_error=time.time(), message=msg[:300], progress=None)
-        notify('Drive sync failed', f"{folder_title(f)}: "
-               + ('open Drive and choose Resync' if needs else msg[:120]), 'critical')
+        fails = (before.get('fails') or 0) + 1
+        wait = min(BACKOFF[1], BACKOFF[0] * 2 ** (fails - 1))
+        write_status(fid, state=state, last_error=time.time(), message=msg[:300], progress=None,
+                     fails=fails, retry_at=time.time() + wait)
+        if msg[:300] != before.get('notified'):     # the same error again: no new alarm
+            write_status(fid, notified=msg[:300])
+            notify('Drive sync failed', f"{folder_title(f)}: "
+                   + ('open Drive and choose Resync' if needs else msg[:120]), 'critical')
         return state
     finally:
         queue.close()
@@ -287,6 +295,15 @@ def cmd_sync(args):
             sys.exit(f"zorro-drive: no folder {', '.join(args.folder)}")
     elif not args.all:
         sys.exit('zorro-drive sync: --folder ID or --all')
+    if args.all:                        # the timer: leave failing folders alone for a while
+        now = time.time()
+        for f in list(folders):
+            st = read_status(f['id'])
+            if st.get('state') in ('error', 'needs_resync', 'rate_limited') \
+                    and (st.get('retry_at') or 0) > now:
+                print(f"{folder_title(f)}: skipped after an error, next try "
+                      + time.strftime('%H:%M', time.localtime(st['retry_at'])))
+                folders.remove(f)
     rc = 0
     for f in folders[1:]:               # show the rest of the batch as waiting
         if not is_locked(f['id']):
@@ -295,6 +312,13 @@ def cmd_sync(args):
         r = sync_folder(f, args.resync)
         print(f"{folder_title(f)}: {r}")
         rc |= r in ('error', 'needs_resync', 'rate_limited')
+        if r == 'rate_limited':         # Google says stop: the others would hit it too
+            for g in folders[folders.index(f) + 1:]:
+                if read_status(g['id']).get('state') == 'queued':
+                    write_status(g['id'], state='rate_limited', progress=None,
+                                 retry_at=time.time() + RETRY_AFTER,
+                                 message='Google\'s request limit was reached; retrying automatically')
+            break
     return rc
 
 
@@ -1069,6 +1093,8 @@ def run_app():
                     txt = f"⚠ error {ago(st.get('last_error'))}: {st.get('message', '')}"
                     if st.get('last_ok'):
                         txt += f"  (last good sync {ago(st['last_ok'])})"
+                    if (st.get('retry_at') or 0) > time.time():
+                        txt += '  · next try ' + time.strftime('%H:%M', time.localtime(st['retry_at']))
                 else:
                     txt = 'not synced yet'
                 lbl.set_text(txt)

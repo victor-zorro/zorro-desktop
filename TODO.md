@@ -25,7 +25,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
 
 ## Phase 1: wrong today
 
-- [ ] **1.1 Drive: a folder that fails its first sync retries forever** (S)
+- [x] **1.1 Drive: a folder that fails its first sync retries forever** (S)
   `apps/zorro-drive/zorro-drive` — `sync_folder`, `cmd_sync` (about lines 199-297).
   A folder with no baseline runs a full `--resync` on every timer run and sends a critical
   notification each time. One folder fails on "can't read dangling shortcut" (about 14
