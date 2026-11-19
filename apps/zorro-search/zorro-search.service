@@ -6,7 +6,7 @@ After=graphical-session.target
 ExecStart=%h/.local/bin/zorro-search serve
 Nice=10
 IOSchedulingClass=idle
-MemoryHigh=1G
+MemoryHigh=600M
 Restart=on-failure
 RestartSec=30
 

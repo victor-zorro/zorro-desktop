@@ -179,7 +179,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   `apps/zorro-fx/zorro_fx.py` about 487-490.
   Fix: convert the pixbuf once into a cached cairo surface when the backdrop is set.
 
-- [ ] **2.11 Search service holds 556 MB (confirm first)** (S-M)
+- [x] **2.11 Search service holds 556 MB (confirm first)** (S-M)
   `apps/zorro-search/zorro-search` about 131-140, 189-231; `zorro-search.service`.
   Expected cause: onnxruntime's memory arena. Not tested.
   Fix to try: `opt.enable_cpu_mem_arena = False`, `opt.enable_mem_pattern = False`; measure

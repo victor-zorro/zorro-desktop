@@ -130,6 +130,9 @@ class Model:
         self.np = np
         opt = ort.SessionOptions()
         opt.intra_op_num_threads = max(1, (os.cpu_count() or 2) // 2)
+        # onnxruntime's memory arena keeps every buffer it ever needed: 494 -> 261 MB without
+        # it, at the same speed (the memory pattern planning stays on)
+        opt.enable_cpu_mem_arena = False
         # Debian's onnxruntime prints ~570 harmless "Schema error" lines while loading a
         # model (onnx registered twice); keep them out of the journal
         err = os.dup(2)
@@ -201,6 +204,7 @@ class Index:
         vecs = [self.vecs[keep]] if keep else []
         say(f'{len(todo)} files to read')
         batch_meta, batch_text = [], []
+        saved = [len(meta)]
 
         def flush():
             if batch_text:
@@ -217,18 +221,28 @@ class Index:
             if len(batch_text) >= 64:
                 flush()
                 say(f'{k + 1}/{len(todo)}')
+                if len(meta) - saved[0] >= 1000:     # a long first index survives a stop
+                    self.publish(meta, vecs)
+                    saved[0] = len(meta)
         flush()
-        with self.lock:
-            self.meta = meta
-            self.vecs = np.concatenate(vecs) if vecs else np.zeros((0, 384), np.float32)
-        CACHE.mkdir(parents=True, exist_ok=True)
-        tmp = CACHE / 'vecs.tmp.npy'
-        np.save(tmp, self.vecs.astype(np.float16))
-        (CACHE / 'meta.tmp.json').write_text(json.dumps(meta))
-        os.replace(tmp, CACHE / 'vecs.npy')
-        os.replace(CACHE / 'meta.tmp.json', CACHE / 'meta.json')
+        self.publish(meta, vecs)
         self.updated = time.time()
         return len(todo)
+
+    def publish(self, meta, vecs):
+        """use these pieces for searching and write them to disk (the files not done yet
+        are simply not in meta, so the next update picks them up)"""
+        np = self.np
+        with self.lock:
+            self.meta = list(meta)
+            self.vecs = np.concatenate(vecs) if vecs else np.zeros((0, 384), np.float32)
+            vs = self.vecs
+        CACHE.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE / 'vecs.tmp.npy'
+        np.save(tmp, vs.astype(np.float16))
+        (CACHE / 'meta.tmp.json').write_text(json.dumps(self.meta))
+        os.replace(tmp, CACHE / 'vecs.npy')
+        os.replace(CACHE / 'meta.tmp.json', CACHE / 'meta.json')
 
     def search(self, text, n=30, kind=None):
         np = self.np
