@@ -305,7 +305,7 @@ class AccountsPages:
                     'Log in, with your Obsidian account (obsidian.md). Then Settings → Core '
                     'plugins → Sync on → Sync → choose or create the remote vault, with your own '
                     'encryption password. On the Android phone: the same account and vault.'))
-        idle(self.sc_check)
+        self.when_shown('accounts', self.sc_check)       # yt-dlp asks soundcloud.com
         idle(self.ob_check)
         return sc, ob
 

@@ -176,7 +176,8 @@ class LookPages:
             view.set_background_color(black)
             view.connect('context-menu', lambda *a: True)
             view.set_size_request(-1, 210)
-            view.load_uri('file://' + str(DM_DIR / 'theme' / 'secondary.html'))
+            # the WebGL page (a web process) starts when the Login screen tab is first opened
+            self.when_shown('login', lambda v=view: v.load_uri('file://' + str(DM_DIR / 'theme' / 'secondary.html')))
             frame = Gtk.Box(margin_start=18, margin_end=18, margin_top=14)
             view.set_hexpand(True)
             frame.add(view)

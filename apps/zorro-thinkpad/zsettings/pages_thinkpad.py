@@ -229,7 +229,7 @@ class ThinkpadPages:
         box.footer(bottom)
         self.bt_found = []
         self.hw_busy = False
-        self.hw_refresh()
+        self.when_shown('hardware', self.hw_refresh)     # lsusb, v4l2-ctl, bluetoothctl…
         return box
 
     # -- printers (zsettings/printers.py)

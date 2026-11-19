@@ -30,6 +30,7 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         self.set_icon_name('preferences-desktop')
         stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
         self.stack = stack
+        self.first_shown = {}           # tab: [work to do when it is first opened]
         # header: Home shows "Zorro" and the gear; all setup shows the tabs and a way back
         hb = Gtk.HeaderBar(show_close_button=True)
         self.titles = Gtk.Stack()
@@ -124,6 +125,10 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         else:
             self.show_home()
         self.home.connect('notify::visible-child-name', lambda *a: self.sync_header())
+        # slow probes (hardware scan, SoundCloud check, the login preview) wait for their tab
+        stack.connect('notify::visible-child-name', lambda *a: self.run_first_shown())
+        self.top.connect('notify::visible-child-name', lambda *a: self.run_first_shown())
+        self.run_first_shown()
         self.custom_box.set_visible(load_conf().get('star') == 'custom')
         self.timers.append(GLib.timeout_add_seconds(5, self.refresh))
         self.connect('destroy', self.on_destroy)
@@ -173,6 +178,19 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         self.gear.set_visible(on_home)
         if on_home and self.home.get_visible_child_name() != 'cam':
             self.cam_stop()
+
+    def when_shown(self, tab, fn):
+        """do fn the first time this setup tab is on screen (at once if it already is)"""
+        if hasattr(self, 'top') and self.tab_on(tab):
+            fn()
+        else:
+            self.first_shown.setdefault(tab, []).append(fn)
+
+    def run_first_shown(self):
+        if self.top.get_visible_child_name() != 'setup':
+            return
+        for fn in self.first_shown.pop(self.stack.get_visible_child_name(), []):
+            fn()
 
     def tab_on(self, name):
         """is this setup tab on screen (not hidden behind Home)?"""
