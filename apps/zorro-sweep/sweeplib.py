@@ -37,6 +37,29 @@ except ImportError:
         return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', ''))]
 
 
+def state_file(vault):
+    """where a vault's progress is kept: the Obsidian plugin's data.json when the plugin is in the
+    vault (shared with Obsidian on the laptop and the phone), else our own state file"""
+    plugin = vault / '.obsidian/plugins/zorro-sweep'
+    if (plugin / 'manifest.json').exists():
+        return plugin / 'data.json'
+    return STATE_DIR / (re.sub(r'[^\w.-]+', '_', vault.name) + '.json')
+
+
+def read_state(vault):
+    f = state_file(vault)
+    try:
+        st = json.loads(f.read_text())
+    except (OSError, ValueError):
+        st = {}
+    if 'kept' not in st:                        # first time with the plugin: take the old progress
+        try:
+            st.update(json.loads((STATE_DIR / (re.sub(r'[^\w.-]+', '_', vault.name) + '.json')).read_text()))
+        except (OSError, ValueError):
+            pass
+    return st
+
+
 def attach_dir(vault):
     try:
         sub = json.loads((vault / '.obsidian/app.json').read_text()).get('attachmentFolderPath', '')
@@ -130,16 +153,16 @@ class Vault:
 
     def __init__(self, path):
         self.path = path
-        self.state_file = STATE_DIR / (re.sub(r'[^\w.-]+', '_', path.name) + '.json')
-        try:
-            st = json.loads(self.state_file.read_text())
-        except (OSError, ValueError):
-            st = {}
+        self.state_file = state_file(path)
+        st = read_state(path)
         self.kept = set(st.get('kept', []))      # names relative to the vault
         self.stays = set(st.get('stays', []))    # kept and sorted: stays where it is
         # this round's kept notes, sorted once there are ROUND of them (older kept notes, from
         # before rounds existed, make up the first round)
         self.batch = st.get('batch', sorted(self.kept - self.stays))
+        # a round the Obsidian plugin is playing in a folder ('Folder/note.md'): not ours, kept aside
+        self.batch_elsewhere = [b for b in self.batch if '/' in b]
+        self.batch = [b for b in self.batch if '/' not in b]
         self.stats = {'deleted': 0, 'moved': 0, **st.get('stats', {})}
         self.files = {}                          # lower-case name: path, for pictures and pdfs
         self.uses = {}                           # lower-case name: set of notes that link to it
@@ -169,12 +192,19 @@ class Vault:
         return when(front(self.read(p)[:600])[0], p)
 
     def save(self):
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        # entries with a folder in them belong to the Obsidian plugin sweeping that folder: kept as is
         live = {p.name for p in self.path.glob('*.md')}
-        tmp = self.state_file.with_suffix('.tmp')
-        tmp.write_text(json.dumps({'kept': sorted(self.kept & live), 'stays': sorted(self.stays & live),
-                                   'batch': [b for b in self.batch if b in live],
-                                   'stats': self.stats}, indent=0))
+        ok = lambda k: k in live or '/' in k        # noqa: E731
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        try:                                        # the plugin's other keys stay
+            st = json.loads(self.state_file.read_text())
+        except (OSError, ValueError):
+            st = {}
+        st.update({'kept': sorted(k for k in self.kept if ok(k)), 'stays': sorted(k for k in self.stays if ok(k)),
+                   'batch': [b for b in self.batch if b in live] + self.batch_elsewhere,
+                   'stats': self.stats})
+        tmp = self.state_file.with_name(self.state_file.name + '.tmp')
+        tmp.write_text(json.dumps(st, indent=2, ensure_ascii=False))
         os.replace(tmp, self.state_file)
 
     def to_scan(self):
@@ -186,10 +216,7 @@ class Vault:
     @staticmethod
     def left_in(path):
         """notes still to scan in a vault, from its saved progress"""
-        try:
-            st = json.loads((STATE_DIR / (re.sub(r'[^\w.-]+', '_', path.name) + '.json')).read_text())
-        except (OSError, ValueError):
-            st = {}
+        st = read_state(path)
         done = set(st.get('kept', [])) | set(st.get('stays', []))
         return sum(1 for p in path.glob('*.md') if p.name not in done)
 

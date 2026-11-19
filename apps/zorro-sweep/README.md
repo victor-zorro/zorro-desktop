@@ -91,3 +91,33 @@ zorro-sweep --vault PATH    another vault
 
 Install: `./install.sh` (user level, no sudo). It puts the app in the Dialer and in rofi as
 "Sweep notes".
+
+## Inside Obsidian (laptop and phone)
+`obsidian-plugin/` is Sweep as an Obsidian plugin: plain JavaScript (`main.js`, `styles.css`,
+`manifest.json`), no build step. `install.sh` copies it into every vault and switches it on in
+`community-plugins.json`. Obsidian Sync takes it to the phone.
+
+Once per device:
+1. Open the vault. Obsidian asks "Do you trust the author of this vault?": choose **Trust
+   author and enable plugins**. On the phone: Settings → Community plugins → Turn on.
+2. Settings → Sync → turn on **Installed community plugins** (and **Active community plugin
+   list**). Do it on the laptop and the phone.
+
+Then the **brush button** in the ribbon (or the command "Sweep notes: Open") opens it.
+- **Start screen**: choose the **vault** (another vault opens it, with Sweep on top) and the
+  **notebook to clean up**: the loose notes at the top of the vault, or one of its folders.
+- **Keep or delete**: swipe the card left to keep, right to delete (laptop: ← / →).
+  Deleted notes, and pictures only they use, go to the vault's `.trash` folder.
+- **Sort**: after 10 kept notes, drag each one onto a notebook, or tap a notebook (laptop: 1–9).
+  The notebooks are the folders of this vault, plus "Stays in …" and "+ New folder". There's no
+  "best match" here, and no moving to another vault: a plugin only sees its own vault. The
+  laptop app still does both.
+- Undo under the card, two-finger pinch or Ctrl+scroll to zoom, double-tap to open the note.
+
+**Progress is shared.** The plugin keeps it in `.obsidian/plugins/zorro-sweep/data.json`, which
+Sync carries along. The laptop app reads and writes that same file when the plugin is in the
+vault, so the phone, Obsidian and the laptop app all continue where you left off. (The old
+progress in `~/.local/state/zorro-sweep/` is taken over once.) Keys are paths relative to the
+vault: `note.md` for loose notes, `Folder/note.md` for notes in a folder.
+
+After changing the plugin: rerun `install.sh` and reload Obsidian (or turn the plugin off/on).

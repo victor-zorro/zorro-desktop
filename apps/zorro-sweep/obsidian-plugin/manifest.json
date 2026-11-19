@@ -1,0 +1,9 @@
+{
+  "id": "zorro-sweep",
+  "name": "Sweep notes",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Clean up a notebook in rounds: swipe notes left to keep or right to delete, then drag every 10 kept ones into notebooks.",
+  "author": "Vincent Vriens",
+  "isDesktopOnly": false
+}
