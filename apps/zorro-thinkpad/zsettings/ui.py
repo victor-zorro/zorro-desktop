@@ -186,3 +186,57 @@ def in_bg(fn, *args):
     """a command in a thread, so the window never waits for it (nmcli, pactl, v4l2-ctl)"""
     import threading
     threading.Thread(target=fn, args=args, daemon=True).start()
+
+
+# ---- form widgets, the same on every page (one spacing, one look) --------------------------
+ROW, COL = 8, 12
+
+
+def form(rows, row_spacing=ROW):
+    """label | widget rows in a grid"""
+    g = Gtk.Grid(column_spacing=COL, row_spacing=row_spacing)
+    for i, (text, w) in enumerate(rows):
+        g.attach(Gtk.Label(label=text, xalign=0), 0, i, 1, 1)
+        g.attach(w, 1, i, 1, 1)
+    return g
+
+
+def combo(options, current, on_change):
+    """options: {id: label}; on_change(id)"""
+    c = Gtk.ComboBoxText()
+    for k, text in options.items():
+        c.append(k, text)
+    c.set_active_id(current)
+    c.connect('changed', lambda w: on_change(w.get_active_id()))
+    return c
+
+
+def scale(lo, hi, step, value, on_change, fmt=None, digits=None):
+    """a horizontal slider, value shown on the right; on_change(value rounded to 2 decimals)"""
+    sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
+    sc.set_hexpand(True)
+    sc.set_digits(digits if digits is not None else (2 if step < 0.1 else 1 if step < 1 else 0))
+    sc.set_value(float(value))
+    sc.set_value_pos(Gtk.PositionType.RIGHT)
+    if fmt:
+        sc.connect('format-value', lambda w, v: fmt(v))
+    sc.connect('value-changed', lambda w: on_change(round(w.get_value(), 2)))
+    return sc
+
+
+def switch(value, on_change):
+    sw = Gtk.Switch(active=bool(value), halign=Gtk.Align.START)
+    sw.connect('notify::active', lambda w, _p: on_change(w.get_active()))
+    return sw
+
+
+def colour(value, on_change):
+    """a colour button; value and on_change use '#rrggbb'"""
+    from gi.repository import Gdk
+    b = Gtk.ColorButton(halign=Gtk.Align.START)
+    c = Gdk.RGBA()
+    c.parse(value)
+    b.set_rgba(c)
+    b.connect('color-set', lambda w: on_change('#%02x%02x%02x' % tuple(
+        round(x * 255) for x in (w.get_rgba().red, w.get_rgba().green, w.get_rgba().blue))))
+    return b

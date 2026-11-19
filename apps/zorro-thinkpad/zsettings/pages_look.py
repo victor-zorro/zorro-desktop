@@ -8,6 +8,7 @@ from pathlib import Path
 from .base import HOME, RUNTIME, load_conf, spawn, update_conf, write_atomic
 from .look import CBLUR_MODES, CUSTOM_PRESETS, DM_DIR, LOOK_ANIMALS, LOOK_BACKGROUNDS, LOOK_DEFAULTS, LOOK_FILE, _look_draft, custom_presets, theme_presets
 from .power import LOOK_HELPER
+from . import ui
 from .ui import Pages, heading, idle, note
 import gi
 gi.require_version('Gtk', '3.0')
@@ -194,37 +195,11 @@ class LookPages:
                     None, None, None, None, None)
             self.look_msg.set_text('Not saved yet')
 
-        def scale(key, lo, hi, step, fmt=None):
-            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
-            sc.set_hexpand(True)
-            sc.set_value(float(L[key]))
-            sc.set_value_pos(Gtk.PositionType.RIGHT)
-            sc.set_digits(2 if step < 0.1 else 1 if step < 1 else 0)
-            if fmt:
-                sc.connect('format-value', lambda w, v: fmt(v))
-            sc.connect('value-changed', lambda w: setv(key, round(w.get_value(), 2)))
-            return sc
-
-        def colour(key):
-            b = Gtk.ColorButton(halign=Gtk.Align.START)
-            c = Gdk.RGBA()
-            c.parse(L[key])
-            b.set_rgba(c)
-            b.connect('color-set', lambda w: setv(key, '#%02x%02x%02x' % tuple(
-                round(x * 255) for x in (w.get_rgba().red, w.get_rgba().green, w.get_rgba().blue))))
-            return b
-
-        def switch(key):
-            sw = Gtk.Switch(active=bool(L[key]), halign=Gtk.Align.START)
-            sw.connect('notify::active', lambda w, _p: setv(key, w.get_active()))
-            return sw
-
-        def grid(rows):
-            g = Gtk.Grid(column_spacing=12, row_spacing=6)
-            for i, (label, w) in enumerate(rows):
-                g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-                g.attach(w, 1, i, 1, 1)
-            return g
+        scale = lambda key, lo, hi, step, fmt=None: ui.scale(lo, hi, step, L[key],          # noqa: E731
+                                                             lambda v: setv(key, v), fmt)
+        colour = lambda key: ui.colour(L[key], lambda v: setv(key, v))                       # noqa: E731
+        switch = lambda key: ui.switch(L[key], lambda v: setv(key, v))                       # noqa: E731
+        grid = ui.form
 
         x = lambda v: f'{v:.1f}×'
         bgk = Gtk.ComboBoxText()

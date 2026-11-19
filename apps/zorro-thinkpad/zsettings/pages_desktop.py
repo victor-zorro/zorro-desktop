@@ -8,6 +8,7 @@ from .base import APPS, HOME, load_conf, osd, run, spawn, update_conf, write_ato
 from .fxshim import Snow, zorro_fx
 from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS
 from .power import load_script
+from . import ui
 from .ui import Pages, heading, idle, in_bg, note, radios
 from .windows import TITLE_SIZES, apply_windows, set_winpos, win_conf, winpos_conf
 import gi
@@ -130,36 +131,11 @@ class DesktopPages:
             frame.add(inner)
             box.header(frame)
 
-        def combo(key, options):
-            c = Gtk.ComboBoxText()
-            for k, label in options.items():
-                c.append(k, label)
-            c.set_active_id(s[key])
-            c.connect('changed', lambda w: set_(key, w.get_active_id()))
-            return c
-
-        def scale(key, lo, hi, step, digits=1, fmt=None):
-            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
-            sc.set_hexpand(True)
-            sc.set_digits(digits)
-            sc.set_value(s[key])
-            sc.set_value_pos(Gtk.PositionType.RIGHT)
-            if fmt:
-                sc.connect('format-value', lambda w, v: fmt(v))
-            sc.connect('value-changed', lambda w: set_(key, round(w.get_value(), 2)))
-            return sc
-
-        def switch(key):
-            sw = Gtk.Switch(active=s[key], halign=Gtk.Align.START)
-            sw.connect('notify::active', lambda w, _p: set_(key, w.get_active()))
-            return sw
-
-        def grid(part):
-            g = Gtk.Grid(column_spacing=12, row_spacing=6)
-            for i, (label, w) in enumerate(part):
-                g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-                g.attach(w, 1, i, 1, 1)
-            return g
+        combo = lambda key, options: ui.combo(options, s[key], lambda v: set_(key, v))   # noqa: E731
+        scale = lambda key, lo, hi, step, digits=1, fmt=None: ui.scale(                  # noqa: E731
+            lo, hi, step, s[key], lambda v: set_(key, v), fmt, digits)
+        switch = lambda key: ui.switch(s[key], lambda v: set_(key, v))                   # noqa: E731
+        grid = ui.form
 
         pct = lambda v: f'{v * 100:.0f}%'
         particles = [
@@ -286,14 +262,7 @@ class DesktopPages:
             sp.connect('value-changed', lambda w: setv(key, round(w.get_value(), 1)))
             return sp
 
-        def colour(key):
-            b = Gtk.ColorButton(halign=Gtk.Align.START)
-            rgba = Gdk.RGBA()
-            rgba.parse(c[key])
-            b.set_rgba(rgba)
-            b.connect('color-set', lambda w: setv(key, '#%02x%02x%02x' % tuple(
-                round(v * 255) for v in (w.get_rgba().red, w.get_rgba().green, w.get_rgba().blue))))
-            return b
+        colour = lambda key: ui.colour(c[key], lambda v: setv(key, v))   # noqa: E731
 
         icon_op = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.3, 1, 0.02)
         icon_op.set_hexpand(True)
@@ -349,12 +318,7 @@ class DesktopPages:
                 GLib.source_remove(self.win_apply_id)
             self.win_apply_id = GLib.timeout_add(400, self.windows_apply)
 
-        def grid(rows):
-            g = Gtk.Grid(column_spacing=12, row_spacing=8)
-            for i, (label, w) in enumerate(rows):
-                g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-                g.attach(w, 1, i, 1, 1)
-            return g
+        grid = ui.form
 
         box.add(heading('Window title bars', 'Title bars'))
         box.add(radios([(k, v[0]) for k, v in TITLE_SIZES.items()], c['titlebar'],
@@ -552,35 +516,13 @@ class DesktopPages:
             if kv.get('enabled') and not run('pgrep', '-f', 'bin/zorro-wall$').strip():
                 spawn([str(APPS / 'zorro-wall' / 'zorro-wall')])
 
-        def grid(rows):
-            g = Gtk.Grid(column_spacing=12, row_spacing=8)
-            for i, (label, w) in enumerate(rows):
-                g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-                g.attach(w, 1, i, 1, 1)
-            return g
-
-        def switch(key, on_change=None):
-            sw = Gtk.Switch(active=bool(c[key]), halign=Gtk.Align.START)
-            sw.connect('notify::active', lambda w, _p: (save(**{key: w.get_active()}),
-                                                       on_change and on_change(w.get_active())))
-            return sw
-
-        def scale(key, lo, hi, step, fmt):
-            sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, lo, hi, step)
-            sc.set_hexpand(True)
-            sc.set_value(float(c[key]))
-            sc.set_value_pos(Gtk.PositionType.RIGHT)
-            sc.connect('format-value', lambda w, v: fmt(v))
-            sc.connect('value-changed', lambda w: save(**{key: round(w.get_value(), 2)}))
-            return sc
-
-        def combo(key, options):
-            cb = Gtk.ComboBoxText()
-            for k, label in options.items():
-                cb.append(k, label)
-            cb.set_active_id(c['look'].get(key))
-            cb.connect('changed', lambda w: save(look={**c['look'], key: w.get_active_id()}))
-            return cb
+        grid = ui.form
+        switch = lambda key, on_change=None: ui.switch(c[key], lambda v: (                 # noqa: E731
+            save(**{key: v}), on_change and on_change(v)))
+        scale = lambda key, lo, hi, step, fmt: ui.scale(lo, hi, step, c[key],               # noqa: E731
+                                                        lambda v: save(**{key: v}), fmt)
+        combo = lambda key, options: ui.combo(options, c['look'].get(key),                  # noqa: E731
+                                              lambda v: save(look={**c['look'], key: v}))
 
         box.add(heading('Living wallpaper', 'Wallpaper'))
         own = grid([('Animal', combo('animal', LOOK_ANIMALS)),
