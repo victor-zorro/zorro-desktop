@@ -2,7 +2,8 @@
 """zorro-shot: screenshot overlay for the Openbox desktop.
 
   zorro-shot            freeze the screen, then pick: drag = region, click = window,
-                        Space = whole screen. Enter/double-click saves, Esc cancels.
+                        Space = whole screen; then Enter / double-click saves, Ctrl+C copies,
+                        Esc cancels.
   zorro-shot --region   same, starts in region mode (Fn+PrtSc)
   zorro-shot --window   the active window right away, no overlay (Alt+PrtSc)
   zorro-shot --full     the whole screen right away
@@ -425,12 +426,12 @@ def run_overlay(start_mode):
         # -- state
         def update_hint(self):
             if self.mode == 'window':
-                t = 'Click a window  ·  Esc cancels'
+                t = 'Click a window to select it  ·  Esc cancels'
             elif self.sel:
                 t = 'drag the edges to adjust  ·  Enter or double-click saves  ·  Ctrl+C copies'
                 # (the size shows once, next to the selection)
             else:
-                t = 'Drag to select an area  ·  click a window  ·  Space = whole screen'
+                t = 'Drag to select an area  ·  click a window  ·  Space selects the whole screen'
             self.hint.set_text(t)
 
         def on_mode(self, btn, key):
@@ -478,9 +479,8 @@ def run_overlay(start_mode):
                 return True
             if self.mode == 'window':
                 r = self.window_at(ev.x, ev.y)
-                if r:
-                    self.sel = r
-                    self.done(save=True)
+                if r:                       # selected; Enter / Save / double-click, or Ctrl+C / Copy
+                    self.select(r)
                 return True
             what = self.edge_at(ev.x, ev.y) or 'new'
             self.drag = (what, ev.x, ev.y, self.sel and clamp(self.sel, W, H))
@@ -542,7 +542,7 @@ def run_overlay(start_mode):
                 r = self.window_at(ev.x, ev.y)
                 self.sel = r if r else None
                 if r:
-                    self.done(save=True)
+                    self.select(r)
                     return True
             if self.sel:
                 self.sel = clamp(self.sel, W, H)
@@ -550,6 +550,15 @@ def run_overlay(start_mode):
             self.update_hint()
             self.area.queue_draw()
             return True
+
+        def select(self, rect):
+            """a window or the whole screen picked: it is selected (edges can still be dragged);
+            Save / Enter / double-click or Copy / Ctrl+C take it"""
+            self.sel = clamp(rect, W, H)
+            self.hover = None
+            self.mode_btns['region'].set_active(True)
+            self.update_hint()
+            self.area.queue_draw()
 
         # -- keys
         def on_key(self, _w, ev):
@@ -560,8 +569,7 @@ def run_overlay(start_mode):
             elif k in ('Return', 'KP_Enter'):
                 self.done(save=True)
             elif k == 'space':
-                self.sel = (0, 0, W, H)
-                self.done(save=True)
+                self.select((0, 0, W, H))
             elif ctrl and k in ('c', 'C'):
                 self.done(save=False)
             else:

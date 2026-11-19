@@ -4,9 +4,8 @@ Screenshot overlay for the Openbox desktop. The screen is frozen first (menus an
 stay in the shot), then shown dimmed:
 
 - **drag** = region (drag the edges or corners to adjust, drag inside to move)
-- **click** = the window under the pointer
-- **Space** = whole screen · **Enter** / double-click = save · **Ctrl+C** = copy only ·
-  **Esc** / right-click = cancel
+- **click** = selects the window under the pointer · **Space** = selects the whole screen
+- then **Enter** / double-click = save · **Ctrl+C** = copy only · **Esc** / right-click = cancel
 - toolbar: Screen / Window / Region · Copy · Save · Cancel
 
 Saved to `~/Pictures/Screenshots/YYYY-MM-DD_HH-MM-SS.png` and copied to the clipboard; the

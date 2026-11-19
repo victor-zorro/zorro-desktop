@@ -289,9 +289,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   right pane's heading line; "Remove account…" on the left. Errors in red, syncing in cyan.
   "client ID" everywhere; verb buttons in confirm dialogs.
 
-- [ ] **3.8 Screenshot arrangement** (S-M)
-  Done: keys on the buttons, size shown once, theme colours (3.1). Open: window click /
-  Space select first instead of saving at once: waiting for Vincent's answer.
+- [x] **3.8 Screenshot arrangement** (S-M)
   `apps/zorro-shot/zorro-shot`.
   Keys in button labels ("Copy  Ctrl+C", "Save  Enter", "Cancel  Esc"); window click and
   Space select first so Copy works for windows too, double-click and Enter stay the fast
