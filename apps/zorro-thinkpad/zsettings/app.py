@@ -12,6 +12,8 @@ from .pages_accounts import AccountsPages
 from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
 from .pages_network import NetworkPages
+from .pages_bluetooth import BluetoothPages
+from .pages_printers import PrinterPages
 from .pages_thinkpad import ThinkpadPages
 from .ui import Group
 import gi
@@ -32,7 +34,7 @@ SECTION_TAB = {'wifi': 'network', 'eth': 'network', 'lte': 'network', 'nb': 'net
                'sc': 'accounts', 'ob': 'accounts'}
 
 
-class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
+class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, PrinterPages, BluetoothPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
