@@ -5,7 +5,7 @@
 # obsidian-plugin/.github/workflows/release.yml when the version tag arrives.
 #
 # Once:  gh repo create victor-zorro/sweep-or-keep --public
-#        git remote add sweep-or-keep git@github.com:victor-zorro/sweep-or-keep.git
+#        git remote add sweep-or-keep https://github.com/victor-zorro/sweep-or-keep.git
 # Each release:
 #   1. raise "version" in obsidian-plugin/manifest.json, add it to versions.json
 #      ("<version>": "<minAppVersion>") and a "## <version>" section to CHANGELOG.md
