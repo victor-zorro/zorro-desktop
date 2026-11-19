@@ -251,10 +251,17 @@ class WinPos:
 
     def start_session(self):
         """once per login: start what was open, and put its windows back as they appear"""
+        # restored once per login: a restart of winpos within the same login reopens nothing.
+        # The login is named in the file: /run/user/UID can outlive a logout (services that
+        # keep running), and a marker without a name then blocked every later login.
         mark = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-winpos-restored'
-        if mark.exists():
-            return                       # winpos restarted within the same login: nothing to do
-        mark.touch()
+        login = f"{os.environ.get('XDG_SESSION_ID', '')}:{os.environ.get('DISPLAY', '')}:{boot_id()}"
+        try:
+            if mark.read_text().strip() == login:
+                return
+        except OSError:
+            pass
+        mark.write_text(login + '\n')
         try:
             wins = json.loads(SESSION.read_text()).get('windows', [])
         except (OSError, ValueError):
@@ -378,6 +385,13 @@ class WinPos:
                 self.later.remove(item)          # once more: apps like to resize themselves
                 if item[1] in self.known:
                     self.put_back(self.d.create_resource_object('window', item[1]), item[2])
+
+
+def boot_id():
+    try:
+        return Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    except OSError:
+        return ''
 
 
 def children(pid):
