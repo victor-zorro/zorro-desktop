@@ -315,7 +315,9 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Done: tabs are built when opened or linked to, the rest one per idle moment after Home shows;
   F9 to Home 0.63 s -> 0.23 s on the test screen. The slow probes wait for their tab.
 
-- [ ] **4.4 Split the big files** (M-L)
+- [x] **4.4 Split the big files** (M-L)
+  Done: dialparts/ package, sweeplib.py, pages_printers.py + pages_bluetooth.py, js/animals.js.
+  Left as is: the Dialer's Dial class and the orb's window class (one GTK window each).
   `zorro-dial/zorro-dial` (one 1,000-line class) and `dialmodes.py` → `parts/<name>.py` +
   `draw.py`; `zorro-dm/theme/js/fx.js` (987 lines) → `animals.js`, one `makeProgram`, one
   `makeTexture`; `zorro-sweep/zorro-sweep` (1,600 lines) → vault / files, notebooks
