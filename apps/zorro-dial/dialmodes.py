@@ -6,6 +6,7 @@ tiles. A tile: {'tile': True, 'icon': 'lucide:NAME' or an icon name, 'name', 'su
 for actions that need a second click, 'keep': True to keep the dial open}.
 Data is fetched in a thread when the dial opens; nothing runs while it is closed.
 """
+import hashlib
 import json
 import os
 import re
@@ -337,6 +338,19 @@ def human(n):
         n /= 1024
 
 
+def prune_previews(keep=50):
+    """the cache lives in RAM ($XDG_RUNTIME_DIR): only the last `keep` pictures stay"""
+    try:
+        old = sorted(PREVIEW_DIR.glob('*.png'), key=lambda f: f.stat().st_mtime)
+    except OSError:
+        return
+    for f in old[:max(0, len(old) - keep + 1)]:
+        try:
+            f.unlink()
+        except OSError:
+            pass
+
+
 def file_preview(path):
     """what the Dialer shows when you rest on a file: {title, meta, image (a file), lines}"""
     p = Path(path)
@@ -348,7 +362,10 @@ def file_preview(path):
     out = {'title': p.name, 'meta': f'{human(st.st_size)} · {time.strftime("%-d %b %Y %H:%M", time.localtime(st.st_mtime))}',
            'image': None, 'lines': []}
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    png = PREVIEW_DIR / f'{abs(hash((str(p), st.st_mtime, THUMB)))}.png'
+    # a stable name (Python's hash() changes per run), so the next Dialer finds it again
+    png = PREVIEW_DIR / (hashlib.sha1(f'{p}|{st.st_mtime}|{THUMB}'.encode()).hexdigest() + '.png')
+    if not png.exists():
+        prune_previews()
 
     def probe():
         try:

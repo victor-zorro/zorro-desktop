@@ -97,7 +97,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: one `zwebapp NAME URL` script; the four become one-line wrappers; edit `user.js`
   between markers instead of overwriting (same pattern as `zsettings/lang.py` `set_firefox`).
 
-- [ ] **1.11 Dialer: preview cache never hits** (S)
+- [x] **1.11 Dialer: preview cache never hits** (S)
   `apps/zorro-dial/dialmodes.py` about line 351.
   The cache name uses Python's `hash()`, which changes per process, so thumbnails are
   re-made each open and pile up in `$XDG_RUNTIME_DIR`.
