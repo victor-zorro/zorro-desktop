@@ -93,10 +93,10 @@ class BluetoothPages:
                 if len(p) == 3 and p[1] not in paired and not re.fullmatch(r'[0-9A-F-]{17}', p[2]):
                     found.append((p[1], p[2]))
             self.bt_found = found
-            return (f'{len(found)} device(s) found. Put a device in pairing mode and scan '
+            return (f'{len(found)} device(s) found. Put a device in pairing mode and search '
                     'again if yours is missing.') if found else \
-                'Nothing found. Put the device in pairing mode and scan again.'
-        self.hw_do('Scanning for Bluetooth devices (12 s)… put your device in pairing mode', fn)
+                'Nothing found. Put the device in pairing mode and search again.'
+        self.hw_do('Searching for Bluetooth devices (12 s)… put your device in pairing mode', fn)
 
     def bt_pair(self, mac):
         def fn():

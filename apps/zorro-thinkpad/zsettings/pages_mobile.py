@@ -53,7 +53,7 @@ class MobilePages:
         b.connect('clicked', lambda b: self.lte_run('Restarting the modem (up to a minute)…',
                                                     'reset'))
         row.add(b)
-        b = Gtk.Button(label='Refresh')
+        b = Gtk.Button(label='Check again')
         b.connect('clicked', lambda b: self.lte_refresh())
         row.add(b)
         box.add(row)

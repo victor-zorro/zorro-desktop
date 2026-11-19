@@ -11,7 +11,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, MARKS, Pages, heading, idle, later, mark, note, radios
+from .ui import KEY_TABLE, Pages, button, device_list, device_row, heading, idle, later, mark, note, radios
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -167,15 +167,13 @@ class ThinkpadPages:
             if group == 'Printers':
                 box.add(self.printers_box())
                 continue
-            lst = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=6)
+            lst = device_list(margin_top=6)
             box.add(lst)
             self.hw_lists[group] = lst
         bottom = Gtk.Box(spacing=8)
         self.hw_msg.set_hexpand(True)
         bottom.add(self.hw_msg)
-        again = Gtk.Button(label='Check again', valign=Gtk.Align.CENTER)
-        again.connect('clicked', lambda b: self.hw_refresh())
-        bottom.add(again)
+        bottom.add(button('Check again', self.hw_refresh, valign=Gtk.Align.CENTER))
         box.footer(bottom)
         self.bt_found = []
         self.hw_busy = False
@@ -198,32 +196,10 @@ class ThinkpadPages:
             for c in lst.get_children():
                 c.destroy()
         group = 'Other devices'
-        marks = {k: MARKS[k] for k in ('ok', 'warn', 'off')}
         for icon, title, state, detail, acts in rows:
-            row = Gtk.Box(spacing=12)
-            img = Gtk.Image.new_from_icon_name(icon or 'go-next-symbolic', Gtk.IconSize.DND)
-            img.set_opacity(1 if icon else 0)
-            row.add(img)
-            txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            m, col = marks[state]
-            head = Gtk.Label(xalign=0)
-            head.set_markup(f'<span foreground="{col}">{m}</span>  '
-                            f'<b>{GLib.markup_escape_text(title.strip())}</b>'
-                            if icon else f'<span foreground="{col}">{m}</span>  '
-                            f'{GLib.markup_escape_text(title.strip())}')
-            txt.add(head)
-            d = note(detail.replace('    ', ''))
-            d.set_selectable(True)
-            d.set_can_focus(False)
-            txt.add(d)
-            row.add(txt)
-            for label, cb in acts:
-                b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
-                b.connect('clicked', lambda _b, cb=cb: cb())
-                row.add(b)
-            if not icon:
-                row.set_margin_start(28)    # a Bluetooth device under its adapter
-            else:
+            row = device_row(title.strip(), detail.replace('    ', ''), acts, icon=icon,
+                             state=state, sub=not icon)     # sub: a Bluetooth device under its adapter
+            if icon:
                 group = HW_GROUPS.get(title.strip(), 'Other devices')
             self.hw_lists.get(group, self.hw_lists['Other devices']).add(row)
         for lst in self.hw_lists.values():

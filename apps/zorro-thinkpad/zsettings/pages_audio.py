@@ -4,7 +4,7 @@ import time
 
 from . import audio
 from .base import load_conf
-from .ui import Pages, heading, idle, in_bg, mark, note
+from .ui import Pages, device_list, device_row, heading, idle, in_bg, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk  # noqa: E402
@@ -25,7 +25,7 @@ class AudioPages:
         self.au_seen = None
 
         outp.add(heading('Sound output', 'Output'))
-        self.au_out = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.au_out = device_list()
         outp.add(self.au_out)
         t = Gtk.Button(label='Test: left / right', halign=Gtk.Align.START, margin_top=8)
         t.connect('clicked', lambda b: self.speaker_test())
@@ -34,7 +34,7 @@ class AudioPages:
                       'One app somewhere else: Playing now.'))
 
         inp.add(heading('Sound input', 'Input'))
-        self.au_in = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.au_in = device_list()
         inp.add(self.au_in)
         t = Gtk.Button(label='Test: record 3 s', halign=Gtk.Align.START, margin_top=8)
         t.connect('clicked', lambda b: self.mic_test())
@@ -43,7 +43,7 @@ class AudioPages:
                      'microphone is on; music on another device stays as it is.'))
 
         play.add(heading('Playing now', 'Playing now'))
-        self.au_play = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.au_play = device_list()
         play.add(self.au_play)
         play.add(note('Each app can play on its own output: music on the DAC, a call on the '
                       'earbuds. The choice lasts while the app plays.'))
@@ -148,16 +148,7 @@ class AudioPages:
         members = load_conf().get('audio', {}).get('together', [])
         names = {d['name']: d['desc'] for d in devs}
         for d in devs:
-            row = Gtk.Box(spacing=12)
-            row.add(Gtk.Image.new_from_icon_name(KIND_ICON.get(d['kind'], 'audio-card-symbolic'),
-                                                 Gtk.IconSize.DND))
-            txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            head = Gtk.Label(xalign=0)
-            sign = mark('on') if d['default'] else mark('off')
-            head.set_markup(f'{sign}  <b>{GLib.markup_escape_text(d["desc"])}</b>')
-            txt.add(head)
             what = ' + '.join(names.get(n, n.split('.')[0]) for n in members) if d['together'] else d['kind']
-            txt.add(note(what + (' · in use' if d['default'] else '')))
             vol = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 150, 1)
             vol.set_value(d['volume'])
             vol.set_size_request(220, -1)
@@ -165,20 +156,17 @@ class AudioPages:
             vol.connect('format-value', lambda w, v: f'{v:.0f}%')
             vol.connect('value-changed', lambda w, n=d['name']: self.au_volume(kind, n, w.get_value()))
             self.vol_follow(vol, kind, d['name'])
-            txt.add(vol)
-            row.add(txt)
-            mute = Gtk.ToggleButton(label='Muted' if d['muted'] else 'Mute', active=d['muted'],
-                                    valign=Gtk.Align.CENTER)
+            mute = Gtk.ToggleButton(label='Muted' if d['muted'] else 'Mute', active=d['muted'])
             mute.connect('toggled', lambda w, n=d['name']: (
                 w.set_label('Muted' if w.get_active() else 'Mute'),
                 in_bg(audio.set_mute, kind, n, w.get_active())))
-            row.add(mute)
+            acts = [mute]
             if not d['default']:
-                b = Gtk.Button(label='Use', valign=Gtk.Align.CENTER)
-                b.connect('clicked', lambda _b, n=d['name'], t=d['desc']: self.au_bg(
-                    f'Switching to {t}…', lambda: (audio.use(kind, n), f'Now: {t}')[1]))
-                row.add(b)
-            box.add(row)
+                acts.append(('Use', lambda n=d['name'], t=d['desc']: self.au_bg(
+                    f'Switching to {t}…', lambda: (audio.use(kind, n), f'Now: {t}')[1])))
+            box.add(device_row(d['desc'], what + (' · in use' if d['default'] else ''), acts,
+                               icon=KIND_ICON.get(d['kind'], 'audio-card-symbolic'),
+                               state='on' if d['default'] else 'off', below=[vol]))
         if not devs:
             box.add(note('None found'))
         box.show_all()
@@ -220,23 +208,15 @@ class AudioPages:
         for c in self.au_play.get_children():
             c.destroy()
         for s in streams:
-            row = Gtk.Box(spacing=12)
-            txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            head = Gtk.Label(xalign=0)
-            head.set_markup(f'<b>{GLib.markup_escape_text(s["app"])}</b>')
-            txt.add(head)
-            if s['what'] and s['what'] != '(null)':
-                txt.add(note(s['what'][:80]))
-            row.add(txt)
-            combo = Gtk.ComboBoxText(valign=Gtk.Align.CENTER)
+            combo = Gtk.ComboBoxText()
             for d in sinks:
                 combo.append(d['name'], d['desc'])
             combo.set_active_id(s['sink'])
             combo.connect('changed', lambda w, i=s['id'], a=s['app']: self.au_bg(
                 f'Moving {a}…', lambda: (audio.move(i, w.get_active_id()),
                                         f'{a} → {w.get_active_text()}')[1]))
-            row.add(combo)
-            self.au_play.add(row)
+            what = s['what'][:80] if s['what'] and s['what'] != '(null)' else ''
+            self.au_play.add(device_row(s['app'], what, [combo]))
         if not streams:
             self.au_play.add(note('Nothing is playing right now.'))
         self.au_play.show_all()

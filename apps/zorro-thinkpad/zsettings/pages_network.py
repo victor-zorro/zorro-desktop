@@ -5,7 +5,7 @@ import re
 import threading
 
 from .base import run, spawn
-from .ui import Pages, heading, idle, in_bg, mark, note
+from .ui import Pages, device_list, device_row, heading, idle, in_bg, note
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('NM', '1.0')
@@ -65,11 +65,12 @@ class NetworkPages:
                 self.nm = None
         return self.nm
 
-    def net_rows(self, box, rows):
-        """show rows [(title, detail, [(label, cb)], mark)]. Only rebuilt when the rows really
-        change; signal strength and such are updated in place, so a button is never replaced
-        under the mouse (a rebuild between press and release loses the click)"""
-        struct = [(title, tuple(lb for lb, _ in acts), mark) for title, _, acts, mark in rows]
+    def net_rows(self, box, rows, icon=None):
+        """show rows [(title, detail, [(label, cb)], state)] (state: a MARKS key or None).
+        Only rebuilt when the rows really change; signal strength and such are updated in
+        place, so a button is never replaced under the mouse (a rebuild between press and
+        release loses the click)"""
+        struct = [(title, tuple(lb for lb, _ in acts), state) for title, _, acts, state in rows]
         box.zcbs = [[cb for _, cb in acts] for _, _, acts, _ in rows]
         if getattr(box, 'zstruct', None) == struct:
             for lab, (_, detail, _, _) in zip(box.zdetails, rows):
@@ -79,25 +80,11 @@ class NetworkPages:
         box.zstruct, box.zdetails = struct, []
         for c in box.get_children():
             c.destroy()
-        for i, (title, detail, acts, mark) in enumerate(rows):
-            row = Gtk.Box(spacing=12)
-            txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-            head = Gtk.Label(xalign=0)
-            head.set_markup(f'{mark}  <b>{GLib.markup_escape_text(title)}</b>' if mark else
-                            f'<b>{GLib.markup_escape_text(title)}</b>')
-            txt.add(head)
-            d = None
-            if detail:
-                d = note(detail)
-                d.set_selectable(True)
-                d.set_can_focus(False)
-                txt.add(d)
-            box.zdetails.append(d)
-            row.add(txt)
-            for j, (label, _cb) in enumerate(acts):
-                b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
-                b.connect('clicked', lambda _b, i=i, j=j: box.zcbs[i][j]())   # the newest action
-                row.add(b)
+        for i, (title, detail, acts, state) in enumerate(rows):
+            row = device_row(title, detail, [(label, lambda i=i, j=j: box.zcbs[i][j]())  # the newest action
+                                             for j, (label, _cb) in enumerate(acts)],
+                             icon=icon, state=state)
+            box.zdetails.append(row.zdetail)
             box.add(row)
         box.show_all()
 
@@ -109,7 +96,7 @@ class NetworkPages:
         self.wifi_switch = Gtk.Switch(halign=Gtk.Align.START)
         self.wifi_switch_id = self.wifi_switch.connect('notify::active', self.wifi_toggle)
         line.add(self.wifi_switch)
-        scan = Gtk.Button(label='Scan')
+        scan = Gtk.Button(label='Search')
         scan.connect('clicked', lambda b: self.wifi_scan())
         line.add(scan)
         adv = Gtk.Button(label='Advanced…')
@@ -118,7 +105,7 @@ class NetworkPages:
         box.add(line)
         self.wifi_now = note()
         box.add(self.wifi_now)
-        self.wifi_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=6)
+        self.wifi_list = device_list(margin_top=6)
         box.add(self.wifi_list)
 
     def wifi_dev(self):
@@ -168,10 +155,10 @@ class NetworkPages:
             if s in saved:
                 acts.append(('Forget', lambda con=saved[s], s=s: con.delete_async(
                     None, self.net_done, f'{s} forgotten')))
-            rows.append((s, detail, acts, mark('on') if s == cur else ''))
+            rows.append((s, detail, acts, 'on' if s == cur else None))
         if not rows and on:
-            rows.append(('No networks found', 'Click Scan', [], ''))
-        self.net_rows(self.wifi_list, rows)
+            rows.append(('No networks found', 'Click Search', [], None))
+        self.net_rows(self.wifi_list, rows, 'network-wireless-symbolic')
 
     def net_done(self, obj, res, text):
         """finish an async libnm call and say how it went"""
@@ -193,8 +180,8 @@ class NetworkPages:
     def wifi_scan(self):
         dev = self.wifi_dev()
         if dev:
-            self.net_msg.set_text('Scanning…')
-            dev.request_scan_async(None, self.net_done, 'Scan done')
+            self.net_msg.set_text('Searching…')
+            dev.request_scan_async(None, self.net_done, 'Search done')
 
     def wifi_connect(self, ap, ssid):
         c, dev = self.net_client(), self.wifi_dev()
@@ -239,7 +226,7 @@ class NetworkPages:
     # -- Ethernet
     def eth_page(self, box):
         box.add(heading('Ethernet', 'Ethernet'))
-        self.eth_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.eth_list = device_list()
         box.add(self.eth_list)
         box.add(note('The cable is used first while it is plugged in (route metric 100; Wi-Fi '
                      '600, mobile data 1500).'))
@@ -257,10 +244,10 @@ class NetworkPages:
                              'preferred over Wi-Fi. Fix (at the laptop):\n'
                              f'sudo ifdown {iface}; sudo sed -i -E "/^(allow-hotplug|iface) +{iface}/s/^/# /" '
                              '/etc/network/interfaces; sudo systemctl restart NetworkManager',
-                             [], mark('warn')))
+                             [], 'warn'))
                 continue
             if st == NM.DeviceState.UNAVAILABLE or not dev.get_carrier():
-                rows.append((iface, f'{drv} · no cable', [], mark('off')))
+                rows.append((iface, f'{drv} · no cable', [], 'off'))
                 continue
             on = st == NM.DeviceState.ACTIVATED
             speed = dev.get_speed()
@@ -270,8 +257,8 @@ class NetworkPages:
             acts = [('Disconnect', lambda d=dev: d.disconnect_async(None, self.net_done, 'Disconnected'))] \
                 if on else [('Connect', lambda d=dev: c.activate_connection_async(
                     None, d, None, None, self.net_done, 'Connected'))]
-            rows.append((iface, detail, acts, mark('on') if on else ''))
-        self.net_rows(self.eth_list, rows or [('No wired port', '', [], '')])
+            rows.append((iface, detail, acts, 'on' if on else None))
+        self.net_rows(self.eth_list, rows or [('No wired port', '', [], None)], 'network-wired-symbolic')
 
     # -- NetBird
     def netbird_page(self, box):
@@ -285,7 +272,7 @@ class NetworkPages:
             line.add(b)
         box.add(line)
         box.add(heading('Peers'))
-        self.nb_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.nb_list = device_list()
         box.add(self.nb_list)
         box.add(note('Your private network between your own machines. Names ending in '
                      '.netbird.selfhosted go through NetBird, everything else as usual.'))
@@ -328,9 +315,8 @@ class NetworkPages:
             lat = p.get('latency') or 0
             ms = f' · {lat / 1e6:.0f} ms' if isinstance(lat, (int, float)) and lat else ''
             rows.append((name, f'{p.get("netbirdIp", "")}' + (f' · {how}{ms}' if on else ' · offline'),
-                         [], mark('on') if on else
-                         mark('off')))
-        self.net_rows(self.nb_list, rows[:40])
+                         [], 'on' if on else 'off'))
+        self.net_rows(self.nb_list, rows[:40], 'computer-symbolic')
 
     # -- refresh while the tab is open
     def net_refresh(self):

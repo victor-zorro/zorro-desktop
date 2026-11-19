@@ -274,3 +274,58 @@ def colour(value, on_change):
     b.connect('color-set', lambda w: on_change('#%02x%02x%02x' % tuple(
         round(x * 255) for x in (w.get_rgba().red, w.get_rgba().green, w.get_rgba().blue))))
     return b
+
+
+# ---- device lists: one row look for Hardware, Printers, Audio and Network ------------------
+LIST = 10                               # space between the rows of a device list
+
+
+def device_list(**kw):
+    """the box that holds device_row()s"""
+    return Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=LIST, **kw)
+
+
+def button(label, cb, primary=False, **kw):
+    """a button; primary: the one main action (the accent colour)"""
+    b = Gtk.Button(label=label, **kw)
+    if primary:
+        b.get_style_context().add_class('suggested-action')
+    b.connect('clicked', lambda _b: cb())
+    return b
+
+
+def device_row(title, detail='', acts=(), icon=None, state=None, sub=False, below=()):
+    """one row of a device list:  icon | mark  name / detail / below | actions.
+    icon: an icon name (None: no icon). state: a MARKS key ('on', 'ok', 'warn', 'off') shown
+    before the name, None for none. sub: a part of the row above (indented, name not bold).
+    below: widgets under the detail (a volume slider). acts: (label, cb) buttons,
+    (label, cb, True) for the main one, or a ready widget. row.zdetail: the detail label
+    (None without a detail), so a caller can update it in place."""
+    row = Gtk.Box(spacing=12)
+    if icon or sub:
+        img = Gtk.Image.new_from_icon_name(icon or 'go-next-symbolic', Gtk.IconSize.DND)
+        img.set_opacity(0 if sub else 1)
+        row.add(img)
+    if sub:
+        row.set_margin_start(28)
+    txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+    name = GLib.markup_escape_text(title)
+    head = Gtk.Label(xalign=0)
+    head.set_markup((f'{mark(state)}  ' if state else '') + (name if sub else f'<b>{name}</b>'))
+    txt.add(head)
+    row.zdetail = None
+    if detail:
+        row.zdetail = note(detail)
+        row.zdetail.set_selectable(True)
+        row.zdetail.set_can_focus(False)
+        txt.add(row.zdetail)
+    for w in below:
+        txt.add(w)
+    row.add(txt)
+    for a in acts:
+        if isinstance(a, Gtk.Widget):
+            a.set_valign(Gtk.Align.CENTER)
+            row.add(a)
+        else:
+            row.add(button(a[0], a[1], primary=len(a) > 2 and a[2], valign=Gtk.Align.CENTER))
+    return row

@@ -12,7 +12,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, MARKS, Pages, heading, idle, later, mark, note, radios
+from .ui import KEY_TABLE, MARKS, Pages, device_list, device_row, heading, idle, later, mark, note, radios
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -24,13 +24,13 @@ class PrinterPages:
 
     def printers_box(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_top=6)
-        self.pr_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.pr_list = device_list()
         outer.add(self.pr_list)
         outer.add(heading('On the network'))
-        self.pr_found = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.pr_found = device_list()
         outer.add(self.pr_found)
         row = Gtk.Box(spacing=8, margin_top=4)
-        self.pr_search_btn = Gtk.Button(label='Search the network')
+        self.pr_search_btn = Gtk.Button(label='Search')
         self.pr_search_btn.connect('clicked', lambda b: self.pr_search())
         row.add(self.pr_search_btn)
         self.pr_addr = Gtk.Entry(placeholder_text='or an address, e.g. 192.168.66.5',
@@ -53,23 +53,8 @@ class PrinterPages:
         return outer
 
     def pr_row(self, title, detail, acts, ok=True):
-        row = Gtk.Box(spacing=12)
-        row.add(Gtk.Image.new_from_icon_name('printer-symbolic', Gtk.IconSize.DND))
-        txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
-        head = Gtk.Label(xalign=0)
-        sign = mark('ok') if ok else mark('warn')
-        head.set_markup(f'{sign}  <b>{GLib.markup_escape_text(title)}</b>')
-        txt.add(head)
-        d = note(detail)
-        d.set_selectable(True)
-        d.set_can_focus(False)
-        txt.add(d)
-        row.add(txt)
-        for label, cb in acts:
-            b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
-            b.connect('clicked', lambda _b, cb=cb: cb())
-            row.add(b)
-        return row
+        return device_row(title, detail, acts, icon='printer-symbolic',
+                          state='ok' if ok else 'warn')
 
     def pr_bg(self, busy, fn, then):
         """run fn() in a thread with a message; then(result) on the main loop"""
@@ -98,9 +83,9 @@ class PrinterPages:
                 if not q['default']:
                     acts.append(('Default', lambda n=q['name']: (printers.set_default(n),
                                                                  self.pr_refresh())))
-                acts.append(('Remove', lambda n=q['name']: self.pr_bg(
-                    f'Removing {n}…', lambda: printers.remove(n),
-                    lambda _r: (self.hw_msg.set_text(f'{n} removed'), self.pr_refresh()))))
+                acts.append(('Forget', lambda n=q['name']: self.pr_bg(
+                    f'Forgetting {n}…', lambda: printers.remove(n),
+                    lambda _r: (self.hw_msg.set_text(f'{n} forgotten'), self.pr_refresh()))))
                 self.pr_list.add(self.pr_row(
                     q['name'] + ('  (default)' if q['default'] else ''),
                     f'{q["state"]} · {where}', acts, ok=q['state'] != 'disabled'))
@@ -123,7 +108,7 @@ class PrinterPages:
                 return True
             for p, (model, desc) in found:
                 where = re.sub(r'\?.*$', '', printers.unquote(p['uri'].split('://')[-1]))
-                acts = [('Add', lambda p=p: self.pr_add(p))] if model else []
+                acts = [('Add', lambda p=p: self.pr_add(p), True)] if model else []
                 self.pr_found.add(self.pr_row(p['model'] or where, f'{where}\n{desc}', acts,
                                               ok=bool(model)))
             if not found:

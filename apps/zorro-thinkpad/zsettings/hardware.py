@@ -104,7 +104,7 @@ def hardware_rows(ui):
             detail += ' · ' + (f'{len(bt["paired"])} paired' if bt['paired'] else 'nothing paired yet')
         acts = [('Turn off' if bt['powered'] else 'Turn on', lambda p=bt['powered']: ui.bt_power(not p))]
         if bt['powered']:
-            acts.append(('Scan & pair…', ui.bt_scan))
+            acts.append(('Search', ui.bt_scan))
         rows.append(('bluetooth-active-symbolic' if bt['powered'] else 'bluetooth-disabled-symbolic',
                      'Bluetooth', 'ok' if bt['powered'] else 'off', detail, acts))
         for mac, dname, conn in bt['paired']:
@@ -115,7 +115,7 @@ def hardware_rows(ui):
                           ('Forget', lambda m=mac: ui.bt_cmd('remove', m))]))
         for mac, dname in ui.bt_found:
             rows.append((None, f'    {dname}', 'off', f'    {mac} · found nearby',
-                         [('Pair & connect', lambda m=mac: ui.bt_pair(m))]))
+                         [('Pair & connect', lambda m=mac: ui.bt_pair(m), True)]))
 
     # Wi-Fi, Ethernet, mobile data and NetBird: the Network tab (pages_network.py)
 

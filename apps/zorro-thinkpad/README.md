@@ -28,7 +28,7 @@ wallpaper together, plus your own; every login / lock screen effect; face unlock
 - **Hardware**: every device with ✓ / ⚠ and its driver: webcam (Preview opens the camera
   page on Home), mic mute (the record-and-play-back and left/right tests are in the Audio tab),
   Bluetooth on/off, connect /
-  disconnect / forget, scan & pair, Wi-Fi, LTE modem, printer (CUPS), touchscreen,
+  disconnect / forget, search & pair, Wi-Fi, LTE modem, printer (CUPS), touchscreen,
   touchpad, fingerprint reader (with the BIOS hint when none is found).
 
 Still to come: LTE + SMS, fingerprint login.

@@ -241,7 +241,8 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
 
 - [x] **3.3 Settings app: shared form widgets** (M)
   Done: ui.form / combo / scale / switch / colour (one spacing), ui.in_bg / ui.later, ui.mark.
-  Left: one shared device_row for the four device lists.
+  Also done: ui.device_row / device_list / button for every device list (Hardware, Printers,
+  Audio, Wi-Fi, Ethernet, NetBird); Search = find nearby, Check again = read again, Forget.
   `zsettings/pages_desktop.py` (grid 157, 358, 561; combo 48, 133, 583; scale 141, 574),
   `pages_look.py` (196, 207, 221), device rows in `pages_thinkpad.py` 262, 382,
   `pages_audio.py` 116, `pages_network.py` 83; "thread then update UI" six times.
