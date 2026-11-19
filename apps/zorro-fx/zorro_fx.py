@@ -12,14 +12,10 @@ edited in the Zorro app; running windows pick up changes on their next frame.
 import json
 import math
 import os
-import random
 import time
 from pathlib import Path
 
-try:                    # fast path: all particles at once (python3-numpy)
-    import numpy as np
-except ImportError:     # plain Python: fine for a few hundred particles
-    np = None
+import numpy as np      # all particles at once (python3-numpy, in packages/common.txt)
 
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-fx' / 'config.json'
 
@@ -58,7 +54,7 @@ COLOURS = {                 # name: (label, colours picked at random per particl
     'red': ('Red', [RED]),
     'mixed': ('Grey with a few cyan and red', [GREY] * 6 + [CYAN, RED]),
 }
-MAX_PARTICLES = 3000 if np is not None else 1200
+MAX_PARTICLES = 3000
 
 _cache = {'mtime': -1, 'file': None}
 _preview = {}                   # profile -> settings being edited (the app's live preview)
@@ -254,8 +250,8 @@ class Snow:
         self.enabled, self.max_parts, self.max_spill = enabled, max_parts, max_spill
         self.profile = profile
         self.was_on = None
-        self.parts, self.timer = [], None
-        self.swarm = Swarm() if np is not None else None
+        self.timer = None
+        self.swarm = Swarm()
         self.t0 = self.last = time.monotonic()
         self.backdrop = None
         self.backdrop_at = (0, 0)       # where the backdrop image goes in the widget
@@ -320,76 +316,6 @@ class Snow:
         a, b = self.widget.get_allocation(), self.inner.get_allocation()
         return b.x - a.x, b.y - a.y, b.width, b.height
 
-    @staticmethod
-    def new_particle(colours, W, H):
-        rnd = random.random
-        return {'x': rnd() * W, 'y': rnd() * H, 'z': rnd() ** 1.4, 'a': rnd() * 6.283,
-                'r': 0.25 + 0.75 * rnd() ** 0.7, 'ph': rnd() * 6.283, 'vx': 0.0, 'vy': 0.0,
-                'ox': rnd() * 2 - 1, 'oy': rnd() * 2 - 1, 'c': random.choice(colours)}
-
-    def move(self, s, W, H, dt, t):
-        pat, sp = s['pattern'], s['speed']
-        sin, cos = math.sin, math.cos
-        if pat == 'flock':
-            # the flock chases the mouse while it is over the area, else a wandering point
-            m = pointer_in(self.widget)
-            if m and -40 <= m[0] <= W + 40 and -40 <= m[1] <= H + 40:
-                tx, ty = m
-            else:
-                tx = W / 2 + cos(t * 0.45 * sp) * W * 0.38
-                ty = H / 2 + sin(t * 0.7 * sp) * H * 0.35
-            spread_x, spread_y = 12 + W * 0.08, 6 + H * 0.18
-            pull = 3.0 * sp
-            damp = math.exp(-2.2 * dt)
-        for p in self.parts:
-            v = (5 + 16 * p['z']) * sp                         # px per second
-            if pat == 'flock':
-                # each bird keeps its own spot in the swarm around the target
-                gx = tx + p['ox'] * spread_x + sin(t * 1.3 + p['ph']) * 6
-                gy = ty + p['oy'] * spread_y + cos(t * 1.1 + p['ph']) * 4
-                p['vx'] = (p['vx'] + (gx - p['x']) * pull * dt) * damp
-                p['vy'] = (p['vy'] + (gy - p['y']) * pull * dt) * damp
-                vmax = 90 * sp * (0.5 + p['z'])
-                vv = math.hypot(p['vx'], p['vy'])
-                if vv > vmax:
-                    p['vx'], p['vy'] = p['vx'] * vmax / vv, p['vy'] * vmax / vv
-                p['x'] += p['vx'] * dt
-                p['y'] += p['vy'] * dt
-                continue
-            if pat == 'fall' or pat == 'rise':
-                p['y'] += (v if pat == 'fall' else -v) * dt
-                p['x'] += sin(t * 0.8 + p['ph']) * 0.35 * v * dt
-            elif pat == 'swirl':
-                rad = p['r'] * min(W, H) * 0.5 + 4
-                p['a'] += v * dt / rad * (1 if p['ph'] < 3.14 else 0.7)
-                wob = 1 + 0.08 * sin(t * 0.5 + p['ph'])
-                p['x'] = W / 2 + cos(p['a']) * p['r'] * W * 0.5 * wob
-                p['y'] = H / 2 + sin(p['a']) * p['r'] * H * 0.5 * wob
-                continue
-            else:                                               # float / twinkle: wander
-                if pat == 'twinkle':
-                    v *= 0.25
-                p['a'] += (random.random() - 0.5) * 4 * dt
-                p['x'] += cos(p['a']) * v * dt
-                p['y'] += sin(p['a']) * v * dt
-            p['x'] %= W
-            p['y'] = (p['y'] + 3) % (H + 6) - 3
-
-    @staticmethod
-    def organic(x, y, W, H, t):
-        """how visible a particle is in the spill area: 1 inside a soft blob around the box,
-        fading to 0 at its edge. The edge is an ellipse with slow waves, so the cloud has
-        an organic, breathing outline instead of a rectangle."""
-        dx, dy = (x - W / 2) / (W / 2), (y - H / 2) / (H / 2)
-        e = math.hypot(dx, dy)                  # 0 centre .. 1 at the ellipse
-        th = math.atan2(dy, dx)
-        edge = 0.92 + 0.07 * math.sin(3 * th + t * 0.35) + 0.05 * math.sin(5 * th - t * 0.6 + 1.3) \
-            + 0.03 * math.sin(8 * th + t * 0.9 + 2.1)
-        f = (edge - e) / 0.45                   # soft fade band
-        if f <= 0:
-            return 0.0
-        return 1.0 if f >= 1 else f * f * (3 - 2 * f)
-
     def outline(self, cr, x, y, w, h):
         r = min(self.radius, h / 2)
         if r:
@@ -419,72 +345,18 @@ class Snow:
         if spill:
             n *= 1 + 0.5 * ((W * H) / max(1, bw * bh) - 1)
         n = min(self.max_parts, int(n))
-        if self.swarm is not None:                            # numpy: the fast way
-            sw = self.swarm
-            sw.resize(n, len(colours), W, H)
-            if self.colour != s['colour']:
-                self.colour = s['colour']
-                sw.recolour(len(colours))
-            sw.move(s, W, H, dt, t, pointer_in(self.widget) if s['pattern'] == 'flock' else None)
-            self.paint_box(cr, s, bx, by, bw, bh)
-            if not spill:
-                cr.save()
-                self.outline(cr, bx, by, bw, bh)
-                cr.clip()
-            sw.paint(cr, s, W, H, t, spill, colours)
-            if not spill:
-                cr.restore()
-            self.paint_edge(cr, s, bx, by, bw, bh)
-            return False
-        if len(self.parts) > n:
-            del self.parts[n:]
-        while len(self.parts) < n:
-            self.parts.append(self.new_particle(colours, W, H))
-        if self.colour != s['colour']:                         # colour changed: repaint all
+        sw = self.swarm
+        sw.resize(n, len(colours), W, H)
+        if self.colour != s['colour']:
             self.colour = s['colour']
-            for p in self.parts:
-                p['c'] = random.choice(colours)
-        self.move(s, W, H, dt, t)
+            sw.recolour(len(colours))
+        sw.move(s, W, H, dt, t, pointer_in(self.widget) if s['pattern'] == 'flock' else None)
         self.paint_box(cr, s, bx, by, bw, bh)
         if not spill:                                         # particles stay in the box
             cr.save()
             self.outline(cr, bx, by, bw, bh)
             cr.clip()
-        size, glow, twinkle = s['size'], s['glow'], s['pattern'] == 'twinkle'
-        pop = s['particle_opacity']
-        # group by colour and brightness (12 steps), then fill each group in one go:
-        # a dozen cairo fills per frame instead of one per particle
-        groups, halos = {}, {}
-        organic, hypot, sin = self.organic, math.hypot, math.sin
-        for p in self.parts:
-            z, x, y = p['z'], p['x'], p['y']
-            alpha = (0.22 + 0.7 * z) * pop
-            if spill:                                  # one soft cloud, no seam at the box
-                alpha *= organic(x, y, W, H, t)
-            if twinkle:
-                alpha *= 0.5 + 0.5 * sin(t * (1.2 + 2.5 * z) + p['ph'])
-            if alpha <= 0.01:
-                continue
-            q = min(11, int(alpha * 12))
-            rad = (0.6 + 1.3 * z) * size
-            groups.setdefault((p['c'], q), []).append((x, y, rad))
-            if glow and z > 0.65:
-                halos.setdefault((p['c'], q), []).append((x, y, rad * 3))
-        for (c, q), pts in halos.items():
-            cr.set_source_rgba(*c, (q + 0.5) / 12 * 0.18)
-            for x, y, r in pts:
-                cr.new_sub_path()
-                cr.arc(x, y, r, 0, 6.283)
-            cr.fill()
-        for (c, q), pts in groups.items():
-            cr.set_source_rgba(*c, (q + 0.5) / 12)
-            for x, y, r in pts:
-                if r < 1.5:                            # tiny: a square is cheaper
-                    cr.rectangle(x - r, y - r, 2 * r, 2 * r)
-                else:
-                    cr.new_sub_path()
-                    cr.arc(x, y, r, 0, 6.283)
-            cr.fill()
+        sw.paint(cr, s, W, H, t, spill, colours)
         if not spill:
             cr.restore()
         self.paint_edge(cr, s, bx, by, bw, bh)

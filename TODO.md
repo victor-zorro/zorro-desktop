@@ -315,7 +315,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   rebuild the window" refreshes with `refill()` (`pages_desktop.py` 252, `pages_look.py`
   115-146, 322); name sub-pages instead of positional `'hw:2'` targets.
 
-- [ ] **4.3 Delete the second particle engine** (S-M)
+- [x] **4.3 Delete the second particle engine** (S-M)
   `apps/zorro-fx/zorro_fx.py` 126-239 vs 316-383 and 431-482. Keep the numpy `Swarm`,
   delete the plain-Python path (about 130 lines); numpy is in `packages/common.txt`.
 
