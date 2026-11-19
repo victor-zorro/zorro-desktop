@@ -83,10 +83,97 @@ def grab_screen():
     return path
 
 
-def to_clipboard(path):
-    # xclip reads the file, then stays in the background to serve the clipboard
-    subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', path],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+def to_clipboard(path, temp=False):
+    """the clipboard gets the picture AND the file: chat apps and web pages take the picture,
+    file managers and upload fields the file. A small process in the background serves it
+    until something else is copied (then a temp file is removed)."""
+    p = subprocess.Popen([sys.executable, SELF, '--serve', path] + (['--temp'] if temp else []),
+                         start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if p.stdout.readline().strip() != 'ready':      # no python3-xlib: the picture only
+        subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', path],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p.stdout.close()
+
+
+def serve_clipboard(path, temp=False):
+    """own the X clipboard and hand out image/png, text/uri-list and
+    x-special/gnome-copied-files; big answers go in pieces (INCR)"""
+    from urllib.parse import quote
+    from Xlib import X, Xatom, display
+    from Xlib.protocol import event
+    try:
+        d = display.Display()
+        png = Path(path).read_bytes()
+    except Exception:                                    # noqa: BLE001
+        return
+    uri = 'file://' + quote(str(Path(path).resolve()))
+    atom = lambda n: d.intern_atom(n)                    # noqa: E731
+    CLIP, TARGETS, TIMESTAMP, INCR = atom('CLIPBOARD'), atom('TARGETS'), atom('TIMESTAMP'), atom('INCR')
+    data = {atom('image/png'): png,
+            atom('text/uri-list'): (uri + '\r\n').encode(),
+            atom('x-special/gnome-copied-files'): ('copy\n' + uri).encode()}
+    win = d.screen().root.create_window(0, 0, 1, 1, 0, X.CopyFromParent,
+                                        event_mask=X.PropertyChangeMask)
+    win.change_property(Xatom.WM_NAME, Xatom.STRING, 8, b'zorro-shot clipboard')
+    while True:                                          # a real timestamp for the selection
+        e = d.next_event()
+        if e.type == X.PropertyNotify:
+            stamp = e.time
+            break
+    win.set_selection_owner(CLIP, stamp)
+    d.flush()
+    if d.get_selection_owner(CLIP) != win:
+        return
+    print('ready', flush=True)
+    sys.stdout.close()
+    chunk, pending = 65536, {}                           # (requestor, property): (type, bytes, offset)
+    while True:
+        e = d.next_event()
+        if e.type == X.SelectionClear:
+            break
+        if e.type == X.PropertyNotify and e.state == X.PropertyDelete:
+            k = (e.window.id, e.atom)
+            if k in pending:                             # the requestor took a piece: the next
+                typ, blob, off = pending[k]
+                piece = blob[off:off + chunk]
+                e.window.change_property(e.atom, typ, 8, piece)
+                if piece:
+                    pending[k] = (typ, blob, off + chunk)
+                else:
+                    del pending[k]
+                d.flush()
+            continue
+        if e.type != X.SelectionRequest:
+            continue
+        prop = e.property or e.target
+        ok = True
+        try:
+            if e.target == TARGETS:
+                e.requestor.change_property(prop, Xatom.ATOM, 32, [TARGETS, TIMESTAMP, *data])
+            elif e.target == TIMESTAMP:
+                e.requestor.change_property(prop, Xatom.INTEGER, 32, [stamp])
+            elif e.target in data:
+                blob = data[e.target]
+                if len(blob) > chunk * 3:
+                    e.requestor.change_attributes(event_mask=X.PropertyChangeMask)
+                    e.requestor.change_property(prop, INCR, 32, [len(blob)])
+                    pending[(e.requestor.id, prop)] = (e.target, blob, 0)
+                else:
+                    e.requestor.change_property(prop, e.target, 8, blob)
+            else:
+                ok = False
+        except Exception:                                # noqa: BLE001 - requestor gone
+            ok = False
+        e.requestor.send_event(event.SelectionNotify(
+            time=e.time, requestor=e.requestor, selection=e.selection, target=e.target,
+            property=prop if ok else X.NONE), event_mask=0)
+        d.flush()
+    if temp:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def finish(pixbuf, rect, save=True):
@@ -102,11 +189,11 @@ def finish(pixbuf, rect, save=True):
         sub.savev(str(path), 'png', [], [])
         to_clipboard(str(path))
     else:
-        fd, tmp = tempfile.mkstemp(suffix='.png', dir=os.environ.get('XDG_RUNTIME_DIR'))
-        os.close(fd)
-        sub.savev(tmp, 'png', [], [])
-        to_clipboard(tmp)
-        os.unlink(tmp)
+        tmpdir = Path(os.environ.get('XDG_RUNTIME_DIR') or tempfile.gettempdir()) / 'zorro-shot'
+        tmpdir.mkdir(mode=0o700, exist_ok=True)
+        tmp = tmpdir / f"Screenshot {time.strftime('%Y-%m-%d %H-%M-%S')}.png"
+        sub.savev(str(tmp), 'png', [], [])
+        to_clipboard(str(tmp), temp=True)               # removed when something else is copied
         path = None
     # the notification waits for a click, so it runs in its own process
     subprocess.Popen([sys.executable, SELF, '--notify', str(path or ''), f'{w}x{h}'],
@@ -512,8 +599,12 @@ def main():
     g.add_argument('--window', action='store_true', help='active window, no overlay')
     g.add_argument('--full', action='store_true', help='whole screen, no overlay')
     g.add_argument('--notify', nargs=2, metavar=('FILE', 'SIZE'), help=argparse.SUPPRESS)
+    g.add_argument('--serve', metavar='FILE', help=argparse.SUPPRESS)
+    ap.add_argument('--temp', action='store_true', help=argparse.SUPPRESS)
     a = ap.parse_args()
-    if a.notify:
+    if a.serve:
+        serve_clipboard(a.serve, a.temp)
+    elif a.notify:
         cmd_notify(*a.notify)
     elif a.window:
         run_direct('window')

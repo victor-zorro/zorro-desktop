@@ -12,6 +12,12 @@ stay in the shot), then shown dimmed:
 Saved to `~/Pictures/Screenshots/YYYY-MM-DD_HH-MM-SS.png` and copied to the clipboard; the
 notification has *Open* and *Show in folder*.
 
+The clipboard holds the picture **and** the file, so Ctrl+V works almost anywhere:
+WhatsApp Web, Signal, a browser upload field or page, an image editor, or Thunar (pastes the
+file). A small background process (`zorro-shot --serve`, python3-xlib) serves it until
+something else is copied. *Copy* without saving keeps a temp file in `$XDG_RUNTIME_DIR/zorro-shot`
+until then.
+
 | Key | |
 |---|---|
 | PrtSc | overlay |
