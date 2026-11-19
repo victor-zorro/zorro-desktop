@@ -191,6 +191,11 @@ def toggle_running():
     """already open: close it and stop (Super pressed again)"""
     try:
         pid = int(PIDFILE.read_text())
+        # a pid file left by a Dialer that died: that number may belong to anything now
+        argv = [os.path.basename(x) for x in Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0')]
+        if not (argv[:1] == [b'zorro-dial'] or
+                (argv[0].startswith(b'python') and argv[1:2] == [b'zorro-dial'])):
+            return False
         os.kill(pid, signal.SIGTERM)
         return True
     except (OSError, ValueError):
@@ -784,11 +789,14 @@ class Dial(Gtk.Window):
             step = math.degrees((44 if k == 0 else 74) / rm)
             cap = max(2, int((a1 - a0 - 4) / step))
             items = list(items)
-            if len(items) > cap:                   # never dropped silently: "+N" opens the folder
+            if len(items) > cap:                   # never dropped silently: "N more" unfolds the rest
                 parent = path[lv - 1] if lv > 0 else None
-                extra = len(items) - cap + 1
-                items = items[:cap - 1] + [dialmodes.tile('lucide:ellipsis', f'{extra} more', 'click: all',
-                                                          parent and parent.get('act'), id=f'__more{lv}')]
+                rest = items[cap - 1:]
+                where = self.node_key(parent) if parent else part.key
+                items = items[:cap - 1] + [dialmodes.tile(
+                    'lucide:ellipsis', f'{len(rest)} more', 'rest here: the others',
+                    parent and parent.get('act'), id=f'__more{lv}:{where}:{len(rest)}',
+                    kids=lambda r=rest: r)]
             n = max(1, len(items))
             if parent_angle is None:
                 s0, s1 = a0, a1
@@ -1180,6 +1188,10 @@ class Dial(Gtk.Window):
                     act()
                     self.close_dial()
                     return
+            elif a.get('kids'):         # nothing to start ("N more"): a click unfolds it
+                lv = next((sl[4] for sl in self.slots if same(sl[3], a)), None)
+                if lv is not None:
+                    self.unfold(a, lv)
         else:
             self.launch(a)
             return

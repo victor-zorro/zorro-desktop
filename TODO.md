@@ -40,14 +40,14 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   `OnUnitActiveSec=30min` with runs of 16-26 minutes leaves gaps of 6-14 minutes.
   Fix: `OnUnitInactiveSec=30min`. Rerun the app's install.sh so the unit is reloaded.
 
-- [ ] **1.3 Dialer: "N more" tile does nothing** (S)
+- [x] **1.3 Dialer: "N more" tile does nothing** (S)
   `apps/zorro-dial/zorro-dial` — ring layout about lines 784-791, `activate` about 1156.
   The first ring fits 8 tiles; the rest collapse into an "N more" tile with no action and no
   children. Notes (10 roots) and Messages (9) have unreachable items; deeper rings too.
   Fix: make "N more" a node whose `kids` are the remaining items (paging).
   Check: every root of every part can be reached with mouse and keys.
 
-- [ ] **1.4 Dialer: stale pid file kills another process** (S)
+- [x] **1.4 Dialer: stale pid file kills another process** (S)
   `apps/zorro-dial/zorro-dial` about lines 190-197 and 1207-1209.
   Fix: before sending SIGTERM, check `/proc/<pid>/cmdline` contains `zorro-dial`; else ignore
   and overwrite the pid file.
