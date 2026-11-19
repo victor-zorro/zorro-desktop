@@ -2,12 +2,18 @@
 
 Clean up a cluttered vault one note at a time, in rounds, on your computer or your phone.
 
+![Swipe a note left to keep it](images/keep.png)
+
 1. **Keep or delete.** Your oldest notes come up one by one, shown as cards. Swipe a card
    **left to keep** or **right to delete**. Dots at the top fill up with each note you keep.
 2. **Sort.** After a round of kept notes (10 by default), they come back one by one. Drag
    each onto the notebook (folder) where it belongs, or tap a notebook. "Stays here" and
    "+ New folder" are always there.
 3. Next round.
+
+![Drag the kept notes onto notebooks](images/sort.png)
+
+![On the phone: choose a notebook, swipe, sort](images/phone.png)
 
 Deleted notes go where your **Settings → Files and links → Deleted files** setting says, and
 **undo** (the button under the card, or Ctrl+Z) brings them back.

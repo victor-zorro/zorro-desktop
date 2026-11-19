@@ -138,3 +138,4 @@
 .zs.zs-theme .zs-row:hover { border-color: var(--interactive-accent); }
 .zs.zs-theme .zs-side-l { color: var(--interactive-accent); opacity: .6; }
 .zs.zs-theme .zs-side-r { color: var(--text-error); opacity: .5; }
+.zs.is-narrow .zs-nb-best { font-size: 8px; letter-spacing: 1px; }
