@@ -4,6 +4,7 @@ import getpass
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -14,6 +15,8 @@ from gi.repository import GdkPixbuf, Gtk  # noqa: E402
 from .ui import Pages, heading, idle, note
 
 FACE = '/usr/local/bin/zorro-face'
+FACEVIEW = os.path.realpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..',
+                                         'zorro-face', 'faceview.py'))
 SRC = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', '..', 'zorro-face')
 
 
@@ -38,10 +41,11 @@ class FacePages:
 
         row = Gtk.Box(spacing=8, margin_top=6)
         self.face_learn = Gtk.Button(label='Learn my face')
-        self.face_learn.set_tooltip_text('Look at the camera for a few seconds; again with glasses, '
+        self.face_learn.set_tooltip_text('Opens a window: look at the screen and turn your head a little; '
+                                         'learning again (glasses, other light) adds to it. '
                                          'or in other light, makes it better')
         self.face_test = Gtk.Button(label='Test')
-        self.face_forget = Gtk.Button(label='Forget my face')
+        self.face_forget = Gtk.Button(label='Delete all my face data')
         self.face_look = Gtk.Button(label='Camera view')
         self.face_look.set_tooltip_text('What the infrared camera sees')
         for b in (self.face_learn, self.face_test, self.face_forget, self.face_look):
@@ -64,10 +68,10 @@ class FacePages:
                      'first app that needs it asks for the password once.'))
 
         me = getpass.getuser()
-        self.face_learn.connect('clicked', lambda b: self.face_run(['enroll', me], 'Look at the camera…'))
+        self.face_learn.connect('clicked', lambda b: self.face_window('learn'))
         self.face_test.connect('clicked', lambda b: self.face_run(['verify', me, '--timeout', '6'],
                                                                    'Look at the camera…'))
-        self.face_forget.connect('clicked', lambda b: self.face_run(['remove', me], 'Forgetting…'))
+        self.face_forget.connect('clicked', lambda b: self.face_window('forget'))
         self.face_look.connect('clicked', lambda b: self.face_snapshot())
         self.face_lock.connect('toggled', lambda c: self.face_set('lock', c))
         self.face_login.connect('toggled', lambda c: self.face_set('login', c))
@@ -101,6 +105,15 @@ class FacePages:
             w.set_sensitive(ok)
         self.face_busy = False
         return False
+
+    def face_window(self, mode):
+        """faceview: learning shows the wireframe being built, deleting shows it coming apart"""
+        self.face_out.set_text('')
+
+        def work():
+            subprocess.run([sys.executable, FACEVIEW, mode])
+            self.face_check()
+        threading.Thread(target=work, daemon=True).start()
 
     def face_run(self, args, first):
         self.face_out.set_text(first)
