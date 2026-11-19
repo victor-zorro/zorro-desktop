@@ -1,0 +1,9 @@
+<!-- a broom in the Lucide line style (drawn for zorro-desktop, same licence as this repo) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none"
+     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M21 3 13.5 10.5" />
+  <path d="M9.5 7.5 16.5 14.5 12 21 3 12Z" />
+  <path d="m7 16 3-3" />
+  <path d="m9.5 18.5 3-3" />
+  <path d="m5 13.5 2.5-2.5" />
+</svg>

@@ -106,6 +106,35 @@ def greyscale(src, size, opacity):
                                            GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
 
 
+def sweep_icon(size, opacity):
+    """Sweep notes: Obsidian's icon (black and white like the others) with a white broom on a
+    dark disc in its bottom-right corner; None without Obsidian's icon"""
+    import gi
+    gi.require_version('GdkPixbuf', '2.0')
+    from gi.repository import GdkPixbuf
+    src = official_file('obsidian')
+    if not src:
+        return None
+    base = greyscale(src, size, opacity)
+    broom = (HERE / 'sweep-broom.svg').read_text()
+    broom = re.sub(r'<!--.*?-->\s*', '', broom, flags=re.S).replace('stroke="currentColor"', 'stroke="#ffffff"')
+    inner = re.search(r'<svg[^>]*>(.*)</svg>', broom, re.S).group(1)
+    badge = ('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">'
+             f'<circle cx="12" cy="12" r="11.5" fill="#05070a" fill-opacity="{0.6 + 0.4 * opacity:.2f}"/>'
+             '<g transform="translate(4.2 4.2) scale(0.65)" fill="none" stroke="#ffffff" stroke-width="2.4" '
+             f'stroke-linecap="round" stroke-linejoin="round" stroke-opacity="{min(1, opacity + 0.4):.2f}">'
+             f'{inner}</g></svg>')
+    n = max(12, int(size * 0.56))
+    loader = GdkPixbuf.PixbufLoader.new_with_type('svg')
+    loader.set_size(n, n)
+    loader.write(badge.encode())
+    loader.close()
+    over = loader.get_pixbuf()
+    x = y = size - n
+    over.composite(base, x, y, n, n, x, y, 1, 1, GdkPixbuf.InterpType.BILINEAR, 255)
+    return base
+
+
 def mono_svg(path, opacity):
     """a one-colour brand logo, white with the shared transparency"""
     svg = path.read_text()
@@ -159,6 +188,21 @@ def build(opacity, style):
                 official.add(name)
             except Exception as e:                       # a broken icon file: keep Lucide
                 print(f'build-icons: {name}: {e}', file=sys.stderr)
+
+    if style == 'official':             # our Sweep notes: the Obsidian icon with a broom
+        try:
+            for sz in SIZES:
+                pb = sweep_icon(sz, opacity)
+                if pb:
+                    pb.savev(str(tmp / f'apps-{sz}' / 'zorro-sweep.png'), 'png', [], [])
+                    official.add('zorro-sweep')
+        except Exception as e:                           # noqa: BLE001
+            print(f'build-icons: zorro-sweep: {e}', file=sys.stderr)
+    if 'zorro-sweep' not in official:   # line style (or no Obsidian): the broom alone
+        for n in ('zorro-sweep', 'zorro-sweep-symbolic'):
+            (tmp / 'scalable' / f'{n}.svg').write_text(
+                re.sub(r'<!--.*?-->\s*', '', (HERE / 'sweep-broom.svg').read_text(), flags=re.S)
+                .replace('stroke="currentColor"', f'stroke="#ffffff" stroke-opacity="{opacity:.2f}"'))
 
     src = {}
     for name, lucide in {**m['apps'], **m['symbols']}.items():
