@@ -545,10 +545,14 @@ class Notes(Part):
         """every vault Obsidian knows except those unticked in the app (Accounts → Obsidian);
         the one open in Obsidian first"""
         try:
-            vs = list(json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values())
-        except (OSError, ValueError):
-            vs = []
-        vs.sort(key=lambda v: (not v.get('open'), os.path.basename(v.get('path', '')).lower()))
+            from zorro_util import vault_entries         # apps/zorro-fx (on the path via zorro-dial)
+            vs = vault_entries()
+        except ImportError:
+            try:
+                vs = list(json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values())
+            except (OSError, ValueError):
+                vs = []
+            vs.sort(key=lambda v: (not v.get('open'), os.path.basename(v.get('path', '')).lower()))
         try:
             hide = json.loads((HOME / '.config/zorro-dial/config.json').read_text()).get('notes_hide_vaults', [])
         except (OSError, ValueError):

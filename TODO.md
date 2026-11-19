@@ -223,7 +223,10 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   marks: on = cyan, warning = red, off = grey. Screenshot frame and label in cyan and
   DejaVu Sans Mono. Decide the settings app's default font once (`zsettings/windows.py` 16).
 
-- [ ] **3.2 One shared helper module next to zorro-fx** (M)
+- [x] **3.2 One shared helper module next to zorro-fx** (M)
+  Done: `apps/zorro-fx/zorro_util.py` (vaults, vault_entries, read_json, write_json) used by
+  search, sweep, dial, settings; settings writes made atomic. Left on purpose: the three
+  `ago()` give different texts by design, and the `.desktop` readers need different fields.
   Copies today: Obsidian `vaults()` (dialmodes.py 527, zorro-search 41, zorro-sweep 75,
   zsettings/pages_accounts.py 96); atomic JSON write (5+ in drive, winpos, zsettings);
   `ago()` (zorro-drive 427, dialmodes.py 48, zorro-sweep 126); `.desktop` parsing

@@ -38,12 +38,16 @@ EVERY = 600                  # seconds between index updates in the service
 
 # ---- what to search ------------------------------------------------------------------------
 
-def vaults():
-    try:
-        vs = json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values()
-    except (OSError, ValueError):
-        return []
-    return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', ''))]
+sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+try:                                    # shared helpers (apps/zorro-fx/zorro_util.py)
+    from zorro_util import vaults
+except ImportError:
+    def vaults():
+        try:
+            vs = json.loads((Path.home() / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values()
+        except (OSError, ValueError):
+            return []
+        return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', ''))]
 
 
 def files():

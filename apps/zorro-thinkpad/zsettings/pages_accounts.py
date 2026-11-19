@@ -6,7 +6,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from .base import APPS, HOME, run, spawn
+from .base import APPS, HOME, run, spawn, write_atomic
 from .ui import Pages, heading, idle, note
 import gi
 gi.require_version('Gtk', '3.0')
@@ -27,8 +27,7 @@ def music_conf():
 def save_music_conf(**kv):
     c = music_conf()
     c.update(kv)
-    MUSIC_CONF.parent.mkdir(parents=True, exist_ok=True)
-    MUSIC_CONF.write_text(json.dumps(c, indent=2) + '\n')
+    write_atomic(MUSIC_CONF, json.dumps(c, indent=2) + '\n')
 
 
 def soundcloud_state():
@@ -92,6 +91,11 @@ def set_dial_hidden(path, hidden):
 
 
 def obsidian_vaults():
+    try:
+        from zorro_util import vaults               # apps/zorro-fx, on the path via ui.py
+        return sorted((str(p) for p in vaults()), key=str.lower)
+    except ImportError:
+        pass
     try:
         vs = json.loads((HOME / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values()
     except (OSError, ValueError):

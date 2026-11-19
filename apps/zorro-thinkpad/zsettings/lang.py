@@ -43,8 +43,8 @@ def chosen():
 
 
 def choose(langs):
-    CONF.parent.mkdir(parents=True, exist_ok=True)
-    CONF.write_text(json.dumps({'spell': [x for x in LANGS if x in langs]}, indent=1))
+    from .base import write_atomic
+    write_atomic(CONF, json.dumps({'spell': [x for x in LANGS if x in langs]}, indent=1))
 
 
 def installed(code):

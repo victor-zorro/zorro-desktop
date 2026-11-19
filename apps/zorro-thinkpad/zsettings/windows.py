@@ -247,8 +247,7 @@ def set_winpos(key, value):
     settings when it starts; it does not reopen anything when restarted within a login)"""
     c = winpos_conf()
     c[key] = value
-    WINPOS_CONF.parent.mkdir(parents=True, exist_ok=True)
-    WINPOS_CONF.write_text(json.dumps(c, indent=1))
+    write_atomic(WINPOS_CONF, json.dumps(c, indent=1))
     tool = shutil.which('zorro-winpos')
     if not tool:
         return

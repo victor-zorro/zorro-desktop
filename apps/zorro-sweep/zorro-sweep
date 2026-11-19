@@ -72,12 +72,15 @@ LINKS = re.compile(r'!?\[\[([^\]|#^]+)|!?\[[^\]]*\]\(<?([^)>]+)>?\)')
 
 
 # ---- vaults and notes ----------------------------------------------------------------------
-def vaults():
-    try:
-        v = json.loads(OBSIDIAN_JSON.read_text())['vaults'].values()
-        return [Path(x['path']) for x in v if Path(x['path']).is_dir()]
-    except (OSError, ValueError, KeyError):
-        return []
+try:                                    # shared helpers (apps/zorro-fx/zorro_util.py)
+    from zorro_util import vaults
+except ImportError:
+    def vaults():
+        try:
+            vs = json.loads((Path.home() / '.config/obsidian/obsidian.json').read_text()).get('vaults', {}).values()
+        except (OSError, ValueError):
+            return []
+        return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', ''))]
 
 
 def attach_dir(vault):
