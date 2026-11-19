@@ -6,12 +6,14 @@ until the password is right. We pause dunst meanwhile, so notifications wait.
 Exits when unlocked. Without zorro-dm (LightDM fallback) it runs `dm-tool lock`.
 """
 import os
+import signal
 import socket
 import subprocess
 import sys
 
 SOCK = '/run/zorro-dm/lock.sock'
-LOCKED = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'zorro-locked')   # zorro-wall pauses
+# zorro-wall pauses while this file is there; only in the user's own runtime folder
+LOCKED = os.path.join(os.environ['XDG_RUNTIME_DIR'], 'zorro-locked') if os.environ.get('XDG_RUNTIME_DIR') else None
 
 
 def dunst(paused):
@@ -40,8 +42,10 @@ def main():
         release_sleep()
         os.execvp('dm-tool', ['dm-tool', 'lock'])
     dunst(True)
+    signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))    # so the finally below still runs
     try:                                # zorro-wall stops drawing while this file is there
-        open(LOCKED, 'w').close()
+        if LOCKED:
+            open(LOCKED, 'w').close()
     except OSError:
         pass
     try:
@@ -56,7 +60,8 @@ def main():
         release_sleep()
         dunst(False)
         try:
-            os.unlink(LOCKED)
+            if LOCKED:
+                os.unlink(LOCKED)
         except OSError:
             pass
 

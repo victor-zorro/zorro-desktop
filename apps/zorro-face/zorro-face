@@ -266,11 +266,10 @@ def verify(user, timeout=6.0):
     if not dev:
         say('no camera')
         return 3
-    if not emitter(dev):
-        say('no camera light')
-        return 4
+    light = emitter(dev)                # may fail while the light flashes anyway: go on
     c = conf()
     t0 = time.time()
+    seen = 0
     cam = Camera(dev)                   # the camera starts first: OpenCV takes ~0.5 s to load
     faces, hits = Faces(), 0
     # a camera that stops sending frames would block a read forever: stop ffmpeg at the end
@@ -280,6 +279,7 @@ def verify(user, timeout=6.0):
     say('looking')
     try:
         for lit, dark in cam.pairs(until=t0 + timeout):
+            seen += 1
             e, why = faces.look(lit, dark)
             if e is None:
                 continue
@@ -294,6 +294,9 @@ def verify(user, timeout=6.0):
     finally:
         watchdog.cancel()
         cam.close()
+    if not seen and not light:          # no flashing light at all: say that, not 'no match'
+        say('no camera light')
+        return 4
     say('no match')
     return 1
 

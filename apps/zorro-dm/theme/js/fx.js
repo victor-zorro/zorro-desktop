@@ -741,7 +741,8 @@
   window.FX = {
     burst: triggerBurst,
     onBurst: (f) => listeners.push(f),
-    powerOff(cb) { powerTarget = 0; powerStart = performance.now(); powerCb = cb; wake(); },
+    // the session starts from inside the frame loop: wake it even when paused (idle screen)
+    powerOff(cb) { powerTarget = 0; powerStart = performance.now(); powerCb = cb; paused = false; wake(); },
     // live changes (the Zorro app's preview); a new animal swims in right away
     setLook(obj) {
       const animal = cfg.animal;

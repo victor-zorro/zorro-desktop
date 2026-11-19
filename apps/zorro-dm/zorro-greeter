@@ -42,7 +42,7 @@ def look_script():
             if fh.read().strip() == '0':
                 look['fps'] = min(float(look.get('fps') or 30), 12)
                 look['fps_min'] = min(float(look.get('fps_min') or 8), 8)
-    except OSError:
+    except (OSError, ValueError, TypeError):    # a bad value must never stop the login screen
         pass
     return 'window.ZORRO_LOOK = ' + json.dumps(look) + ';'
 

@@ -318,6 +318,8 @@ class FaceCheck:
         self.done = True
         if rc == 0:
             self.dm.events.put(('face_ok', self.rnd, self))
+        elif self.rnd != self.dm.round:
+            pass                            # a check from an earlier round: no answer to a new page
         elif self.last:
             self.dm.send(type='face', state='none',
                          why=f'face unlock is off after {FACE_TRIES} tries: type your password')
@@ -443,7 +445,8 @@ class DM:
         def offer(user):                # the face icon, when this user has a learned face
             nonlocal face_user
             face_user = user if FaceCheck.wanted(user, mode) else None
-            self.send(type='face', state='available' if face_user else 'none')
+            on = face_user and face_tries < FACE_TRIES       # after the cap it stays away
+            self.send(type='face', state='available' if on else 'none')
 
         def look():
             nonlocal face, face_at, face_tries
@@ -453,7 +456,8 @@ class DM:
                 self.send(type='face', state='none', why='type your password')
                 return
             if not face_user or time.monotonic() - face_at < 1:
-                self.send(type='face', state='fail', why='')    # the page waits for an answer
+                self.send(type='face', state='fail',             # the page waits for an answer
+                          why='' if not face_user else 'wait a moment and press again')
                 return
             face_at = time.monotonic()
             face_tries += 1
@@ -497,6 +501,7 @@ class DM:
                     fl = FaceLogin(m.user, display)
                 except PAM.error as e:
                     log('face login refused:', e)
+                    self.send(type='face', state='fail', why='login refused for this user: use the password')
                     continue
                 if login:
                     login.cancel()
