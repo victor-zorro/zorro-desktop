@@ -115,7 +115,20 @@ def on_charger():
     return sysread('/sys/class/power_supply/AC/online', '1') == '1'
 
 
+_cam = {'at': -1e9, 'val': False}
+
+
 def camera_or_mic_in_use():
+    """shared by the red dot and 'stay awake in calls': one look every 5 s on the charger,
+    every 15 s on battery (it walks /proc and asks PipeWire)"""
+    if time.monotonic() - _cam['at'] < (5 if on_charger() else 15):
+        return _cam['val']
+    _cam['val'] = _camera_or_mic_in_use()
+    _cam['at'] = time.monotonic()
+    return _cam['val']
+
+
+def _camera_or_mic_in_use():
     for fd_dir in Path('/proc').glob('[0-9]*/fd'):           # our own processes only
         try:
             for fd in fd_dir.iterdir():
@@ -150,11 +163,12 @@ _dot = {'refresh': False, 'checked': 0.0, 'mode': None, 'conf': None}
 
 def dot_mode():
     """the pattern the red dot should show now: the first active override, else the
-    normal one. Conditions are checked at most every 5 seconds (or on a settings change)."""
+    normal one. Conditions are checked at most every 5 seconds, 15 on battery (or at once on a
+    settings change)."""
     li = load_conf().get('lights', {})
     if not isinstance(li, dict):
         li = {}
-    if li != _dot['conf'] or time.monotonic() - _dot['checked'] > 5:
+    if li != _dot['conf'] or time.monotonic() - _dot['checked'] > (5 if on_charger() else 15):
         mode = li.get('dot', 'on')
         ov = li.get('overrides', {}) if isinstance(li.get('overrides'), dict) else {}
         for key, _ in OVERRIDES:

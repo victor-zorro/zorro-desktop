@@ -32,6 +32,9 @@ OSD_CSS = b'''
 _styled = set()
 
 
+_styled_monitors = []
+
+
 def style_osd(screen):
     """indicator look; the level bar's opacity follows the zorro-fx setting (live).
     Once per screen: a rebuilt app window must not add providers and timers again."""
@@ -48,14 +51,19 @@ def style_osd(screen):
     Gtk.StyleContext.add_provider_for_screen(screen, bar, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
     last = [None]
 
-    def update():
+    def update(*_a):
         data = zorro_fx.bar_css()
         if data != last[0]:
             last[0] = data
             bar.load_from_data(data)
         return True
     update()
-    GLib.timeout_add(500, update)
+    # follow the zorro-fx settings file instead of reading it every 500 ms
+    from gi.repository import Gio
+    zorro_fx.CONF.parent.mkdir(parents=True, exist_ok=True)
+    mon = Gio.File.new_for_path(str(zorro_fx.CONF)).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
+    mon.connect('changed', lambda *a: GLib.timeout_add(100, lambda: update() and False))
+    _styled_monitors.append(mon)      # kept alive
 
 
 def find_event_device(name):
