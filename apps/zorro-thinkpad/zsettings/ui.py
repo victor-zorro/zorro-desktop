@@ -304,6 +304,7 @@ def device_row(title, detail='', acts=(), icon=None, state=None, sub=False, belo
     row = Gtk.Box(spacing=12)
     if icon or sub:
         img = Gtk.Image.new_from_icon_name(icon or 'go-next-symbolic', Gtk.IconSize.DND)
+        img.set_pixel_size(32)              # also an app icon that only comes in big sizes
         img.set_opacity(0 if sub else 1)
         row.add(img)
     if sub:

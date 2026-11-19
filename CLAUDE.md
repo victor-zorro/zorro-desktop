@@ -27,7 +27,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app; `zorro_style.py` = the one palette + font for all apps
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
-- `extras/` — apps that need a manual download first (e.g. `extras/davinci-resolve/install.sh`)
+- `extras/` — optional apps, added after the minimal setup: `extras/apps.json` is the list (Godot, Unreal Engine, LocalSend…), each with `extras/<id>/install.sh` (runs as the user, pkexec/sudo for root steps; shared bits in `extras/common.sh`). Installed from Settings → Desktop → Install apps or `zorro-apps install ID`. New optional app = an entry in apps.json + its install.sh. DaVinci Resolve (`extras/davinci-resolve/install.sh`, sudo) is not on the list.
 
 ## Rules
 - Every change must also land in the repo so a fresh machine gets it: package → packages/*.txt, config → config/, system file → system/ + an install line in install.sh.

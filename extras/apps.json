@@ -1,0 +1,16 @@
+{
+  "_about": "Apps you can add later, from Settings → Desktop → Install apps or `zorro-apps`. Each has extras/<id>/install.sh, run as you (it asks for your password itself when it needs root). how: auto = downloads by itself; manual = you download a file first (download = the page). installed = a file that exists once it is installed.",
+  "apps": [
+    {"id": "godot", "name": "Godot", "icon": "godot",
+     "about": "Game engine, standard build (GDScript)", "size": "about 150 MB",
+     "how": "auto", "installed": "~/.local/opt/godot/godot"},
+    {"id": "unreal-engine", "name": "Unreal Engine", "icon": "unreal-engine",
+     "about": "Game engine by Epic. Needs your Epic account: download the Linux zip first",
+     "size": "about 45 GB unpacked, the zip is about 25 GB", "how": "manual",
+     "download": "https://www.unrealengine.com/en-US/linux", "file": "Linux_Unreal_Engine_*.zip",
+     "installed": "~/UnrealEngine/Engine/Binaries/Linux/UnrealEditor"},
+    {"id": "localsend", "name": "LocalSend", "icon": "localsend_app",
+     "about": "Send files to phones and computers nearby", "size": "about 60 MB",
+     "how": "auto", "installed": "/usr/share/applications/localsend_app.desktop"}
+  ]
+}

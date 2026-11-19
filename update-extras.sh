@@ -4,9 +4,9 @@ set -euo pipefail
 
 ARCH=$(dpkg --print-architecture)
 if [[ $ARCH == amd64 ]]; then
-  MQTTX_PAT='amd64\.deb$'; LS_PAT='linux-x86-64\.deb$'
+  MQTTX_PAT='amd64\.deb$'
 else
-  MQTTX_PAT='arm64\.deb$'; LS_PAT='linux-arm-64\.deb$'
+  MQTTX_PAT='arm64\.deb$'
 fi
 
 gh_deb() {
@@ -29,7 +29,7 @@ gh_deb() {
 }
 
 gh_deb emqx/MQTTX "$MQTTX_PAT" mqttx
-gh_deb localsend/localsend "$LS_PAT" localsend
+# LocalSend: optional now (Settings → Desktop → Install apps, or: zorro-apps install localsend)
 # Obsidian (notes; synced with Obsidian Sync): official .deb, amd64 only
 if [[ $ARCH == amd64 ]]; then gh_deb obsidianmd/obsidian-releases 'obsidian_.*_amd64\.deb$' obsidian; fi
 # --- rclone (Google Drive mount/sync) ------------------------------------
