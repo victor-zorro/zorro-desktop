@@ -47,6 +47,7 @@ DIM = (0.44, 0.44, 0.47)
 RED = (1.0, 0.16, 0.29)
 CYAN = (0.10, 0.90, 1.0)
 GREEN = (0.30, 1.0, 0.62)
+ROUND = 10                      # keep this many, then sort them
 SWIPE = 150                     # px past which a let-go counts as a swipe
 IMG = re.compile(r'\.(png|jpe?g|gif|webp|bmp|svg)$', re.I)
 GAP = '<span size="4000"> </span>'     # an empty line, made small
@@ -162,6 +163,10 @@ class Vault:
             st = {}
         self.kept = set(st.get('kept', []))      # names relative to the vault
         self.stays = set(st.get('stays', []))    # kept and sorted: stays where it is
+        # this round's kept notes, sorted once there are ROUND of them (older kept notes, from
+        # before rounds existed, make up the first round)
+        self.batch = st.get('batch', sorted(self.kept - self.stays))
+        self.stats = {'deleted': 0, 'moved': 0, **st.get('stats', {})}
         self.files = {}                          # lower-case name: path, for pictures and pdfs
         self.uses = {}                           # lower-case name: set of notes that link to it
         for p in self.path.rglob('*'):
@@ -189,9 +194,26 @@ class Vault:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         live = {p.name for p in self.path.glob('*.md')}
         tmp = self.state_file.with_suffix('.tmp')
-        tmp.write_text(json.dumps({'kept': sorted(self.kept & live), 'stays': sorted(self.stays & live)},
-                                  indent=0))
+        tmp.write_text(json.dumps({'kept': sorted(self.kept & live), 'stays': sorted(self.stays & live),
+                                   'batch': [b for b in self.batch if b in live],
+                                   'stats': self.stats}, indent=0))
         os.replace(tmp, self.state_file)
+
+    def to_scan(self):
+        return [p for p in self.notes if p.exists() and p.name not in self.kept]
+
+    def sorted_count(self):
+        return self.stats['moved'] + len(self.stays)
+
+    @staticmethod
+    def left_in(path):
+        """notes still to scan in a vault, from its saved progress"""
+        try:
+            st = json.loads((STATE_DIR / (re.sub(r'[^\w.-]+', '_', path.name) + '.json')).read_text())
+        except (OSError, ValueError):
+            st = {}
+        done = set(st.get('kept', [])) | set(st.get('stays', []))
+        return sum(1 for p in path.glob('*.md') if p.name not in done)
 
     def attachments(self, note, text):
         return [self.files[r] for r in refs(text) if r in self.files and self.files[r].exists()]
@@ -292,6 +314,7 @@ class Sweep(Gtk.Window):
         self.skipped = set()
         self.hover = None                  # Sort: the notebook under the card
         self.card = None                   # cached rendering of the current note
+        self.banner = None                 # (title, sub, start): round start / round done
         self.dests = []
         self.find_dests()
 
@@ -304,6 +327,12 @@ class Sweep(Gtk.Window):
             top.add(b)
         self.count = Gtk.Label(xalign=1, hexpand=True)
         top.add(self.count)
+        self.pick = Gtk.ComboBoxText()
+        self.pick.set_tooltip_text('Which notebook (vault) to sweep')
+        self.pick_paths = []
+        self.fill_pick()
+        self.pick.connect('changed', lambda c: self.change_vault())
+        top.add(self.pick)
         ub = Gtk.Button(label='Undo')
         ub.set_tooltip_text('Ctrl+Z')
         ub.connect('clicked', lambda b: self.do_undo())
@@ -332,12 +361,42 @@ class Sweep(Gtk.Window):
         self.connect('key-press-event', self.key)
         self.connect('destroy', lambda w: (self.v.save(), Gtk.main_quit()))
         css = Gtk.CssProvider()
-        css.load_from_data(b'window, box { background: #05070a; } label { color: #9a9aa3; }')
+        css.load_from_data(b'window, box { background: #05070a; } label { color: #9a9aa3; } '
+                          b'button box, combobox box { background: transparent; }')
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css, 800)
         self.show_all()
         self.area.grab_focus()
+        if len(self.v.batch) >= ROUND:     # a full round waits to be sorted
+            self.b_sort.set_active(True)
         self.next_card()
         GLib.timeout_add(16, self.tick)
+
+    def fill_pick(self):
+        self.pick_paths = sorted(vaults(), key=lambda p: p.name.lower())
+        self.pick.remove_all()
+        for p in self.pick_paths:
+            n = Vault.left_in(p) if p != self.v.path else len(self.v.to_scan())
+            self.pick.append_text(f'{p.name} · {n} to scan')
+        if self.v.path in self.pick_paths:
+            self.pick.set_active(self.pick_paths.index(self.v.path))
+
+    def change_vault(self):
+        i = self.pick.get_active()
+        if i < 0 or self.pick_paths[i] == self.v.path:
+            return
+        self.v.save()
+        self.v = Vault(self.pick_paths[i])
+        self.undo.clear()
+        self.skipped.clear()
+        self.fly = None
+        self.find_dests()
+        self.say(f'sweeping {self.v.path.name}')
+        want = self.b_sort if len(self.v.batch) >= ROUND else self.b_sweep
+        if want.get_active():
+            self.next_card()
+        else:
+            want.set_active(True)
+        self.area.grab_focus()
 
     # ---- what is shown -------------------------------------------------------------------
     def find_dests(self):
@@ -351,6 +410,8 @@ class Sweep(Gtk.Window):
                 out.append({'name': vp.name, 'sub': 'vault', 'path': vp, 'vault': True})
         for d in out:
             d['vec'] = self.meaning.centre(d['path'])
+            d['n'] = sum(1 for p in d['path'].rglob('*.md')
+                         if not any(x.startswith('.') for x in p.relative_to(d['path']).parts))
         out.append({'name': 'Stays in ' + self.v.path.name, 'sub': 'keep it where it is', 'path': None,
                     'vault': False, 'vec': None, 'stay': True})
         out.append({'name': '+ New folder', 'sub': 'in ' + self.v.path.name, 'path': None,
@@ -361,24 +422,50 @@ class Sweep(Gtk.Window):
         live = [p for p in self.v.notes if p.exists()]
         if self.mode == 'sweep':
             return [p for p in live if p.name not in self.v.kept and p not in self.skipped]
-        return [p for p in live if p.name in self.v.kept and p.name not in self.v.stays
+        todo = [p for p in live if p.name in self.v.kept and p.name not in self.v.stays
                 and p not in self.skipped]
+        if self.v.batch:                    # this round's notes
+            b = set(self.v.batch)
+            return [p for p in todo if p.name in b]
+        return todo
 
     def next_card(self):
         q = self.queue()
         if not q and self.skipped:          # all seen: the skipped ones come round again
             self.skipped.clear()
             q = self.queue()
+        if not q and self.mode == 'sort' and not self.fly:      # round sorted: next round
+            if self.v.batch:
+                n = len(self.v.batch)
+                self.v.batch = []
+                self.v.save()
+                self.banner = (f'ROUND {self.round() - 1} DONE', f'{n} notes sorted · on to the next {ROUND}',
+                               time.monotonic())
+            if self.v.to_scan():
+                self.b_sweep.set_active(True)
+                return
+        if not q and self.mode == 'sweep' and self.v.batch and not self.fly:   # nothing left
+            self.banner = ('LAST ROUND', 'sort the last ones you kept', time.monotonic())
+            self.b_sort.set_active(True)
+            return
         self.dx = self.dy = self.scroll = 0.0
         self.hover = None
         self.enter_at = time.monotonic()
         self.card = self.load(q[0]) if q else None
         self.left = len(q)
-        if self.mode == 'sweep':
-            self.count.set_text(f'{len(q)} to go · {len(self.v.kept)} kept')
-        else:
-            self.count.set_text(f'{len(q)} kept notes to sort')
+        self.update_count()
         self.area.queue_draw()
+
+    def round(self):
+        return self.v.sorted_count() // ROUND + 1
+
+    def update_count(self):
+        left = len(self.v.to_scan())
+        st = self.v.stats
+        self.count.set_text(f'{left} left to scan · {st["deleted"]} deleted · {self.v.sorted_count()} sorted')
+        i = self.pick.get_active()
+        if 0 <= i < len(self.pick_paths) and self.pick_paths[i] == self.v.path:
+            self.pick.get_model()[i][0] = f'{self.v.path.name} · {left} to scan'
 
     def load(self, path):
         text = self.v.read(path)
@@ -421,9 +508,17 @@ class Sweep(Gtk.Window):
     # ---- actions -------------------------------------------------------------------------
     def keep(self, p):
         self.v.kept.add(p.name)
+        if p.name not in self.v.batch:
+            self.v.batch.append(p.name)
         self.undo.append(('keep', p))
         self.v.save()
-        self.say('kept')
+        n = len(self.v.batch)
+        if n >= ROUND:                      # a full hand: now sort them
+            self.banner = (f'ROUND {self.round()}', f'{n} kept · now sort them into notebooks',
+                           time.monotonic())
+            self.b_sort.set_active(True)
+        else:
+            self.say(f'kept · {n} of {ROUND}')
 
     def delete(self, p):
         text = self.v.read(p)
@@ -439,6 +534,8 @@ class Sweep(Gtk.Window):
             self.say(f'could not delete: {e}')
             return
         self.v.forget(p, text)
+        self.v.stats['deleted'] += 1
+        self.v.save()
         self.undo.append(('delete', p, ops, text))
         self.say('deleted · Ctrl+Z brings it back')
 
@@ -477,7 +574,9 @@ class Sweep(Gtk.Window):
         if d['vault']:
             self.v.forget(p, text)
         self.v.kept.discard(p.name)
-        self.undo.append(('send', p, ops, text))
+        self.v.stats['moved'] += 1
+        d['n'] = d.get('n', 0) + 1
+        self.undo.append(('send', p, ops, text, d))
         self.v.save()
         self.say(f'→ {d["name"]}')
 
@@ -515,6 +614,8 @@ class Sweep(Gtk.Window):
         try:
             if u[0] == 'keep':
                 self.v.kept.discard(p.name)
+                if p.name in self.v.batch:
+                    self.v.batch.remove(p.name)
             elif u[0] == 'stay':
                 self.v.stays.discard(p.name)
             else:
@@ -522,6 +623,13 @@ class Sweep(Gtk.Window):
                 self.v.learn(p, u[3])
                 if u[0] == 'send':
                     self.v.kept.add(p.name)
+                    self.v.stats['moved'] -= 1
+                    u[4]['n'] = u[4].get('n', 1) - 1
+                else:
+                    self.v.stats['deleted'] -= 1
+            if u[0] in ('send', 'stay') and p.name not in self.v.batch:
+                self.v.batch.append(p.name)
+            self.banner = None
         except OSError as e:
             self.say(f'could not undo: {e}')
             return
@@ -683,7 +791,10 @@ class Sweep(Gtk.Window):
                     self.next_card()
                 else:
                     self.dx = self.dy = 0
-        if busy or self.drag or now - self.enter_at < 0.3 or now - self.toast_at < 2.2:
+        if self.banner and now - self.banner[2] > 2.6:
+            self.banner = None
+            self.area.queue_draw()
+        if busy or self.drag or self.banner or now - self.enter_at < 0.3 or now - self.toast_at < 2.2:
             self.area.queue_draw()
         return True
 
@@ -694,8 +805,8 @@ class Sweep(Gtk.Window):
             cw = min(560, W - 2 * 250)
         else:
             cw = min(700, W - 80)
-        ch = H - 110
-        return W / 2, (H - 40) / 2, max(cw, 300), max(ch, 300)
+        ch = H - 160                       # room for the score above, the keys below
+        return W / 2, 62 + ch / 2, max(cw, 300), max(ch, 300)
 
     def tile_rects(self):
         """Sort: the notebooks, left and right of the card: (centre x, centre y, w, h)"""
@@ -772,10 +883,66 @@ class Sweep(Gtk.Window):
         hint = ('← keep   → delete   space skip   O open in Obsidian   Ctrl+Z undo' if self.mode == 'sweep'
                 else 'drag onto a notebook   1-9 or Enter (best match)   space skip   Ctrl+Z undo')
         self.text(cr, hint, W / 2, H - 30, 9, DIM, align='center')
-        if now - self.toast_at < 2.2 and self.toast:
+        self.draw_score(cr, W)
+        if now - self.toast_at < 2.2 and self.toast and not self.banner:
             a = min(1, (2.2 - (now - self.toast_at)) / 0.5)
-            self.text(cr, self.toast, W / 2, 14, 11, FG, a, align='center')
+            self.text(cr, self.toast, W / 2, H - 56, 10, FG, a, align='center')
+        if self.banner:
+            self.draw_banner(cr, W, H, now)
         return False
+
+    def draw_score(self, cr, W):
+        """round, the pips of this round, how much of the vault is scanned"""
+        v = self.v
+        sort = self.mode == 'sort'
+        self.text(cr, f'ROUND {self.round()}', 24, 8, 12, FG, bold=True)
+        self.text(cr, 'SORT' if sort else 'KEEP OR DELETE', 24, 28, 8, CYAN if sort else DIM)
+        # pips: sweep = kept so far this round; sort = sorted of this round
+        if sort:
+            todo = {p.name for p in self.queue()} | {p.name for p in self.skipped}
+            n = max(len(v.batch), 1) if v.batch else len(todo)
+            done = n - len(todo) if v.batch else 0
+        else:
+            n, done = ROUND, min(len(v.batch), ROUND)
+        n = max(n, 1)
+        gap = 22 if n <= 20 else max(6, 440 / n)
+        x0 = W / 2 - gap * (n - 1) / 2
+        for i in range(n):
+            cr.arc(x0 + i * gap, 22, 6 if gap >= 16 else 2.5, 0, 2 * math.pi)
+            if i < done:
+                cr.set_source_rgba(*(GREEN if sort else CYAN), 0.95)
+                cr.fill()
+            else:
+                cr.set_source_rgba(*FG, 0.35)
+                cr.set_line_width(1)
+                cr.stroke()
+        # the whole vault: scanned / total
+        left = len(v.to_scan())
+        live = {p.name for p in v.path.glob('*.md')}
+        total = left + v.stats['deleted'] + v.stats['moved'] + len((v.kept | v.stays) & live)
+        frac = 1 - left / total if total else 1
+        self.text(cr, f'{left} to scan', W - 24, 8, 12, FG, bold=True, align='right')
+        self.text(cr, f'{frac * 100:.0f}% of {total} scanned', W - 24, 28, 8, DIM, align='right')
+        cr.rectangle(24, 46, W - 48, 2)
+        cr.set_source_rgba(*FG, 0.12)
+        cr.fill()
+        cr.rectangle(24, 46, (W - 48) * frac, 2)
+        cr.set_source_rgba(*CYAN, 0.9)
+        cr.fill()
+
+    def draw_banner(self, cr, W, H, now):
+        t = now - self.banner[2]
+        a = min(1, t / 0.15, (2.6 - t) / 0.4)
+        cr.rectangle(0, 0, W, H)
+        cr.set_source_rgba(*BG, 0.75 * a)
+        cr.fill()
+        title, sub = self.banner[:2]
+        j = 6 if t < 0.35 or int(t * 9) % 7 == 0 else 0     # a glitch now and then
+        import random
+        for dx, rgb, aa in ((-3 - random.random() * j, RED, 0.6), (3 + random.random() * j, CYAN, 0.6),
+                            (0, FG, 1)):
+            self.text(cr, title, W / 2 + dx, H / 2 - 50, 34, rgb, a * aa, bold=True, align='center')
+        self.text(cr, sub, W / 2, H / 2 + 6, 11, DIM, a, align='center')
 
     def draw_card(self, cr, now):
         c = self.card
@@ -879,7 +1046,8 @@ class Sweep(Gtk.Window):
                 cr.fill()
             self.text(cr, f'{i + 1}', x + 8, y + 8, 8, DIM)
             self.text(cr, d['name'], x + 24, y + 8, 10, FG, width=tw - 32)
-            self.text(cr, 'best match' if i == best else d['sub'], x + 24, y + 28, 8,
+            sub = d['sub'] + (f' · {d["n"]} notes' if d.get('n') is not None and d['path'] else '')
+            self.text(cr, 'best match · ' + sub if i == best else sub, x + 24, y + 28, 8,
                       CYAN if i == best else DIM, width=tw - 32)
             s = scores.get(i)
             if s is not None:                   # how close in meaning: a thin bar

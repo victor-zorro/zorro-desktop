@@ -2,18 +2,30 @@
 
 Clean up a big Obsidian vault (by default the one called **Notes**) one note at a time.
 
-**Keep or delete.** A note fills the screen, the oldest first. Swipe it **left to keep** or
-**right to delete**.
+It plays in **rounds**:
+1. **Keep or delete.** A note fills the screen, the oldest first. Swipe it **left to keep** or
+   **right to delete**. Ten dots at the top fill up with each note you keep.
+2. **Sort.** After **10 kept notes**, "ROUND n" flashes and those 10 come back one by one. Drag
+   each one onto where it belongs:
+   - another vault;
+   - a folder in this vault;
+   - "Stays in Notes";
+   - "+ New folder".
 
-**Sort into notebooks.** The kept notes come back one by one. Drag each one onto where it
-belongs:
-- another vault;
-- a folder in this vault;
-- "Stays in Notes";
-- "+ New folder".
+   The notebook closest in meaning lights up as **best match**. It uses the zorro-search
+   index, and Enter sends the note there. Each tile shows how many notes that notebook
+   already holds.
+3. "ROUND n DONE", and the next 10.
 
-The notebook closest in meaning lights up as **best match**. It uses the zorro-search index,
-and Enter sends the note there.
+The top of the screen shows:
+- the round;
+- the dots for the round;
+- how many notes are still **to scan**, with a bar for how much of the vault is done.
+
+The picker at the top right chooses **which vault** to sweep, and shows how many notes each one
+still has to scan. Deletes don't count toward the 10; only kept notes do.
+
+The two buttons at the top left switch by hand, for example to sort a half-full round.
 
 ## How to swipe
 - Drag the card with the mouse, or with a finger on the touch screen.
