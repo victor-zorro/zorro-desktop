@@ -275,8 +275,8 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
      class, one `--split`; face icon about 40 px with reserved space.
 
 - [x] **3.6 Dialer arrangement** (S-M)
-  Done: a, b, d; for c only the hint is kept on screen. Full scaling with one unit `u` is
-  still open (needs testing on a small screen / the VM).
+  Done: a, b, c, d (c: all sizes in `u`, rings shrink to fit; tested on Xvfb 1920x1080,
+  1366x768, 1280x720).
   `apps/zorro-dial/zorro-dial`.
   a) Always draw a short label in the first ring (about line 847).
   b) A fixed search line with a caret showing the end of the text, and a per-part hint

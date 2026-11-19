@@ -334,7 +334,7 @@ class Dial(Gtk.Window):
         self.hub_key = None             # a player button in the hub centre (music)
         self.preview = None             # the file whose preview is shown
         self.previews = {}              # file -> preview data (None while it is made)
-        self.preview_pb = {}            # image file -> scaled picture
+        self.preview_pb = {}            # (image file, width) -> scaled picture
         self.fetching = set()           # parts whose data is being read (after the first frame)
         self.theme = Gtk.IconTheme.get_default()
         self.icons = {}
@@ -345,6 +345,10 @@ class Dial(Gtk.Window):
             mon = disp.get_monitor_at_point(*self.pointer()) or disp.get_primary_monitor() or disp.get_monitor(0)
         g = mon.get_geometry()
         self.geo = g
+        # one unit for every size and distance: 1 on a 1920x1080 screen, 0.71 on 1366x768,
+        # so the dial looks the same on every screen (times the Size settings where they apply)
+        self.u = min(g.width, g.height) / 1080
+        self.iu = self.u                # the icons' unit: u, less where the rings had to shrink
         scr = self.get_screen()
         self.composited = bool(scr.is_composited() and scr.get_rgba_visual())
         if self.composited:
@@ -482,6 +486,7 @@ class Dial(Gtk.Window):
                                             -score(self.usage, a['id']), a['name'].lower()))
 
     def lucide(self, name, size, alpha=0.75):
+        size = max(8, int(round(size)))
         key = ('lucide:' + name, size, alpha)
         if key not in self.icons:
             try:
@@ -497,6 +502,7 @@ class Dial(Gtk.Window):
         return self.icons[key]
 
     def icon(self, a, size):
+        size = max(8, int(round(size)))
         if a.get('icon', '').startswith('lucide:'):
             return self.lucide(a['icon'][7:], int(size * 0.8))
         key = (a['icon'], size)
@@ -519,7 +525,25 @@ class Dial(Gtk.Window):
         return self.icons[key]
 
     # -- drawing
-    def text(self, cr, s, x, y, size, bold=True, alpha=1.0, split=1.4):
+    def pt(self, size):
+        """a font size for text beside the dial: smaller on a small screen (never under 7 pt),
+        never bigger than at 1080 (a big screen has its Text size setting for that)"""
+        return max(7, round(size * min(1.0, self.u), 1))
+
+    def text_ext(self, cr, s, size, bold=True):
+        """(width, height) of a text in pixels"""
+        ext = self.layout(cr, s, size, bold)[1]
+        return ext.width, ext.height
+
+    def inside(self, cr, s, x, y, size, bold=True, pad=None):
+        """(x, y) moved so that the text centred there stays on the screen"""
+        w, h = self.text_ext(cr, s, size, bold)
+        pad = 12 * self.u if pad is None else pad
+        W, H = self.geo.width, self.geo.height
+        return (min(max(x, w / 2 + pad), W - w / 2 - pad),
+                min(max(y, h / 2 + pad), H - h / 2 - pad))
+
+    def layout(self, cr, s, size, bold):
         # layouts are kept between frames (20 a second, dozens of labels each)
         cache = self.__dict__.setdefault('_layouts', {})
         key = (s, size, bold)
@@ -536,6 +560,10 @@ class Dial(Gtk.Window):
             if len(cache) > 400:
                 cache.clear()
             cache[key] = (lay, ext)
+        return lay, ext
+
+    def text(self, cr, s, x, y, size, bold=True, alpha=1.0, split=1.4):
+        lay, ext = self.layout(cr, s, size, bold)
         x0, y0 = x - ext.width / 2, y - ext.height / 2
         for col, dx in ((RED, -split), (CYAN, split)):
             cr.move_to(x0 + dx, y0)
@@ -573,51 +601,76 @@ class Dial(Gtk.Window):
     def fan(self):
         """(cx, cy, hub radius, first angle, last angle, rings) in window coordinates.
         orb: the hub is the info circle's clock and the rings fan out from its corner into
-        the screen (120 degrees); centre: full circle in the middle of the screen."""
+        the screen (120 degrees); centre: full circle in the middle of the screen.
+        Sizes in the unit u (screen) times the Size setting, made smaller where the rings and
+        their names would not fit on the screen."""
         W, H = self.geo.width, self.geo.height
-        u = self.dial_scale()
+        u = self.u
+        ru = u * self.dial_scale()          # the rings' unit
         anchor = self.conf.get('anchor')
         corners = {'bottom-right': 225, 'bottom-left': 315, 'top-right': 135, 'top-left': 45}
-        if anchor in corners:               # its own clock in that corner, the fan into the screen
-            hub, m = 96 * u, 40
-            cx = m + hub if 'left' in anchor else W - m - hub
-            cy = m + hub if 'top' in anchor else H - m - hub
-            a0, a1 = corners[anchor] - 60, corners[anchor] + 60
-        elif anchor == 'orb':
-            if not hasattr(self, '_orb'):
-                self._orb = orb_conf()      # read once: fan() runs on every draw and mouse move
-            orb = self._orb
-            d, m, corner = orb['size'], orb['margin'], orb['corner']
-            cx = m + d / 2 if 'left' in corner else W - m - d / 2
-            cy = m + d / 2 if 'top' in corner else H - m - d / 2
-            mid = {'bottom-right': 225, 'bottom-left': 315, 'top-right': 135, 'top-left': 45}.get(corner, 225)
-            hub = d / 2
-            a0, a1 = mid - 60, mid + 60
-        else:
-            cx, cy, hub, a0, a1 = W / 2, H / 2, 86 * u, -90, 270
-        rings = self.base_rings(hub, u)
+        edge = 50 * u                       # room outside the outer ring: slice names, '+ slice'
+        for _ in range(4):
+            fixed = 0                       # the part of the outer radius that does not scale
+            if anchor in corners:           # its own clock in that corner, the fan into the screen
+                hub, m = 96 * ru, 40 * u
+                cx = m + hub if 'left' in anchor else W - m - hub
+                cy = m + hub if 'top' in anchor else H - m - hub
+                a0, a1 = corners[anchor] - 60, corners[anchor] + 60
+            elif anchor == 'orb':
+                if not hasattr(self, '_orb'):
+                    self._orb = orb_conf()  # read once: fan() runs on every draw and mouse move
+                orb = self._orb
+                d, m, corner = orb['size'], orb['margin'], orb['corner']
+                cx = m + d / 2 if 'left' in corner else W - m - d / 2
+                cy = m + d / 2 if 'top' in corner else H - m - d / 2
+                mid = corners.get(corner, 225)
+                hub = fixed = d / 2
+                a0, a1 = mid - 60, mid + 60
+            else:
+                cx, cy, hub, a0, a1 = W / 2, H / 2, 86 * ru, -90, 270
+            fit = self.reach(cx, cy, a0, a1) - edge
+            outer = hub + 270 * ru
+            if outer <= fit + 0.5:
+                break
+            ru *= max(0.2, (fit - fixed) / max(1, outer - fixed))
+        self.iu = u * ru / (u * self.dial_scale())
+        rings = self.base_rings(hub, ru)
         if self.mode == 'apps' and not self.filter and self.expanded is None:
             # more apps than three rings hold: the dial grows outward, as far as the screen allows
-            room = min(max(cx, W - cx), max(cy, H - cy)) - 60
-            for _ in range(self.app_rings(hub, a0, a1, room) - 3):
+            room = min(min(max(cx, W - cx), max(cy, H - cy)) - 60 * u, fit)
+            for _ in range(self.app_rings(hub, a0, a1, room, ru) - 3):
                 ro = rings[-1][1]
-                rings.append((ro, ro + 84 * u))
+                rings.append((ro, ro + 84 * ru))
         return cx, cy, hub, a0, a1, rings
 
-    def app_rings(self, hub, a0, a1, room):
+    def reach(self, cx, cy, a0, a1):
+        """how far the fan can reach from (cx, cy) between angles a0 and a1 before it leaves
+        the screen"""
+        W, H = self.geo.width, self.geo.height
+        best = float('inf')
+        steps = max(1, int((a1 - a0) / 2))
+        for j in range(steps + 1):
+            a = math.radians(a0 + (a1 - a0) * j / steps)
+            dx, dy = math.cos(a), math.sin(a)
+            tx = (W - cx) / dx if dx > 1e-9 else cx / -dx if dx < -1e-9 else float('inf')
+            ty = (H - cy) / dy if dy > 1e-9 else cy / -dy if dy < -1e-9 else float('inf')
+            best = min(best, tx, ty)
+        return best
+
+    def app_rings(self, hub, a0, a1, room, ru):
         """how many rings the apps need so that no slice needs 'N more' (kept: the apps do not
         change while the dial is open)"""
         groups = getattr(self, 'groups', [])
-        key = (hub, a0, a1, room, tuple(len(g) for g in groups))
+        key = (hub, a0, a1, room, ru, tuple(len(g) for g in groups))
         if getattr(self, '_app_rings', (None,))[0] == key:
             return self._app_rings[1]
         span = (a1 - a0) / max(1, len(groups))
-        u = self.dial_scale()
-        rings = self.base_rings(hub, u)
-        while rings[-1][1] + 84 * u <= room and any(
+        rings = self.base_rings(hub, ru)
+        while rings[-1][1] + 84 * ru <= room and any(
                 len(g) > sum(self.ring_cap(k, (ri + ro) / 2, span) for k, (ri, ro) in enumerate(rings))
                 for g in groups):
-            rings.append((rings[-1][1], rings[-1][1] + 84 * u))
+            rings.append((rings[-1][1], rings[-1][1] + 84 * ru))
         self._app_rings = (key, len(rings))
         return len(rings)
 
@@ -640,7 +693,7 @@ class Dial(Gtk.Window):
 
     def ring_size(self, k):
         """icon size on ring k (the outer rings all small)"""
-        return (44, 36, 30)[min(k, 2)] * self.icon_scale()
+        return (44, 36, 30)[min(k, 2)] * self.icon_scale() * self.iu
 
     def ring_cap(self, k, rm, span):
         size = self.ring_size(k)
@@ -700,33 +753,49 @@ class Dial(Gtk.Window):
             self.draw_bin(cr, px, py, quiet=not self.drag)
         if self.drag:
             a, x, y = self.drag
-            pb = self.icon(a, 44)
+            pb = self.icon(a, 44 * self.iu)
             cr.new_path()
-            cr.arc(x, y, 40, 0, 2 * math.pi)
+            cr.arc(x, y, 40 * self.iu, 0, 2 * math.pi)
             cr.set_source_rgba(*CYAN, 0.12)
             cr.fill()
-            self.chroma_circle(cr, x, y, 40)
+            self.chroma_circle(cr, x, y, 40 * self.iu)
             if pb:
                 Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
                 cr.paint()
-        hx, hy = cx + math.cos(am) * (outer + 115), cy + math.sin(am) * (outer + 115)
-        # on a small screen the hint would fall off the edge: keep it inside
-        hx = min(max(hx, 380), self.geo.width - 380)
-        hy = min(max(hy, 30), self.geo.height - 30)
+        hx, hy = cx + math.cos(am) * (outer + 115 * self.u), cy + math.sin(am) * (outer + 115 * self.u)
         if self.filter:                 # what you type, in full (the end of it if long)
             shown = self.filter if len(self.filter) <= 48 else '…' + self.filter[-47:]
             what = {'notes': 'notes', 'music': 'SoundCloud'}.get(self.mode, 'apps')
-            self.text(cr, f'search {what}:  {shown}' + ('▏' if int(time.time() * 2) % 2 else ' '),
-                      hx, hy, 11, bold=True, alpha=0.95, split=1.0)
+            line, size = f'search {what}:  {shown}', self.pt(11)
+            # kept on the screen, measured with the caret's room so it does not jump
+            hx, hy = self.hint_at(cr, line + '▏', hx, hy, size, True, cx, cy, am, outer)
+            self.text(cr, line + ('▏' if int(time.time() * 2) % 2 else ' '),
+                      hx, hy, size, bold=True, alpha=0.95, split=1.0)
         else:
             search = {'notes': 'type: search notes · ', 'music': 'type: search SoundCloud · '}.get(self.mode, '')
-            self.text(cr, 'type to search · drag to rearrange · Enter starts · Esc closes'
-                      if self.mode == 'apps' else
-                      search + 'rest on something: it opens in the next ring · Esc: one back'
-                      if getattr(self.parts.get(self.mode), 'tree', False) else
-                      'click a part of the circle: it stays · Esc: back to apps',
-                      hx, hy, 9, bold=False, alpha=0.5, split=0)
+            line = ('type to search · drag to rearrange · Enter starts · Esc closes'
+                    if self.mode == 'apps' else
+                    search + 'rest on something: it opens in the next ring · Esc: one back'
+                    if getattr(self.parts.get(self.mode), 'tree', False) else
+                    'click a part of the circle: it stays · Esc: back to apps')
+            size = self.pt(9)
+            hx, hy = self.hint_at(cr, line, hx, hy, size, False, cx, cy, am, outer)
+            self.text(cr, line, hx, hy, size, bold=False, alpha=0.5, split=0)
         return False
+
+    def hint_at(self, cr, s, hx, hy, size, bold, cx, cy, am, outer):
+        """the hint line's place: out along the fan's middle until no part of it touches the
+        rings or the slice names, and on the screen"""
+        w, h = self.text_ext(cr, s, size, bold)
+        clear = outer + 34 * self.u
+        for _ in range(6):
+            nx = min(max(cx, hx - w / 2), hx + w / 2)       # its point nearest the clock
+            ny = min(max(cy, hy - h / 2), hy + h / 2)
+            short = clear - math.hypot(nx - cx, ny - cy)
+            if short <= 0.5:
+                break
+            hx, hy = hx + math.cos(am) * short, hy + math.sin(am) * short
+        return self.inside(cr, s, hx, hy, size, bold)
 
     def draw_hub(self, cr, cx, cy, hub):
         """the middle circle in six parts: icons on the rim, the kept part lit; the centre
@@ -803,24 +872,25 @@ class Dial(Gtk.Window):
                                      (label[:23], max(8, 10 * k), False, 0.9)])
 
     MUSIC_KEYS = (('skip-back', 'prev', -42), ('play', 'toggle', -14), ('square', 'stop', 14),
-                  ('skip-forward', 'next', 42))
+                  ('skip-forward', 'next', 42))      # x offsets in the unit u
 
     def music_keys(self, cr, cx, cy, hub):
         """previous / play-pause / stop / next in the centre of the circle"""
         np = getattr(self.parts['music'], 'np', None)
         y = cy + hub * 0.33
+        u = self.u
         for icon, what, dx in self.MUSIC_KEYS:
             if what == 'toggle' and np and np.get('playing'):
                 icon = 'pause'
             hov = self.hub_key == what
             if hov:
                 cr.new_path()
-                cr.arc(cx + dx, y, 12, 0, 2 * math.pi)
+                cr.arc(cx + dx * u, y, 12 * u, 0, 2 * math.pi)
                 cr.set_source_rgba(*CYAN, 0.18)
                 cr.fill()
-            pb = self.lucide(icon, 16, 0.95 if hov else 0.6)
+            pb = self.lucide(icon, 16 * u, 0.95 if hov else 0.6)
             if pb:
-                Gdk.cairo_set_source_pixbuf(cr, pb, cx + dx - 8, y - 8)
+                Gdk.cairo_set_source_pixbuf(cr, pb, cx + dx * u - pb.get_width() / 2, y - pb.get_height() / 2)
                 cr.paint()
 
     def music_key_at(self, x, y):
@@ -828,12 +898,12 @@ class Dial(Gtk.Window):
             return None
         cx, cy, hub, *_ = self.fan()
         return next((w for _, w, dx in self.MUSIC_KEYS
-                     if (x - cx - dx) ** 2 + (y - cy - hub * 0.33) ** 2 <= 13 ** 2), None)
+                     if (x - cx - dx * self.u) ** 2 + (y - cy - hub * 0.33) ** 2 <= (13 * self.u) ** 2), None)
 
     def text_block(self, cr, cx, cy, block):
         heights = [size * 1.8 for _, size, _, _ in block]
         if self.mode == 'music' and not self.filter:
-            cy -= 14                    # room for the player buttons underneath
+            cy -= 14 * self.u           # room for the player buttons underneath
         y = cy - sum(heights) / 2
         for (s, size, bold, a), h in zip(block, heights):
             self.text(cr, s, cx, y + h / 2, max(7, size), bold=bold, alpha=a, split=1.6 if bold else 0.8)
@@ -906,16 +976,18 @@ class Dial(Gtk.Window):
         cx, cy, hub, a0, a1, rings = self.fan()
         outer = rings[-1][1]
         sw, sh = self.geo.width, self.geo.height
+        u = self.u
         try:
             W = int(self.conf.get('preview_size', 460))
         except (TypeError, ValueError):
             W = 460
-        W = max(280, min(W, sw - 32))
-        H = min(int(W * 0.78), sh - 32)
-        x = cx - outer - W - 40 if cx > sw / 2 else cx + outer + 40
-        x = max(16, min(sw - W - 16, x))
-        y = max(16, min(sh - H - 16, cy - H + 40 if cy > sh / 2 else cy - 40))
-        r = 14
+        W = int(max(280 * u, min(W * u, sw - 32 * u)))     # preview_size: pixels at 1080
+        H = int(min(W * 0.78, sh - 32 * u))
+        x = cx - outer - W - 40 * u if cx > sw / 2 else cx + outer + 40 * u
+        x = max(16 * u, min(sw - W - 16 * u, x))
+        y = max(16 * u, min(sh - H - 16 * u, cy - H + 40 * u if cy > sh / 2 else cy - 40 * u))
+        r = 14 * u
+        p = 14 * u                          # the inner margin
         cr.new_path()
         cr.arc(x + r, y + r, r, math.pi, 1.5 * math.pi)
         cr.arc(x + W - r, y + r, r, 1.5 * math.pi, 0)
@@ -933,49 +1005,51 @@ class Dial(Gtk.Window):
             cr.set_source_rgba(*col, 0.6)
             cr.stroke()
         if data is None:
-            self.text(cr, 'making the preview…', x + W / 2, y + H / 2, 10, bold=False, alpha=0.6, split=0)
+            self.text(cr, 'making the preview…', x + W / 2, y + H / 2, self.pt(10), bold=False, alpha=0.6, split=0)
             return
-        area_h = H - 70
+        area_h = H - 70 * u
         if data.get('image'):
-            pb = self.preview_pb.get(data['image'])
+            pb = self.preview_pb.get((data['image'], W))
             if pb is None:
                 try:
-                    pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(data['image'], W - 28, area_h - 10, True)
+                    pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(data['image'], int(W - 2 * p),
+                                                                 int(area_h - 10 * u), True)
                 except GLib.Error:
                     pb = False
-                self.preview_pb[data['image']] = pb
+                self.preview_pb[(data['image'], W)] = pb
             if pb:
-                Gdk.cairo_set_source_pixbuf(cr, pb, x + (W - pb.get_width()) / 2, y + 14 + (area_h - 10 - pb.get_height()) / 2)
+                Gdk.cairo_set_source_pixbuf(cr, pb, x + (W - pb.get_width()) / 2,
+                                            y + p + (area_h - 10 * u - pb.get_height()) / 2)
                 cr.paint()
         elif data.get('lines'):
             lay = text_layout(cr)
-            lay.set_font_description(Pango.FontDescription.from_string(f'DejaVu Sans Mono {max(8, min(12, round(W / 52)))}'))
-            lay.set_width(int((W - 28) * Pango.SCALE))
+            lay.set_font_description(Pango.FontDescription.from_string(f'DejaVu Sans Mono {max(7, min(12, round(W / 52)))}'))
+            lay.set_width(int((W - 2 * p) * Pango.SCALE))
             lay.set_ellipsize(Pango.EllipsizeMode.END)
             lay.set_text('\n'.join(data['lines']), -1)
             cr.save()
-            cr.rectangle(x + 14, y + 14, W - 28, area_h - 8)
+            cr.rectangle(x + p, y + p, W - 2 * p, area_h - 8 * u)
             cr.clip()
-            cr.move_to(x + 14, y + 14)
+            cr.move_to(x + p, y + p)
             cr.set_source_rgba(*FG, 0.85)
             PangoCairo.show_layout(cr, lay)
             cr.restore()
-        cr.move_to(x + 14, y + H - 50)
-        cr.line_to(x + W - 14, y + H - 50)
+        cr.move_to(x + p, y + H - 50 * u)
+        cr.line_to(x + W - p, y + H - 50 * u)
         cr.set_source_rgba(1, 1, 1, 0.08)
         cr.stroke()
         lay = text_layout(cr)
-        lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans Bold 10'))
-        lay.set_width(int((W - 28) * Pango.SCALE))
+        lay.set_font_description(Pango.FontDescription.from_string(f'DejaVu Sans Bold {self.pt(10)}'))
+        lay.set_width(int((W - 2 * p) * Pango.SCALE))
         lay.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         lay.set_text(data.get('title', ''), -1)
-        cr.move_to(x + 14, y + H - 42)
+        cr.move_to(x + p, y + H - 42 * u)
         cr.set_source_rgba(*FG, 1)
         PangoCairo.show_layout(cr, lay)
         lay = text_layout(cr)
-        lay.set_font_description(Pango.FontDescription.from_string('DejaVu Sans 8'))
+        lay.set_font_description(Pango.FontDescription.from_string(f'DejaVu Sans {self.pt(8)}'))
         lay.set_text(data.get('meta', ''), -1)
-        cr.move_to(x + 14, y + H - 22)
+        cr.move_to(x + p, y + H - 22 * u)
         cr.set_source_rgba(*FG, 0.6)
         PangoCairo.show_layout(cr, lay)
 
@@ -1000,13 +1074,13 @@ class Dial(Gtk.Window):
             lv = start + k
             ri, ro = rings[k]
             rm = (ri + ro) / 2
-            size = (30, 27, 25)[k] * self.icon_scale()
+            size = (30, 27, 25)[k] * self.icon_scale() * self.iu
             # names in the first ring only where icons repeat (a row of the same folder icon:
             # the notebooks); unique icons speak for themselves, their name shows on hover
             icons = [t.get('icon') for t in items]
             twins = {i for i in icons if icons.count(i) > 1}
             named = k > 0 or bool(twins)
-            step = math.degrees((74 if k > 0 else 58 if named else 44) * self.icon_scale() / rm)
+            step = math.degrees((74 if k > 0 else 58 if named else 44) * self.icon_scale() * self.iu / rm)
             cap = max(2, int((a1 - a0 - 4) / step))
             items = list(items)
             if len(items) > cap:                   # never dropped silently: "N more" unfolds the rest
@@ -1035,8 +1109,9 @@ class Dial(Gtk.Window):
                 cr.stroke()
                 pa = math.radians(parent_angle)    # a thin chromatic line from parent to children
                 for col, dx in ((RED, -0.8), (CYAN, 0.8)):
-                    cr.move_to(cx + math.cos(pa) * (parent_r + 26) + dx, cy + math.sin(pa) * (parent_r + 26))
-                    cr.line_to(cx + math.cos(pa) * (ri + 4) + dx, cy + math.sin(pa) * (ri + 4))
+                    r0, r1 = parent_r + 26 * self.iu, ri + 4 * self.iu
+                    cr.move_to(cx + math.cos(pa) * r0 + dx, cy + math.sin(pa) * r0)
+                    cr.line_to(cx + math.cos(pa) * r1 + dx, cy + math.sin(pa) * r1)
                     cr.set_source_rgba(*col, 0.35)
                     cr.set_line_width(1)
                     cr.stroke()
@@ -1059,16 +1134,16 @@ class Dial(Gtk.Window):
                     f = min(1.0, (time.time() - self.dwell[2]) / self.DWELL)
                     for col, dx in ((RED, -1), (CYAN, 1)):
                         cr.new_path()
-                        cr.arc(x + dx, y, size * 0.85 + 5, -math.pi / 2, -math.pi / 2 + 2 * math.pi * f)
+                        cr.arc(x + dx, y, size * 0.85 + 5 * self.iu, -math.pi / 2, -math.pi / 2 + 2 * math.pi * f)
                         cr.set_source_rgba(*col, 0.9)
                         cr.set_line_width(2.2)
                         cr.stroke()
                 pb = self.icon(t, size)
                 if pb:
-                    Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2 - 3)
+                    Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2 - 3 * self.iu)
                     cr.paint()
                 if t.get('kids'):              # a chevron: it unfolds (files show a preview instead)
-                    ch = self.lucide('chevron-right', 10, 0.4)
+                    ch = self.lucide('chevron-right', 10 * self.iu, 0.4)
                     if ch:
                         Gdk.cairo_set_source_pixbuf(cr, ch, x + size * 0.55, y - size * 0.75)
                         cr.paint()
@@ -1076,7 +1151,7 @@ class Dial(Gtk.Window):
                     cut = 8 if k == 0 else 13          # short in the first ring, where they sit closest
                     name = t['name'] if (is_open or hov) else \
                         (t['name'][:cut] + '…' if len(t['name']) > cut + 1 else t['name'])
-                    self.text(cr, name[:22], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
+                    self.text(cr, name[:22], x, y + size * 0.7 + 8 * self.iu, self.pt(8), bold=is_open or hov,
                               alpha=0.9, split=0.8 if is_open else 0)
             parent_angle, parent_r = next_angle, rm
 
@@ -1084,7 +1159,7 @@ class Dial(Gtk.Window):
         """a part's three rings of tiles: icon, label, and an optional value ring"""
         for k, ((ri, ro), row) in enumerate(zip(rings, rows)):
             rm = (ri + ro) / 2
-            size = (40, 34, 30)[min(k, 2)] * self.icon_scale()
+            size = (40, 34, 30)[min(k, 2)] * self.icon_scale() * self.iu
             for j, t in enumerate(row):
                 am = math.radians(a0 + (a1 - a0) * (j + 0.5) / len(row))
                 x, y = cx + math.cos(am) * rm, cy + math.sin(am) * rm
@@ -1112,7 +1187,7 @@ class Dial(Gtk.Window):
                 if pb:
                     Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
                     cr.paint()
-                self.text(cr, t['name'][:18], x, y + size * 0.75 + 10, 8, bold=False, alpha=0.85, split=0)
+                self.text(cr, t['name'][:18], x, y + size * 0.75 + 10 * self.iu, self.pt(8), bold=False, alpha=0.85, split=0)
 
     @staticmethod
     def fits(rm, span_deg, size):
@@ -1122,7 +1197,7 @@ class Dial(Gtk.Window):
     def draw_slices(self, cr, cx, cy, rings, a0, a1):
         slices = self.conf['slices'][:6]
         n = len(slices)
-        self.labels = []                    # (x, y, slice): right-click a name to rename it
+        self.labels = []                    # (x, y, slice, half width, half height): right-click a name to rename it
         span = (a1 - a0) / n
         for i, s in enumerate(slices):
             start = a0 + i * span
@@ -1138,15 +1213,24 @@ class Dial(Gtk.Window):
                 cr.set_line_width(1)
                 cr.stroke()
             am = math.radians(start + span / 2)
-            r_lab = rings[-1][1] + 20
+            r_lab = rings[-1][1] + 20 * self.u
             lx, ly = cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab
-            self.labels.append((lx, ly, i))
             if self.renaming == i:          # being renamed: what you type, with a caret
-                self.text(cr, (self.rename_text or ' ') + ('▏' if int(time.time() * 2) % 2 else ' '),
-                          lx, ly, 10, split=1.0)
-                self.text(cr, 'Enter: keep · Esc: back', lx, ly + 18, 7, bold=False, alpha=0.5, split=0)
+                size = self.pt(10)
+                shown = self.rename_text or ' '
+                lx, ly = self.inside(cr, shown + '▏', lx, ly, size)
+                ly = min(ly, self.geo.height - 30 * self.u)     # room for the line underneath
+                w, h = self.text_ext(cr, shown + '▏', size)
+                self.text(cr, shown + ('▏' if int(time.time() * 2) % 2 else ' '), lx, ly, size, split=1.0)
+                hx, hy = self.inside(cr, 'Enter: keep · Esc: back', lx, ly + 18 * self.u, self.pt(7), bold=False)
+                self.text(cr, 'Enter: keep · Esc: back', hx, hy, self.pt(7), bold=False, alpha=0.5, split=0)
             else:
-                self.text(cr, s['name'].upper(), lx, ly, 9, split=1.4)
+                size = self.pt(9)
+                lx, ly = self.inside(cr, s['name'].upper(), lx, ly, size)
+                w, h = self.text_ext(cr, s['name'].upper(), size)
+                self.text(cr, s['name'].upper(), lx, ly, size, split=1.4)
+            # right-click there to rename: the name's box, at least as wide as before
+            self.labels.append((lx, ly, i, max(70 * self.u, w / 2 + 8 * self.u), 16 * self.u))
             group = list(self.groups[i])
             caps = [self.ring_cap(k, (ri + ro) / 2, span) for k, (ri, ro) in enumerate(rings)]
             if len(group) > sum(caps):           # never drop apps silently: "+N" shows them all
@@ -1164,15 +1248,16 @@ class Dial(Gtk.Window):
         self.add_label = None
         if n < 6:                           # '+': a new slice (up to six)
             am = math.radians(a1 - 3)
-            r_lab = rings[-1][1] + 46
+            r_lab = rings[-1][1] + 46 * self.u
             ax, ay = cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab
+            ax, ay = self.inside(cr, '+ slice', ax, ay, self.pt(8), bold=False)
             self.add_label = (ax, ay)
-            self.text(cr, '+ slice', ax, ay, 8, bold=False, alpha=0.55, split=0)
+            self.text(cr, '+ slice', ax, ay, self.pt(8), bold=False, alpha=0.55, split=0)
 
     # -- slices: right-click a name to rename it, '+ slice' to add one
     def label_at(self, x, y):
-        return next((i for lx, ly, i in getattr(self, 'labels', [])
-                     if abs(x - lx) < 70 and abs(y - ly) < 16), None)
+        return next((i for lx, ly, i, hw, hh in getattr(self, 'labels', [])
+                     if abs(x - lx) < hw and abs(y - ly) < hh), None)
 
     def start_rename(self, i):
         self.renaming, self.rename_text = i, self.conf['slices'][i]['name']
@@ -1256,7 +1341,7 @@ class Dial(Gtk.Window):
         """index of the slice under (x, y), or None outside the fan"""
         cx, cy, hub, a0, a1, rings = self.fan()
         dx, dy = x - cx, y - cy
-        if not hub ** 2 <= dx * dx + dy * dy <= (rings[-1][1] + 30) ** 2:
+        if not hub ** 2 <= dx * dx + dy * dy <= (rings[-1][1] + 30 * self.u) ** 2:
             return None
         rel = (math.degrees(math.atan2(dy, dx)) - a0) % 360
         n = len(self.conf['slices'][:6])
@@ -1320,41 +1405,43 @@ class Dial(Gtk.Window):
     # -- the bin: drop an app on it and it leaves the launcher (typing still finds it)
     def bin_at(self):
         """the bin's centre: the top-left corner, or top-right when the dial sits top-left"""
-        W = self.geo.width
+        W, m = self.geo.width, 70 * self.u
         cx, cy = self.fan()[:2]          # the dial's clock in the top-left quarter: top-right
-        return (W - 70, 70) if cx < W / 2 and cy < self.geo.height / 2 else (70, 70)
+        return (W - m, m) if cx < W / 2 and cy < self.geo.height / 2 else (m, m)
 
     def over_bin(self, x, y):
         bx, by = self.bin_at()
-        return (x - bx) ** 2 + (y - by) ** 2 <= 48 ** 2
+        return (x - bx) ** 2 + (y - by) ** 2 <= (48 * self.u) ** 2
 
     def draw_bin(self, cr, x, y, quiet=False):
         bx, by = self.bin_at()
+        u = self.u
         hot = self.over_bin(x, y)
         if quiet:                           # not dragging: a faint bin, saying how
             cr.new_path()
-            cr.arc(bx, by, 30, 0, 2 * math.pi)
+            cr.arc(bx, by, 30 * u, 0, 2 * math.pi)
             cr.set_source_rgba(1, 1, 1, 0.04)
             cr.fill()
-            pb = self.lucide('trash-2', 22, 0.35)
+            pb = self.lucide('trash-2', 22 * u, 0.35)
             if pb:
-                Gdk.cairo_set_source_pixbuf(cr, pb, bx - 11, by - 11)
+                Gdk.cairo_set_source_pixbuf(cr, pb, bx - pb.get_width() / 2, by - pb.get_height() / 2)
                 cr.paint()
-            self.text(cr, 'drag an app here, or right-click it, to remove it',
-                      max(bx, 160) if bx < 200 else min(bx, self.geo.width - 160),
-                      by + 46, 8, bold=False, alpha=0.4, split=0)
+            say = 'drag an app here, or right-click it, to remove it'
+            tx, ty = self.inside(cr, say, bx, by + 46 * u, self.pt(8), bold=False, pad=36 * u)
+            self.text(cr, say, tx, ty, self.pt(8), bold=False, alpha=0.4, split=0)
             return
         cr.new_path()
-        cr.arc(bx, by, 40, 0, 2 * math.pi)
+        cr.arc(bx, by, 40 * u, 0, 2 * math.pi)
         cr.set_source_rgba(*(RED if hot else (1, 1, 1)), 0.25 if hot else 0.06)
         cr.fill()
-        self.chroma_circle(cr, bx, by, 40, alpha=0.9 if hot else 0.4)
-        pb = self.lucide('trash-2', 30, 0.95 if hot else 0.6)
+        self.chroma_circle(cr, bx, by, 40 * u, alpha=0.9 if hot else 0.4)
+        pb = self.lucide('trash-2', 30 * u, 0.95 if hot else 0.6)
         if pb:
-            Gdk.cairo_set_source_pixbuf(cr, pb, bx - 15, by - 15)
+            Gdk.cairo_set_source_pixbuf(cr, pb, bx - pb.get_width() / 2, by - pb.get_height() / 2)
             cr.paint()
-        self.text(cr, 'out of the launcher' if hot else 'drop here to remove', bx, by + 58, 8,
-                  bold=hot, alpha=0.9 if hot else 0.5, split=0)
+        say = 'out of the launcher' if hot else 'drop here to remove'
+        tx, ty = self.inside(cr, say, bx, by + 58 * u, self.pt(8), bold=hot)
+        self.text(cr, say, tx, ty, self.pt(8), bold=hot, alpha=0.9 if hot else 0.5, split=0)
 
     def hide_app(self, a):
         """the app leaves the slices (Zorro app → Desktop → Dialer → Apps brings it back)"""
@@ -1400,8 +1487,8 @@ class Dial(Gtk.Window):
             if lab is not None and ev.button == 3:
                 self.start_rename(lab)          # right-click a slice name: type a new one
                 return
-            if ev.button == 1 and self.add_label and abs(ev.x - self.add_label[0]) < 50 \
-                    and abs(ev.y - self.add_label[1]) < 14:
+            if ev.button == 1 and self.add_label and abs(ev.x - self.add_label[0]) < 50 * self.u \
+                    and abs(ev.y - self.add_label[1]) < 14 * self.u:
                 self.add_slice()
                 return
             if self.renaming is not None:       # clicked elsewhere: keep what was typed

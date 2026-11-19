@@ -214,7 +214,8 @@ class Music(Part):
         np = getattr(self, 'np', None)
         if not np:
             return
-        r = rings[-1][1] + 14
+        u = getattr(dial, 'u', 1.0)
+        r = rings[-1][1] + 14 * u
         frac = (self.position() / np['dur']) if np.get('dur') else 0
         rnd = random.Random(hash(np['title']))
         n = 170
@@ -223,7 +224,7 @@ class Music(Part):
             amp = 0.3 + 0.7 * abs(math.sin(j * 0.23 + rnd.random()) * math.cos(j * 0.051))
             played = j / n <= frac
             for _ in range(int(2 + amp * 4)):
-                rr = r + rnd.uniform(-1, 1) * amp * 7
+                rr = r + rnd.uniform(-1, 1) * amp * 7 * u
                 cr.set_source_rgba(*((0.97, 0.97, 0.97) if played else (0.62, 0.62, 0.64)),
                                    (0.9 if played else 0.28) * rnd.uniform(0.5, 1))
                 cr.rectangle(cx + math.cos(a) * rr, cy + math.sin(a) * rr, 1.5, 1.5)
