@@ -6,7 +6,7 @@ import subprocess
 import threading
 
 from .base import load_conf, update_conf
-from .ui import Pages, heading, idle, note
+from .ui import Pages, heading, idle, later, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk  # noqa: E402
@@ -96,7 +96,7 @@ class MobilePages:
         grid.attach(Gtk.Label(label='Access point (APN)', xalign=0), 0, 0, 1, 1)
         self.lte_apn = Gtk.Entry(placeholder_text='automatic (from the SIM)', width_chars=24,
                                  text=load_conf().get('lte', {}).get('apn', ''))
-        self.lte_apn.connect('changed', lambda e: update_conf('lte', apn=e.get_text().strip()))
+        self.lte_apn.connect('changed', lambda e: later('apn', lambda: update_conf('lte', apn=e.get_text().strip())))
         grid.attach(self.lte_apn, 1, 0, 1, 1)
         box.add(grid)
         box.add(note('Wi-Fi and the cable stay first: mobile data is only used while they are '

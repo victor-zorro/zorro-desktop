@@ -53,9 +53,40 @@ def save(dev=DEV):
 
 
 def reset(dev=DEV):
-    for c in controls(dev):
-        set_control(c['name'], c['default'], dev)
+    """all controls back to their defaults in one v4l2-ctl call (one call took ~100 ms each)"""
+    import subprocess
+    cs = controls(dev)
+    vals = ','.join(f"{c['name']}={int(c['default'])}" for c in cs)
+    try:
+        ok = vals and subprocess.run(['v4l2-ctl', '-d', dev, '-c', vals], capture_output=True,
+                                     timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    if not ok:                      # one control refused (e.g. locked by an auto mode): one by one
+        for c in cs:
+            set_control(c['name'], c['default'], dev)
     update_conf('webcam', saved={})
+
+
+_pending = {}
+_worker = []
+
+
+def set_soon(name, value, dev=DEV):
+    """for sliders: the newest value per control is applied by one background thread, so
+    dragging never waits for v4l2-ctl and in-between values are skipped"""
+    import threading
+    _pending[name] = value
+    if _worker:
+        return
+
+    def work():
+        while _pending:
+            n, v = _pending.popitem()
+            set_control(n, v, dev)
+        _worker.clear()
+    _worker.append(1)
+    threading.Thread(target=work, daemon=True).start()
 
 
 def restore(dev=DEV):

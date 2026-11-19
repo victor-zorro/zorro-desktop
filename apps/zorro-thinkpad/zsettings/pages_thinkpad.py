@@ -11,7 +11,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, MARKS, Pages, heading, idle, mark, note, radios
+from .ui import KEY_TABLE, MARKS, Pages, heading, idle, later, mark, note, radios
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -94,7 +94,7 @@ class ThinkpadPages:
         self.custom_box = Gtk.Box(spacing=6, no_show_all=True)
         self.custom = Gtk.Entry(hexpand=True, text=c.get('star_command', ''),
                                 placeholder_text='command, e.g.  firefox https://example.org')
-        self.custom.connect('changed', lambda e: update_conf(None, star_command=e.get_text()))
+        self.custom.connect('changed', lambda e: later('star', lambda: update_conf(None, star_command=e.get_text())))
         test = Gtk.Button(label='Try')
         test.connect('clicked', lambda b: key_star())
         self.custom_box.add(self.custom)
@@ -529,7 +529,8 @@ class ThinkpadPages:
         mrow.add(Gtk.Label(label='Morse text'))
         mtext = Gtk.Entry(text=li_text, hexpand=True,
                           placeholder_text='a word or sentence, e.g.  ZORRO WAS HERE')
-        mtext.connect('changed', lambda e: update_conf('lights', morse_text=e.get_text()))
+        # written once you stop typing (the dot restarts its Morse on every change)
+        mtext.connect('changed', lambda e: later('morse', lambda: update_conf('lights', morse_text=e.get_text())))
         mrow.add(mtext)
         box.add(mrow)
         srow = Gtk.Box(spacing=8)

@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 
 from .base import APPS, HOME, run, spawn, write_atomic
-from .ui import Pages, heading, idle, note
+from .ui import Pages, heading, idle, later, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, Gtk  # noqa: E402
@@ -272,7 +272,8 @@ class AccountsPages:
         grid.attach(Gtk.Label(label='Your SoundCloud name', xalign=0), 0, 0, 1, 1)
         user = Gtk.Entry(placeholder_text='the part after soundcloud.com/', width_chars=26,
                          text=music_conf().get('user', ''))
-        user.connect('changed', lambda e: save_music_conf(user=e.get_text().strip().strip('/')))
+        user.connect('changed', lambda e: later('sc-user', lambda: save_music_conf(
+            user=e.get_text().strip().strip('/'))))
         grid.attach(user, 1, 0, 1, 1)
         sc.add(grid)
         sc.add(note('The music player borrows your SoundCloud login from the Google-apps window '

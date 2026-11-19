@@ -5,7 +5,7 @@ import re
 import threading
 
 from .base import run, spawn
-from .ui import Pages, heading, idle, mark, note
+from .ui import Pages, heading, idle, in_bg, mark, note
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('NM', '1.0')
@@ -187,7 +187,7 @@ class NetworkPages:
         GLib.timeout_add(1500, lambda: self.net_refresh() and False)
 
     def wifi_toggle(self, sw, _p):
-        run('nmcli', 'radio', 'wifi', 'on' if sw.get_active() else 'off')
+        in_bg(run, 'nmcli', 'radio', 'wifi', 'on' if sw.get_active() else 'off')
         GLib.timeout_add(1500, lambda: self.net_refresh() and False)
 
     def wifi_scan(self):

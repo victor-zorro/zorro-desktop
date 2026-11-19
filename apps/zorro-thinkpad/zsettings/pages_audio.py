@@ -4,7 +4,7 @@ import time
 
 from . import audio
 from .base import load_conf
-from .ui import Pages, heading, idle, mark, note
+from .ui import Pages, heading, idle, in_bg, mark, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk  # noqa: E402
@@ -139,7 +139,7 @@ class AudioPages:
                                     valign=Gtk.Align.CENTER)
             mute.connect('toggled', lambda w, n=d['name']: (
                 w.set_label('Muted' if w.get_active() else 'Mute'),
-                audio.set_mute(kind, n, w.get_active())))
+                in_bg(audio.set_mute, kind, n, w.get_active())))
             row.add(mute)
             if not d['default']:
                 b = Gtk.Button(label='Use', valign=Gtk.Align.CENTER)
@@ -181,7 +181,7 @@ class AudioPages:
         ids = self.__dict__.setdefault('au_vol_ids', {})
         if ids.get(key):
             GLib.source_remove(ids[key])
-        ids[key] = GLib.timeout_add(120, lambda: (audio.set_volume(kind, name, value),
+        ids[key] = GLib.timeout_add(120, lambda: (in_bg(audio.set_volume, kind, name, value),
                                                   ids.pop(key, None)) and False)
 
     def au_streams(self, sinks, streams):

@@ -8,7 +8,7 @@ from .base import APPS, HOME, load_conf, osd, run, spawn, update_conf, write_ato
 from .fxshim import Snow, zorro_fx
 from .look import LOOK_ANIMALS, LOOK_BACKGROUNDS, WALL_DEFAULTS
 from .power import load_script
-from .ui import Pages, heading, idle, note, radios
+from .ui import Pages, heading, idle, in_bg, note, radios
 from .windows import TITLE_SIZES, apply_windows, set_winpos, win_conf, winpos_conf
 import gi
 gi.require_version('Gtk', '3.0')
@@ -383,8 +383,8 @@ class DesktopPages:
         wp = winpos_conf()
         again = Gtk.Switch(active=wp.get('restore_session', True), halign=Gtk.Align.START)
         here = Gtk.Switch(active=wp.get('open_on_current_desktop', True), halign=Gtk.Align.START)
-        again.connect('notify::active', lambda w, _p: set_winpos('restore_session', w.get_active()))
-        here.connect('notify::active', lambda w, _p: set_winpos('open_on_current_desktop', w.get_active()))
+        again.connect('notify::active', lambda w, _p: in_bg(set_winpos, 'restore_session', w.get_active()))
+        here.connect('notify::active', lambda w, _p: in_bg(set_winpos, 'open_on_current_desktop', w.get_active()))
         box.add(grid([('Reopen apps, windows and tabs', again), ('New windows on the current desktop', here)]))
         box.add(note('After a restart the apps that were open start again, every window on its own '
                      'desktop, place and size (maximized too), terminals in the folder they were in, '

@@ -170,3 +170,19 @@ def radios(options, current, on_pick):
         rb.connect('toggled', lambda b, k=key: b.get_active() and on_pick(k))
         box.add(rb)
     return box
+
+
+_later = {}
+
+
+def later(key, fn, ms=400):
+    """run fn once typing / sliding has rested for ms (one config write, not one per key)"""
+    if _later.get(key):
+        GLib.source_remove(_later[key])
+    _later[key] = GLib.timeout_add(ms, lambda: (_later.pop(key, None), fn()) and False)
+
+
+def in_bg(fn, *args):
+    """a command in a thread, so the window never waits for it (nmcli, pactl, v4l2-ctl)"""
+    import threading
+    threading.Thread(target=fn, args=args, daemon=True).start()

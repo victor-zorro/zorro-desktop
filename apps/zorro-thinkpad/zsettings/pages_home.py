@@ -503,7 +503,7 @@ class HomePages:
             sc = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, bright['min'], bright['max'], bright['step'])
             sc.set_value(bright['value'])
             sc.set_hexpand(True)
-            sc.connect('value-changed', lambda w: webcam.set_control('brightness', w.get_value()))
+            sc.connect('value-changed', lambda w: webcam.set_soon('brightness', w.get_value()))
             parts.append(hbox(label('Brightness'), sc, spacing=10))
         self.fill(self.h_cam, parts)
 
@@ -566,7 +566,7 @@ class HomePages:
                 sc.set_value(c['value'])
                 sc.set_hexpand(True)
                 sc.set_sensitive(not c['inactive'])
-                sc.connect('value-changed', lambda w, n=c['name']: webcam.set_control(n, w.get_value()))
+                sc.connect('value-changed', lambda w, n=c['name']: webcam.set_soon(n, w.get_value()))
                 w = sc
             elif c['type'] == 'bool':
                 w = Gtk.Switch(active=bool(c['value']), halign=Gtk.Align.START)
