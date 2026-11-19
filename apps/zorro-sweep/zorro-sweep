@@ -60,6 +60,7 @@ RED = (1.0, 0.16, 0.29)
 CYAN = (0.10, 0.90, 1.0)
 GREEN = (0.30, 1.0, 0.62)
 ROUND = 10                      # keep this many, then sort them
+LIFTED = 0.3                    # Sort: a picked-up card shrinks to this, to see the notebooks
 SWIPE = 150                     # px past which a let-go counts as a swipe
 IMG = re.compile(r'\.(png|jpe?g|gif|webp|bmp|svg)$', re.I)
 GAP = '<span size="4000"> </span>'     # an empty line, made small
@@ -353,6 +354,9 @@ class Sweep(Gtk.Window):
         self.undo_rect = None              # the undo button under the card (x, y, w, h)
         self.undo_hot = False
         self.nb_win = None                 # the Notebooks window, when open
+        self.lift = 0.0                    # Sort: 0 = card lying, 1 = picked up (small)
+        self.pointer = (0.0, 0.0)
+        self.grab = (0.0, 0.0)             # where on the card it was picked up (from its centre)
         self.dests = []
         self.find_dests()
 
@@ -486,6 +490,7 @@ class Sweep(Gtk.Window):
             self.b_sort.set_active(True)
             return
         self.dx = self.dy = self.scroll = 0.0
+        self.lift, self.grab = 0.0, (0.0, 0.0)
         self.hover = None
         self.enter_at = time.monotonic()
         self.card = self.load(q[0]) if q else None
@@ -953,7 +958,8 @@ class Sweep(Gtk.Window):
             act = (lambda: self.stay(p)) if d.get('stay') else (lambda: self.send(p, d))
             x, y = self.tile_rects()[dest][:2]
             cx, cy = self.card_rect()[:2]
-            self.fly = (time.monotonic(), self.dx, x - cx, y - cy, act)
+            k = 1 - LIFTED                  # it lands small, its grab point shifted along
+            self.fly = (time.monotonic(), self.dx, x - cx - self.grab[0] * k, y - cy - self.grab[1] * k, act)
 
     # ---- input ---------------------------------------------------------------------------
     def key(self, w, ev):
@@ -999,6 +1005,7 @@ class Sweep(Gtk.Window):
             x, y, cw, ch = self.card_rect()
             if abs(ev.x - x) < cw / 2 and abs(ev.y - y) < ch / 2:
                 self.drag = (ev.x - self.dx, ev.y - self.dy)
+                self.grab = (ev.x - x - self.dx, ev.y - y - self.dy)
             elif self.mode == 'sort':           # a click on a notebook
                 t = self.tile_at(ev.x, ev.y)
                 if t is not None:
@@ -1019,6 +1026,7 @@ class Sweep(Gtk.Window):
             self.undo_hot = hot
             self.area.queue_draw()
         if self.drag:
+            self.pointer = (ev.x, ev.y)
             self.dx = ev.x - self.drag[0]
             self.dy = (ev.y - self.drag[1]) if self.mode == 'sort' else (ev.y - self.drag[1]) * 0.25
             if self.mode == 'sort':
@@ -1093,6 +1101,13 @@ class Sweep(Gtk.Window):
         if self.banner and now - self.banner[2] > 2.6:
             self.banner = None
             self.area.queue_draw()
+        up = self.mode == 'sort' and (self.drag or (self.fly and self.fly[4]))
+        target = 1.0 if up else 0.0
+        if abs(self.lift - target) > 0.002:     # picking up / putting down: shrink or grow
+            self.lift += (target - self.lift) * 0.22
+            busy = True
+        else:
+            self.lift = target
         if busy or self.drag or self.banner or now - self.enter_at < 0.3 or now - self.toast_at < 2.2:
             self.area.queue_draw()
         return True
@@ -1178,6 +1193,13 @@ class Sweep(Gtk.Window):
             self.text(cr, msg, W / 2, H / 2 - 10, 12, DIM, align='center')
         else:
             self.draw_card(cr, now)
+        if self.card and self.drag and self.hover is not None and self.mode == 'sort':
+            d = self.dests[self.hover]          # held over a notebook: say which, above the card
+            ch = self.card_rect()[3] * (1 - (1 - LIFTED) * (self.lift * (2 - self.lift)))
+            y = self.pointer[1] - self.grab[1] * LIFTED - ch / 2 - 26
+            label = ('→ ' + d['name']) if not d.get('new') else d['name']
+            for off, rgb, a in ((-1.5, RED, 0.6), (1.5, CYAN, 0.6), (0, FG, 1)):
+                self.text(cr, label, self.pointer[0] + off, y, 11, rgb, a, bold=True, align='center')
         # bottom line: what the keys do
         hint = ('← keep   → delete   space skip   O open in Obsidian   Ctrl+Z undo' if self.mode == 'sweep'
                 else 'drag onto a notebook   1-9 or Enter (best match)   space skip   Ctrl+Z undo')
@@ -1208,6 +1230,7 @@ class Sweep(Gtk.Window):
         gap = 22 if n <= 20 else max(6, 440 / n)
         x0 = W / 2 - gap * (n - 1) / 2
         for i in range(n):
+            cr.new_sub_path()
             cr.arc(x0 + i * gap, 22, 6 if gap >= 16 else 2.5, 0, 2 * math.pi)
             if i < done:
                 cr.set_source_rgba(*(GREEN if sort else CYAN), 0.95)
@@ -1286,9 +1309,12 @@ class Sweep(Gtk.Window):
         cx, cy, cw, ch = self.card_rect()
         grow = min(1, (now - self.enter_at) / 0.25)
         scale = 0.94 + 0.06 * (1 - (1 - grow) ** 3)
+        small = 1 - (1 - LIFTED) * (self.lift * (2 - self.lift))   # eased
+        scale *= small
         p = max(-1, min(1, self.dx / SWIPE)) if self.mode == 'sweep' else 0
         cr.save()
-        cr.translate(cx + self.dx, cy + self.dy)
+        # shrink around the point where it is held, so it stays under the finger / pointer
+        cr.translate(cx + self.dx + self.grab[0] * (1 - small), cy + self.dy + self.grab[1] * (1 - small))
         cr.rotate(self.dx * 0.00045 if self.mode == 'sweep' else 0)
         cr.scale(scale, scale)
         cr.push_group()

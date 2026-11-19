@@ -6,7 +6,7 @@ It plays in **rounds**:
 1. **Keep or delete.** A note fills the screen, the oldest first. Swipe it **left to keep** or
    **right to delete**. Ten dots at the top fill up with each note you keep.
 2. **Sort.** After **10 kept notes**, "ROUND n" flashes and those 10 come back one by one. Drag
-   each one onto where it belongs:
+   each one onto where it belongs (a picked-up card shrinks, so the notebooks stay in view):
    - another vault;
    - a folder in this vault;
    - "Stays in Notes";
