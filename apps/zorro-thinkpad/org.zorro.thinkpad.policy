@@ -23,6 +23,16 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/zorro-look-helper</annotate>
   </action>
+  <action id="org.zorro.thinkpad.lang">
+    <description>Add or remove spell-check dictionaries</description>
+    <message>The Zorro app wants to install or remove spell-check dictionaries</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/zorro-lang-helper</annotate>
+  </action>
   <action id="org.zorro.thinkpad.lte">
     <description>Use the built-in LTE modem (start, SIM PIN, mobile data)</description>
     <message>The Zorro app wants to use the LTE modem</message>

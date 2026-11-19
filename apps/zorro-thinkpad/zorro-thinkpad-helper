@@ -9,6 +9,8 @@ session may run it without a password). Only these fixed verbs, every value vali
   fullcharge                                charge to 100% once (until unplugged)
   greeter-look JSON                         login / lock screen look -> /etc/zorro-dm/look.json
                                             (only known keys, numbers clamped, colours checked)
+  dicts LANG ...                            spell-check dictionaries: exactly these installed
+                                            (from the fixed list DICTS; the others removed)
 """
 import json
 import re
@@ -99,6 +101,31 @@ def greeter_look(text):
     sys.exit(0)
 
 
+# spell-check dictionaries the Zorro app can add or remove (Desktop → Languages)
+DICTS = {'en-GB': 'hunspell-en-gb', 'en-US': 'hunspell-en-us', 'nl': 'hunspell-nl',
+         'de': 'hunspell-de-de', 'fr': 'hunspell-fr', 'es': 'hunspell-es', 'it': 'hunspell-it',
+         'pt': 'hunspell-pt-pt'}
+
+
+def dicts(langs):
+    if not langs or any(x not in DICTS for x in langs):
+        die('dicts: languages from ' + ' '.join(DICTS))
+    want = {DICTS[x] for x in langs}
+    have = set(subprocess.run(['dpkg-query', '-W', '-f', '${Package} ${db:Status-Abbrev}\n',
+                               *DICTS.values()], capture_output=True, text=True).stdout.split('\n'))
+    have = {ln.split()[0] for ln in have if ln.strip().endswith('ii')}
+    env = dict(os.environ, DEBIAN_FRONTEND='noninteractive')
+    add, drop = sorted(want - have), sorted((set(DICTS.values()) & have) - want)
+    rc = 0
+    if add:
+        print('installing', *add, flush=True)
+        rc |= subprocess.run(['apt-get', 'install', '-y', '--no-install-recommends', *add], env=env).returncode
+    if drop:
+        print('removing', *drop, flush=True)
+        rc |= subprocess.run(['apt-get', 'remove', '-y', *drop], env=env).returncode
+    sys.exit(rc)
+
+
 def main():
     a = sys.argv[1:]
     # installed twice: zorro-look-helper may only write the login look (asks a password,
@@ -107,6 +134,10 @@ def main():
         if a[:1] == ['greeter-look'] and len(a) == 2:
             greeter_look(a[1])
         die('usage: greeter-look JSON')
+    if os.path.basename(sys.argv[0]) == 'zorro-lang-helper':     # asks a password: installs
+        if a[:1] == ['dicts']:
+            dicts(a[1:])
+        die('usage: dicts LANG ...')
     if a[:1] == ['power'] and len(a) == 5:
         power(*a[1:])
     elif a == ['fullcharge']:

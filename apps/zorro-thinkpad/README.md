@@ -16,6 +16,12 @@ Chromatic sea for login, lock screen and wallpaper together, plus your own), **D
   light. keyd runs the dot and re-applies everything at login and after standby.
 - **Overlays**: particles in the indicator and the screenshot bar (`apps/zorro-fx`),
   with a live preview; optionally the app window gets the same background.
+- **Languages** (Desktop): spell checking in several languages at once (English, Dutch,
+  German, French, Spanish, Italian, Portuguese), so mixed sentences get no red lines. Apply
+  adds / removes the hunspell dictionaries (`zorro-lang-helper`, asks a password) and sets
+  Firefox (a block in every profile's user.js, the web apps too) and Obsidian (its
+  Preferences, while it is closed). `python3 -m zsettings.lang apply` sets it again.
+- **Face unlock** (Login screen): `apps/zorro-face` — learn, test, delete, where the icon shows.
 
 - **Hardware**: every device with ✓ / ⚠, driver and a test: webcam preview (VLC), mic
   mute + record-and-play-back test, speaker left/right test, Bluetooth on/off, connect /

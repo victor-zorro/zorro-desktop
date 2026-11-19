@@ -95,3 +95,6 @@ python3-xlib
 python3-onnxruntime
 python3-sentencepiece
 poppler-utils
+# Spell checking, Dutch and English at the same time (more in Zorro app → Desktop → Languages)
+hunspell-en-gb
+hunspell-nl
