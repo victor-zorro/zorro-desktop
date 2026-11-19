@@ -187,7 +187,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   lower `MemoryHigh`. Also save the index every few hundred pieces, so an interrupted first
   index does not start from zero.
 
-- [ ] **2.12 Small per-tick waste** (S each)
+- [x] **2.12 Small per-tick waste** (S each)
   a) Dialer `fan()` re-reads the orb config on every draw and mouse move
      (`zorro-dial` about 434): read once in `__init__`.
   b) Dialer and Sweep `text()` build a new Pango layout per string per frame: cache layouts

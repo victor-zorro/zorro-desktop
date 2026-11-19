@@ -249,6 +249,7 @@
       }
       gl_FragColor=vec4(col,1.);}`;
   let bgProg = null, bgU = {}, bgTex = null, bgFbo = null, bgW = 0, bgH = 0, bgLast = -1e9;
+  let progP = -1, bgP = -1;                // attribute 'p' of each program, looked up once
 
   let prog, U = {}, tex, quadBuf;
   const UNIFORMS = ['uRes','uTime','uStatic','uBurst','uBars','uPower','uSeed','uWhale',
@@ -271,7 +272,7 @@
     quadBuf = buf;
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, 'p');
+    const loc = progP = gl.getAttribLocation(prog, 'p');
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     for (const n of UNIFORMS) U[n] = gl.getUniformLocation(prog, n);
@@ -291,6 +292,7 @@
     gl.linkProgram(bgProg);
     if (!gl.getProgramParameter(bgProg, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(bgProg));
     for (const n of ['R', 'T', 'MODE', 'CA']) bgU[n] = gl.getUniformLocation(bgProg, n);
+    bgP = gl.getAttribLocation(bgProg, 'p');
     bgTex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, bgTex);
@@ -322,7 +324,7 @@
       gl.viewport(0, 0, w, h);
       gl.useProgram(bgProg);
       gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-      const loc = gl.getAttribLocation(bgProg, 'p');
+      const loc = bgP;
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       gl.uniform2f(bgU.R, w, h);
@@ -333,7 +335,7 @@
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, W, H);
       gl.useProgram(prog);
-      const l2 = gl.getAttribLocation(prog, 'p');
+      const l2 = progP;
       gl.enableVertexAttribArray(l2);
       gl.vertexAttribPointer(l2, 2, gl.FLOAT, false, 0, 0);
     }
@@ -776,7 +778,7 @@
     // back to the main program and its full-screen quad
     gl.useProgram(prog);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-    const l2 = gl.getAttribLocation(prog, 'p');
+    const l2 = progP;
     gl.enableVertexAttribArray(l2);
     gl.vertexAttribPointer(l2, 2, gl.FLOAT, false, 0, 0);
   }
