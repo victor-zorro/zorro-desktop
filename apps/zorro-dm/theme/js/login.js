@@ -54,11 +54,17 @@
   }
 
   // ---- lightdm callbacks ---------------------------------------------------
+  let lastPrompt = null;
   function showPrompt(text, type) {
-    entry.value = '';
     const secret = type === 1 || type === 'password';
+    const kind = secret ? 'secret' : 'text:' + text;
+    // the same question again (after a wrong password): keep what is already typed
+    if (kind !== lastPrompt) entry.value = '';
+    lastPrompt = kind;
     entry.type = secret ? 'password' : 'text';
-    entry.placeholder = secret ? 'password' : (text || 'login').replace(/:\s*$/, '');
+    const locked = window.lightdm && window.lightdm.lock_hint;
+    entry.placeholder = secret ? (locked ? 'password to unlock' : 'password')
+                               : (text || 'login').replace(/:\s*$/, '');
     entry.focus();
   }
 
@@ -79,7 +85,7 @@
       say('access denied', true);
       FX.burst(1, 600);
       login.classList.remove('shake'); void login.offsetWidth; login.classList.add('shake');
-      setTimeout(start, 900);
+      start();                      // ready for the next try at once (what you type is kept)
     }
   }
 
@@ -87,7 +93,8 @@
     const L = window.lightdm;
     const users = L.users || [];
     user = users.length === 1 ? users[0] : null;
-    $('host').textContent = (L.hostname || 'signal');
+    // the lock screen says so; the login screen shows the machine's name
+    $('host').textContent = L.lock_hint ? 'locked · ' + (L.hostname || 'signal') : (L.hostname || 'signal');
     setUser(user ? (user.display_name || user.username) : '');
     if (L.in_authentication) L.cancel_authentication();
     L.authenticate(user ? user.username : null);
@@ -105,7 +112,7 @@
     if (!L) return;
     if (!L.in_authentication) { start(); return; }
     if (!user && entry.type === 'text') setUser(entry.value);
-    say('');
+    say(entry.type === 'password' ? 'checking…' : '');
     L.respond(entry.value);
     entry.value = '';
   });

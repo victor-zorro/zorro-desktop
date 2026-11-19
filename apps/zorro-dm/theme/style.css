@@ -7,6 +7,9 @@
   --red: #ff2a4a;
   --cyan: #19e6ff;
   --font: "DejaVu Sans Mono", monospace;
+  --edge: 32px;                           /* clock and power buttons sit this far from the corners */
+  --split-l: -1px 0 var(--red);           /* the red / cyan glitch split behind text */
+  --split-r: 1px 0 var(--cyan);
 }
 
 * { box-sizing: border-box; }
@@ -39,10 +42,6 @@ html, body {
 #login::before { left: -1px; top: -1px; border-right: 0; border-bottom: 0; }
 #login::after  { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
 
-.label {
-  font-size: 10px; letter-spacing: .35em; text-transform: uppercase;
-  color: var(--dim);
-}
 #user {
   margin: 6px 0 18px; font-size: 22px; letter-spacing: .08em;
   min-height: 1.4em;
@@ -65,31 +64,34 @@ html, body {
 @keyframes blink { 50% { opacity: 0; } }
 
 #msg { min-height: 1.4em; margin-top: 10px; font-size: 12px; color: var(--dim); letter-spacing: .1em; }
-#msg.error { color: var(--fg); text-shadow: -2px 0 var(--red), 2px 0 var(--cyan); }
+#msg.error { color: var(--fg); text-shadow: -2px 0 var(--red), 2px 0 var(--cyan); }  /* stronger on purpose */
 
 #face {
-  display: block; margin: 14px auto 0; width: 68px; height: 68px; padding: 8px;
+  display: block; margin: 10px auto 0; width: 44px; height: 44px; padding: 6px;
   background: none; border: 0; cursor: pointer; color: var(--dim);
 }
-#face[hidden] { display: none; }
+/* no face learned: the icon is not there, but its room is, so the box never jumps */
+#face[hidden] { display: block; visibility: hidden; pointer-events: none; }
 #face svg { width: 100%; height: 100%; }
-#face:hover, #face:focus-visible { color: var(--fg); outline: none; filter: drop-shadow(-1px 0 var(--red)) drop-shadow(1px 0 var(--cyan)); }
+#face:hover, #face:focus-visible { color: var(--fg); outline: none; filter: drop-shadow(var(--split-l)) drop-shadow(var(--split-r)); }
 #face.looking { color: var(--fg); animation: facepulse 1s ease-in-out infinite; }
 @keyframes facepulse { 50% { opacity: .35; } }
 
 /* ---- hud --------------------------------------------------------------- */
 .hud { position: fixed; transition: opacity .4s; }
-#clock { left: 40px; top: 32px; }
+#clock { left: var(--edge); top: var(--edge); }
 #time { font-size: 46px; letter-spacing: .04em; line-height: 1; }
-#date { margin-top: 6px; font-size: 11px; letter-spacing: .35em; text-transform: uppercase; color: var(--dim); }
-
-#power { right: 32px; bottom: 26px; display: flex; gap: 22px; }
-#power button {
-  background: none; border: 0; padding: 4px 0; cursor: pointer;
-  font: 11px var(--font); letter-spacing: .3em; text-transform: uppercase;
-  color: var(--dim);
+#date { margin-top: 6px; }
+/* captions: the host line, the date, the power buttons */
+.label, #date, #power button {
+  font-size: 10px; letter-spacing: .35em; text-transform: uppercase; color: var(--dim);
 }
-#power button:hover, #power button:focus-visible { color: var(--fg); outline: none; text-shadow: -1px 0 var(--red), 1px 0 var(--cyan); }
+
+#power { right: var(--edge); bottom: var(--edge); display: flex; gap: 22px; }
+#power button {
+  background: none; border: 0; padding: 4px 0; cursor: pointer; font-family: var(--font);
+}
+#power button:hover, #power button:focus-visible { color: var(--fg); outline: none; text-shadow: var(--split-l), var(--split-r); }
 #power button[disabled] { display: none; }
 
 /* ---- glitch ------------------------------------------------------------ */

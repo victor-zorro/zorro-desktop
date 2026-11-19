@@ -260,7 +260,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
      `base.py` 104); fix the tooltip at `pages_face.py` 44-46; update README.
   Ask Vincent before a) and c): this changes where he finds things.
 
-- [ ] **3.5 Login and lock screen arrangement** (S)
+- [x] **3.5 Login and lock screen arrangement** (S)
   `apps/zorro-dm/theme/style.css`, `theme/js/login.js`, `zorro-greeter` 176.
   a) Lock mode: host label "locked", placeholder "password to unlock" (`lock_hint` is
      passed but never read).
