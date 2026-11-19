@@ -60,6 +60,12 @@ class Music(Part):
     tree = True
 
     def fetch(self):
+        try:                            # the sound output tile (dialparts/sound.py)
+            from . import sound
+            self.sound = sound.node()
+        except Exception as e:          # noqa: BLE001 - no sound tile, the rest still works
+            print('zorro-dial: sound:', e, file=sys.stderr)
+            self.sound = None
         self.fetch_np()
         self.sc = scapi()
         self.likes, self.lists, self.signed_in = [], [], False
@@ -154,7 +160,7 @@ class Music(Part):
     def roots(self):
         if not getattr(self, 'ready', False):
             return [tile('lucide:ellipsis', 'Loading…', '', None, id='loading')]
-        out = []
+        out = [self.sound] if getattr(self, 'sound', None) else []     # where it plays: first
         if self.likes:
             out.append(tile('lucide:star', 'My likes', f'{len(self.likes)} tracks', None, id='likes',
                             kids=lambda: [tile('lucide:play', 'Play all', 'shuffled',

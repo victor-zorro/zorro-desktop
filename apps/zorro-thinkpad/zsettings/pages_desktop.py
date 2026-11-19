@@ -395,12 +395,13 @@ class DesktopPages:
 
         assigned = {}                   # slice choices made on this page (None = automatic)
 
-        def save(order=None, hide=None):
+        def save(order=None, hide=None, slices=None):
             # the dial writes the dragged order, slice moves and its bin itself: keep what it
             # wrote meanwhile, and add only what was changed here
             now = dial.load_conf()
             c['order'] = now.get('order', {}) if order is None else order
             c['hide'] = now.get('hide', []) if hide is None else hide
+            c['slices'] = now.get('slices', c['slices']) if slices is None else slices   # renamed in the Dialer
             c['assign'] = dict(now.get('assign', {}))
             for app, v in assigned.items():
                 if v:
@@ -442,7 +443,7 @@ class DesktopPages:
             c['slices'] = [{'name': n.get_text().strip(),
                             'categories': [x.strip() for x in k.get_text().split(',') if x.strip()]}
                            for n, k in entries if n.get_text().strip()] or c['slices']
-            save()
+            save(slices=c['slices'])
         for i, s in enumerate(rows):
             name = Gtk.Entry(text=s['name'], width_chars=9, placeholder_text='(unused)')
             cats = Gtk.Entry(text=', '.join(s['categories']), hexpand=True)

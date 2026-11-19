@@ -54,6 +54,12 @@ start it again.
 any corner (with its own clock there) or as a full circle in the middle; Dialer size and Icon
 size 70-160%.
 
-**Apps you never use**: drag one onto the bin that shows in the top-left corner while you drag
-(top-right when the Dialer sits top-left); it leaves the slices, typing still finds it. Zorro app
+**Apps you never use**: right-click one, or drag it onto the bin in the top-left corner
+(top-right when the Dialer sits there); it leaves the slices, typing still finds it. Zorro app
 → Desktop → Dialer → Apps lists every app with a tick box to bring it back (or take it out).
+
+**Slices**: right-click a slice's name to type a new one (its apps and their order go along);
+'+ slice' after the last one adds a new slice (up to six), then drag apps into it.
+
+**Sound**: the first tile under Music is the output in use; it opens into every output and the
+paired Bluetooth speakers / headphones (connected on a click).

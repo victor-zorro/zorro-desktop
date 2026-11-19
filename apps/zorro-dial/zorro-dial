@@ -140,12 +140,16 @@ def save_arrangement(order, assign):
 
 
 def save_hidden(hide):
-    """write the apps left out of the launcher, keeping everything else in the config"""
+    save_keys(hide=hide)
+
+
+def save_keys(**kv):
+    """write these config keys, keeping everything else in the config"""
     try:
         user = json.loads(CONF.read_text())
     except (OSError, ValueError):
         user = {}
-    user['hide'] = hide
+    user.update(kv)
     CONF.parent.mkdir(parents=True, exist_ok=True)
     tmp = CONF.with_suffix('.tmp')
     tmp.write_text(json.dumps(user, indent=2))
@@ -316,6 +320,8 @@ class Dial(Gtk.Window):
         self.press = None               # (app, x, y) while the mouse button is down on an app
         self.drag = None                # (app, x, y) while an app is being dragged
         self.expanded = None            # a full slice shown across the dial ("+N" clicked)
+        self.renaming, self.rename_text = None, ""   # a slice name being typed (right-click it)
+        self.labels, self.add_label = [], None
         # the hub: six parts. Hover one: its preview; click: it stays and fills the fan
         self.mode = 'apps'              # Super always opens on the apps
         self.hub_hover = None           # a part's key, 'centre', or None
@@ -689,8 +695,10 @@ class Dial(Gtk.Window):
             self.music_keys(cr, cx, cy, hub)
         self.draw_preview(cr)
         am = math.radians((a0 + a1) / 2)
+        if self.mode == 'apps' and not self.filter and self.expanded is None:
+            px, py = (self.drag[1], self.drag[2]) if self.drag else (-1e4, -1e4)
+            self.draw_bin(cr, px, py, quiet=not self.drag)
         if self.drag:
-            self.draw_bin(cr, self.drag[1], self.drag[2])
             a, x, y = self.drag
             pb = self.icon(a, 44)
             cr.new_path()
@@ -1114,6 +1122,7 @@ class Dial(Gtk.Window):
     def draw_slices(self, cr, cx, cy, rings, a0, a1):
         slices = self.conf['slices'][:6]
         n = len(slices)
+        self.labels = []                    # (x, y, slice): right-click a name to rename it
         span = (a1 - a0) / n
         for i, s in enumerate(slices):
             start = a0 + i * span
@@ -1130,8 +1139,14 @@ class Dial(Gtk.Window):
                 cr.stroke()
             am = math.radians(start + span / 2)
             r_lab = rings[-1][1] + 20
-            self.text(cr, s['name'].upper(), cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab,
-                      9, split=1.4)
+            lx, ly = cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab
+            self.labels.append((lx, ly, i))
+            if self.renaming == i:          # being renamed: what you type, with a caret
+                self.text(cr, (self.rename_text or ' ') + ('▏' if int(time.time() * 2) % 2 else ' '),
+                          lx, ly, 10, split=1.0)
+                self.text(cr, 'Enter: keep · Esc: back', lx, ly + 18, 7, bold=False, alpha=0.5, split=0)
+            else:
+                self.text(cr, s['name'].upper(), lx, ly, 9, split=1.4)
             group = list(self.groups[i])
             caps = [self.ring_cap(k, (ri + ro) / 2, span) for k, (ri, ro) in enumerate(rings)]
             if len(group) > sum(caps):           # never drop apps silently: "+N" shows them all
@@ -1146,6 +1161,49 @@ class Dial(Gtk.Window):
                 row, group = group[:cnt], group[cnt:]
                 self.place(cr, cx, cy, row, rm, start, span, size, where=(i, pos))
                 pos += len(row)
+        self.add_label = None
+        if n < 6:                           # '+': a new slice (up to six)
+            am = math.radians(a1 - 3)
+            r_lab = rings[-1][1] + 46
+            ax, ay = cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab
+            self.add_label = (ax, ay)
+            self.text(cr, '+ slice', ax, ay, 8, bold=False, alpha=0.55, split=0)
+
+    # -- slices: right-click a name to rename it, '+ slice' to add one
+    def label_at(self, x, y):
+        return next((i for lx, ly, i in getattr(self, 'labels', [])
+                     if abs(x - lx) < 70 and abs(y - ly) < 16), None)
+
+    def start_rename(self, i):
+        self.renaming, self.rename_text = i, self.conf['slices'][i]['name']
+        self.area.queue_draw()
+
+    def add_slice(self):
+        self.conf['slices'] = list(self.conf['slices']) + [{'name': f'Slice {len(self.conf["slices"]) + 1}',
+                                                            'categories': []}]
+        self.save_slices()
+        self.start_rename(len(self.conf['slices']) - 1)
+        self.rename_text = ''               # type its name right away (Enter on empty: 'Slice N')
+
+    def finish_rename(self, keep):
+        i, new = self.renaming, self.rename_text.strip()[:20]
+        self.renaming = None
+        if keep and new and i is not None:
+            old = self.conf['slices'][i]['name']
+            if new != old and new not in [x['name'] for x in self.conf['slices']]:
+                self.conf['slices'][i] = {**self.conf['slices'][i], 'name': new}
+                order = dict(self.conf.get('order', {}))       # its apps and their order go along
+                if old in order:
+                    order[new] = order.pop(old)
+                self.conf['order'] = order
+                self.conf['assign'] = {a: (new if v == old else v) for a, v in self.conf['assign'].items()}
+                self.save_slices()
+        self.area.queue_draw()
+
+    def save_slices(self):
+        save_keys(slices=self.conf['slices'], order=self.conf.get('order', {}),
+                  assign=self.conf.get('assign', {}))
+        self.layout_apps()
 
     def draw_search(self, cr, cx, cy, rings, a0, a1, items=None):
         found = list(items) if items is not None else self.matches()
@@ -1270,9 +1328,22 @@ class Dial(Gtk.Window):
         bx, by = self.bin_at()
         return (x - bx) ** 2 + (y - by) ** 2 <= 48 ** 2
 
-    def draw_bin(self, cr, x, y):
+    def draw_bin(self, cr, x, y, quiet=False):
         bx, by = self.bin_at()
         hot = self.over_bin(x, y)
+        if quiet:                           # not dragging: a faint bin, saying how
+            cr.new_path()
+            cr.arc(bx, by, 30, 0, 2 * math.pi)
+            cr.set_source_rgba(1, 1, 1, 0.04)
+            cr.fill()
+            pb = self.lucide('trash-2', 22, 0.35)
+            if pb:
+                Gdk.cairo_set_source_pixbuf(cr, pb, bx - 11, by - 11)
+                cr.paint()
+            self.text(cr, 'drag an app here, or right-click it, to remove it',
+                      max(bx, 160) if bx < 200 else min(bx, self.geo.width - 160),
+                      by + 46, 8, bold=False, alpha=0.4, split=0)
+            return
         cr.new_path()
         cr.arc(bx, by, 40, 0, 2 * math.pi)
         cr.set_source_rgba(*(RED if hot else (1, 1, 1)), 0.25 if hot else 0.06)
@@ -1324,6 +1395,22 @@ class Dial(Gtk.Window):
     def on_click(self, _w, ev):
         a = self.hit(ev.x, ev.y)
         z = self.hub_at(ev.x, ev.y)
+        if self.mode == 'apps' and not self.filter and self.expanded is None:
+            lab = self.label_at(ev.x, ev.y)
+            if lab is not None and ev.button == 3:
+                self.start_rename(lab)          # right-click a slice name: type a new one
+                return
+            if ev.button == 1 and self.add_label and abs(ev.x - self.add_label[0]) < 50 \
+                    and abs(ev.y - self.add_label[1]) < 14:
+                self.add_slice()
+                return
+            if self.renaming is not None:       # clicked elsewhere: keep what was typed
+                self.finish_rename(True)
+        if a and ev.button == 3 and self.mode == 'apps' and not a.get('tile') and a.get('id') \
+                and not a['id'].startswith('__') and not self.filter:
+            self.hide_app(a)                # right-click an app: out of the launcher
+            self.area.queue_draw()
+            return
         if a and ev.button == 3 and a.get('remove'):    # right-click a message: dismiss it
             part = self.parts.get(self.mode)
             threading.Thread(target=lambda: (a['remove'](), part and part.fetch(),
@@ -1360,6 +1447,19 @@ class Dial(Gtk.Window):
 
     def on_key(self, _w, ev):
         k = Gdk.keyval_name(ev.keyval) or ''
+        if self.renaming is not None:       # typing a slice's new name
+            if k in ('Return', 'KP_Enter'):
+                self.finish_rename(True)
+            elif k == 'Escape':
+                self.finish_rename(False)
+            elif k == 'BackSpace':
+                self.rename_text = self.rename_text[:-1]
+            else:
+                ch = chr(Gdk.keyval_to_unicode(ev.keyval)) if Gdk.keyval_to_unicode(ev.keyval) else ''
+                if ch.isprintable() and len(self.rename_text) < 20:
+                    self.rename_text += ch
+            self.area.queue_draw()
+            return True
         if k.startswith('Super') or ev.state & Gdk.ModifierType.MOD4_MASK:
             return True                     # holding Super unfolds; its xcape Super+Space is not typing
         if k == 'Escape':
