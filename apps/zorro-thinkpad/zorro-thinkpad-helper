@@ -65,7 +65,7 @@ LOOK_NUM = {   # key: (min, max)
 CBLUR_MODES = ('lens', 'prism', 'glow')
 BACKGROUNDS = ('deep', 'waves', 'streaks', 'black')
 LOOK_COLOUR = ('line_colour', 'snow_colour')
-LOOK_BOOL = ('bars', 'crt')
+LOOK_BOOL = ('bars', 'crt', 'clock')
 
 
 def greeter_look(text):

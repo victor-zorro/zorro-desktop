@@ -257,6 +257,9 @@ class LookPages:
                       ('CRT switch-on at start', switch('crt'))]))
         box.add(note('0 switches an effect off. Glitches also come with key presses on '
                      'the login screen.'))
+        box.add(heading('Clock and date', 'Clock'))
+        box.add(grid([('Show the clock', switch('clock'))]))
+        box.add(note('Top left on the login and lock screen.'))
 
         bottom = Gtk.Box(spacing=8)
         save = Gtk.Button(label='Save for login and lock screen')

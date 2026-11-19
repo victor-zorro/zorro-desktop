@@ -501,7 +501,41 @@ class Dial(Gtk.Window):
         else:
             cx, cy, hub, a0, a1 = W / 2, H / 2, 86, -90, 270
         rings = [(hub + 12, hub + 96), (hub + 96, hub + 180), (hub + 180, hub + 270)]
+        if self.mode == 'apps' and not self.filter and self.expanded is None:
+            # more apps than three rings hold: the dial grows outward, as far as the screen allows
+            room = min(max(cx, W - cx), max(cy, H - cy)) - 60
+            for _ in range(self.app_rings(hub, a0, a1, room) - 3):
+                ro = rings[-1][1]
+                rings.append((ro, ro + 84))
         return cx, cy, hub, a0, a1, rings
+
+    def app_rings(self, hub, a0, a1, room):
+        """how many rings the apps need so that no slice needs 'N more' (kept: the apps do not
+        change while the dial is open)"""
+        groups = getattr(self, 'groups', [])
+        key = (hub, a0, a1, room, tuple(len(g) for g in groups))
+        if getattr(self, '_app_rings', (None,))[0] == key:
+            return self._app_rings[1]
+        span = (a1 - a0) / max(1, len(groups))
+        rings = [(hub + 12, hub + 96), (hub + 96, hub + 180), (hub + 180, hub + 270)]
+        while rings[-1][1] + 84 <= room and any(
+                len(g) > sum(self.ring_cap(k, (ri + ro) / 2, span) for k, (ri, ro) in enumerate(rings))
+                for g in groups):
+            rings.append((rings[-1][1], rings[-1][1] + 84))
+        self._app_rings = (key, len(rings))
+        return len(rings)
+
+    @staticmethod
+    def ring_size(k):
+        """icon size on ring k (the outer rings all small)"""
+        return (44, 36, 30)[min(k, 2)]
+
+    def ring_cap(self, k, rm, span):
+        size = self.ring_size(k)
+        if self.conf.get('anchor') == 'orb':
+            return self.fits(rm, span, size)
+        slots = self.conf['ring_slots']
+        return min(slots[min(k, len(slots) - 1)], self.fits(rm, span, size))
 
     def on_draw(self, w, cr):
         cx, cy, hub, a0, a1, rings = self.fan()
@@ -852,8 +886,12 @@ class Dial(Gtk.Window):
             ri, ro = rings[k]
             rm = (ri + ro) / 2
             size = (30, 27, 25)[k]
-            # room per item: the first ring has short names (the full one on hover), the others full
-            step = math.degrees((58 if k == 0 else 74) / rm)
+            # names in the first ring only where icons repeat (a row of the same folder icon:
+            # the notebooks); unique icons speak for themselves, their name shows on hover
+            icons = [t.get('icon') for t in items]
+            twins = {i for i in icons if icons.count(i) > 1}
+            named = k > 0 or bool(twins)
+            step = math.degrees((74 if k > 0 else 58 if named else 44) / rm)
             cap = max(2, int((a1 - a0 - 4) / step))
             items = list(items)
             if len(items) > cap:                   # never dropped silently: "N more" unfolds the rest
@@ -919,13 +957,12 @@ class Dial(Gtk.Window):
                     if ch:
                         Gdk.cairo_set_source_pixbuf(cr, ch, x + size * 0.55, y - size * 0.75)
                         cr.paint()
-                # a name under every tile (a row of the same folder icon says nothing); short in
-                # the first ring, where they sit closest
-                cut = 8 if k == 0 else 13
-                name = t['name'] if (is_open or hov) else \
-                    (t['name'][:cut] + '…' if len(t['name']) > cut + 1 else t['name'])
-                self.text(cr, name[:22], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
-                          alpha=0.9, split=0.8 if is_open else 0)
+                if k > 0 or is_open or hov or t.get('icon') in twins:
+                    cut = 8 if k == 0 else 13          # short in the first ring, where they sit closest
+                    name = t['name'] if (is_open or hov) else \
+                        (t['name'][:cut] + '…' if len(t['name']) > cut + 1 else t['name'])
+                    self.text(cr, name[:22], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
+                              alpha=0.9, split=0.8 if is_open else 0)
             parent_angle, parent_r = next_angle, rm
 
     def draw_tiles(self, cr, cx, cy, rings, a0, a1, rows):
@@ -965,7 +1002,7 @@ class Dial(Gtk.Window):
     @staticmethod
     def fits(rm, span_deg, size):
         """how many icons of this size fit on an arc"""
-        return max(1, int(rm * math.radians(span_deg) / (size * 1.45)))
+        return max(1, int(rm * math.radians(span_deg) / (size * 1.75)))   # a little air between
 
     def draw_slices(self, cr, cx, cy, rings, a0, a1):
         slices = self.conf['slices'][:6]
@@ -989,22 +1026,16 @@ class Dial(Gtk.Window):
             self.text(cr, s['name'].upper(), cx + math.cos(am) * r_lab, cy + math.sin(am) * r_lab,
                       9, split=1.4)
             group = list(self.groups[i])
-            caps = []
-            for k, (ri, ro) in enumerate(rings):
-                size = (44, 36, 30)[k]
-                rm = (ri + ro) / 2
-                caps.append(min(self.conf['ring_slots'][k], self.fits(rm, span, size))
-                            if self.conf.get('anchor') != 'orb' else self.fits(rm, span, size))
+            caps = [self.ring_cap(k, (ri + ro) / 2, span) for k, (ri, ro) in enumerate(rings)]
             if len(group) > sum(caps):           # never drop apps silently: "+N" shows them all
                 extra = len(group) - sum(caps) + 1
                 group = group[:sum(caps) - 1] + [{'id': f'__more__{i}', 'name': f'{extra} more',
                                                   'icon': '', 'more': i, 'extra': extra}]
             pos = 0
             for k, (ri, ro) in enumerate(rings):
-                size = (44, 36, 30)[k]
+                size = self.ring_size(k)
                 rm = (ri + ro) / 2
-                cnt = min(self.conf['ring_slots'][k], self.fits(rm, span, size)) \
-                    if self.conf.get('anchor') != 'orb' else self.fits(rm, span, size)
+                cnt = self.ring_cap(k, rm, span)
                 row, group = group[:cnt], group[cnt:]
                 self.place(cr, cx, cy, row, rm, start, span, size, where=(i, pos))
                 pos += len(row)
@@ -1012,7 +1043,7 @@ class Dial(Gtk.Window):
     def draw_search(self, cr, cx, cy, rings, a0, a1, items=None):
         found = list(items) if items is not None else self.matches()
         for k, (ri, ro) in enumerate(rings):
-            size = (44, 36, 30)[k]
+            size = self.ring_size(k)
             rm = (ri + ro) / 2
             cnt = self.fits(rm, a1 - a0, size)
             row, found = found[:cnt], found[cnt:]

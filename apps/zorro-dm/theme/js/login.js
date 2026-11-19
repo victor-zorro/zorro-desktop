@@ -41,7 +41,9 @@
     // with the CRT start the picture needs 3.3 s to settle; without it only a short fade
     const wait = Math.max(0, (FX.crt ? 3300 : 600) - (performance.now() - FX.startedAt));
     setTimeout(() => {
-      for (const el of [login, $('clock'), $('power')]) {
+      const look = window.ZORRO_LOOK || {};
+      const shown = [login, $('power')].concat(look.clock === false ? [] : [$('clock')]);
+      for (const el of shown) {
         el.classList.remove('hidden'); el.classList.add('appear');
         // drop it afterwards, or every glitch (which swaps the animation) replays the fade-in
         el.addEventListener('animationend', (e) => {

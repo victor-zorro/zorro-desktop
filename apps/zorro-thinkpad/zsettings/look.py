@@ -40,6 +40,7 @@ LOOK_DEFAULTS = {
     'vignette': 1.0, 'flicker': 1.0, 'chroma': 1.0, 'glitch_rate': 1.0, 'glitch_strength': 1.0,
     'bars': False, 'crt': False, 'cblur': 1.0, 'cblur_mode': 'lens', 'bloom': 0.6,
     'background': 'deep', 'bg_strength': 1.0, 'bg_speed': 1.0, 'bg_aberration': 1.0,
+    'clock': True,
 }
 LOOK_BACKGROUNDS = {'deep': 'Deep sea: dark, with pools of iridescent light',
                     'waves': 'Iridescent waves: deep blue with magenta folds',
