@@ -170,7 +170,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: after 60 s without input call `FX.pause(true)`, wake on key or mouse; pass a lower
   fps on battery from `look_script()`; let `zorro-lock` pause zorro-wall as it does dunst.
 
-- [ ] **2.9 Face unlock: start the camera before loading OpenCV** (S)
+- [x] **2.9 Face unlock: start the camera before loading OpenCV** (S)
   `apps/zorro-face/zorro-face` about 185, 266-269.
   ffmpeg starts after `import cv2` (0.52 s). `conf()` re-reads its file every frame.
   Fix: start `Camera(dev)` right after `emitter()`, then build `Faces()`; read `conf()` once.

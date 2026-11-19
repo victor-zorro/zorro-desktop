@@ -171,6 +171,7 @@ class Faces:
         cv2.setNumThreads(2)
         self.det = cv2.FaceDetectorYN.create(f'{SHARE}/face_detection_yunet_2023mar.onnx', '', (W, H),
                                              0.8, 0.3, 5)
+        self.min_light = conf()['min_light']      # read once, not on every frame
         self.rec = cv2.FaceRecognizerSF.create(f'{SHARE}/face_recognition_sface_2021dec.onnx', '')
 
     def look(self, lit, dark):
@@ -186,7 +187,7 @@ class Faces:
             return None, 'too far'
         x0, y0, x1, y1 = max(x, 0), max(y, 0), min(x + w, W), min(y + h, H)
         light = float(lit[y0:y1, x0:x1].mean()) - float(dark[y0:y1, x0:x1].mean())
-        if light < conf()['min_light']:
+        if light < self.min_light:
             return None, 'not lit'                  # a screen or a far-away photo
         crop = self.rec.alignCrop(bgr, f)
         e = self.rec.feature(crop).flatten().astype(np.float32)
@@ -208,8 +209,8 @@ def enroll(user, seconds=8, want=24):
     if not dev:
         sys.exit('zorro-face: no IR camera found')
     emitter(dev)
+    cam, t0 = Camera(dev), time.time()  # the camera first: OpenCV takes ~0.5 s to load
     faces, got, why = Faces(), [], {}
-    cam, t0 = Camera(dev), time.time()
     say('look at the camera, move your head a little')
     try:
         for lit, dark in cam.pairs():
@@ -272,8 +273,8 @@ def verify(user, timeout=6.0):
         return 4
     c = conf()
     t0 = time.time()
+    cam = Camera(dev)                   # the camera starts first: OpenCV takes ~0.5 s to load
     faces, hits = Faces(), 0
-    cam = Camera(dev)
     # a camera that stops sending frames would block a read forever: stop ffmpeg at the end
     watchdog = threading.Timer(timeout + 1, cam.p.kill)
     watchdog.daemon = True
