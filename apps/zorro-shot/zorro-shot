@@ -12,6 +12,7 @@ Saved to ~/Pictures/Screenshots/YYYY-MM-DD_HH-MM-SS.png and copied to the clipbo
 import argparse
 import os
 import re
+import select
 import subprocess
 import sys
 import tempfile
@@ -127,53 +128,73 @@ def serve_clipboard(path, temp=False):
         return
     print('ready', flush=True)
     sys.stdout.close()
-    chunk, pending = 65536, {}                           # (requestor, property): (type, bytes, offset)
-    while True:
-        e = d.next_event()
-        if e.type == X.SelectionClear:
-            break
-        if e.type == X.PropertyNotify and e.state == X.PropertyDelete:
-            k = (e.window.id, e.atom)
-            if k in pending:                             # the requestor took a piece: the next
-                typ, blob, off = pending[k]
-                piece = blob[off:off + chunk]
-                e.window.change_property(e.atom, typ, 8, piece)
-                if piece:
-                    pending[k] = (typ, blob, off + chunk)
-                else:
+    # errors about a requestor that is gone arrive later, as events: not worth a message
+    d.set_error_handler(lambda *_a: None)
+    chunk = 65536
+    pending = {}            # (requestor id, property): [type, bytes, offset, started]
+    try:
+        while True:
+            if pending and not d.pending_events():
+                # a requestor that stops taking pieces is given up after 30 s
+                select.select([d.fileno()], [], [], 5)
+                old = time.monotonic() - 30
+                for k in [k for k, v in pending.items() if v[3] < old]:
                     del pending[k]
-                d.flush()
-            continue
-        if e.type != X.SelectionRequest:
-            continue
-        prop = e.property or e.target
-        ok = True
-        try:
-            if e.target == TARGETS:
-                e.requestor.change_property(prop, Xatom.ATOM, 32, [TARGETS, TIMESTAMP, *data])
-            elif e.target == TIMESTAMP:
-                e.requestor.change_property(prop, Xatom.INTEGER, 32, [stamp])
-            elif e.target in data:
-                blob = data[e.target]
-                if len(blob) > chunk * 3:
-                    e.requestor.change_attributes(event_mask=X.PropertyChangeMask)
-                    e.requestor.change_property(prop, INCR, 32, [len(blob)])
-                    pending[(e.requestor.id, prop)] = (e.target, blob, 0)
+                if not d.pending_events():
+                    continue
+            e = d.next_event()
+            if e.type == X.SelectionClear:
+                break
+            if e.type == X.DestroyNotify:                # a requestor closed mid-transfer
+                for k in [k for k in pending if k[0] == e.window.id]:
+                    del pending[k]
+                continue
+            if e.type == X.PropertyNotify and e.state == X.PropertyDelete:
+                k = (e.window.id, e.atom)
+                if k in pending:                         # the requestor took a piece: the next
+                    typ, blob, off, _t = pending[k]
+                    piece = blob[off:off + chunk]
+                    e.window.change_property(e.atom, typ, 8, piece)
+                    if piece:
+                        pending[k] = [typ, blob, off + chunk, time.monotonic()]
+                    else:
+                        del pending[k]
+                    d.flush()
+                continue
+            if e.type != X.SelectionRequest:
+                continue
+            prop = e.property or e.target
+            ok = True
+            try:
+                if e.target == TARGETS:
+                    e.requestor.change_property(prop, Xatom.ATOM, 32, [TARGETS, TIMESTAMP, *data])
+                elif e.target == TIMESTAMP:
+                    e.requestor.change_property(prop, Xatom.INTEGER, 32, [stamp])
+                elif e.target in data:
+                    blob = data[e.target]
+                    if len(blob) > chunk * 3:
+                        e.requestor.change_attributes(
+                            event_mask=X.PropertyChangeMask | X.StructureNotifyMask)
+                        e.requestor.change_property(prop, INCR, 32, [len(blob)])
+                        pending[(e.requestor.id, prop)] = [e.target, blob, 0, time.monotonic()]
+                    else:
+                        e.requestor.change_property(prop, e.target, 8, blob)
                 else:
-                    e.requestor.change_property(prop, e.target, 8, blob)
-            else:
+                    ok = False
+            except Exception:                            # noqa: BLE001
                 ok = False
-        except Exception:                                # noqa: BLE001 - requestor gone
-            ok = False
-        e.requestor.send_event(event.SelectionNotify(
-            time=e.time, requestor=e.requestor, selection=e.selection, target=e.target,
-            property=prop if ok else X.NONE), event_mask=0)
-        d.flush()
-    if temp:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+            e.requestor.send_event(event.SelectionNotify(
+                time=e.time, requestor=e.requestor, selection=e.selection, target=e.target,
+                property=prop if ok else X.NONE), event_mask=0)
+            d.flush()
+    except Exception:                                    # noqa: BLE001 - the X server went away
+        pass
+    finally:
+        if temp:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def finish(pixbuf, rect, save=True):

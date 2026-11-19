@@ -109,7 +109,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   uploaded again. Events during a running sync are dropped.
   Fix: try/finally around the thread body; a "dirty" flag that queues one follow-up sync.
 
-- [ ] **1.13 Screenshot clipboard server: dead requestor, leftover temp file** (S)
+- [x] **1.13 Screenshot clipboard server: dead requestor, leftover temp file** (S)
   `apps/zorro-shot/zorro-shot` `serve_clipboard`.
   python-xlib reports `change_property` errors asynchronously, so the `except` never fires;
   a dead requestor's INCR entry stays in `pending` forever. An X server exit skips the
