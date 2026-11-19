@@ -307,13 +307,13 @@ class Dial(Gtk.Window):
         except (AttributeError, TypeError):
             return 0, 0
 
-    def grab(self):
+    def grab(self, tries=20):
+        """keyboard and mouse to the dial; Openbox may still hold the key that started us, so
+        try again a little later (without blocking the main loop: no sleep here)"""
         seat = Gdk.Display.get_default().get_default_seat()
-        for _ in range(20):             # Openbox may still hold the key that started us
-            if seat.grab(self.get_window(), Gdk.SeatCapabilities.ALL, True,
-                         None, None, None) == Gdk.GrabStatus.SUCCESS:
-                break
-            time.sleep(0.05)
+        if seat.grab(self.get_window(), Gdk.SeatCapabilities.ALL, True,
+                     None, None, None) != Gdk.GrabStatus.SUCCESS and tries > 1:
+            GLib.timeout_add(50, lambda: self.grab(tries - 1))
         return False
 
     # -- which app goes where
@@ -685,8 +685,10 @@ class Dial(Gtk.Window):
             def work():
                 try:
                     kids = node['kids']()
-                except Exception:       # noqa: BLE001 - an unreadable folder: just empty
-                    kids = []
+                except Exception as e:  # noqa: BLE001 - say what went wrong, not an empty ring
+                    print(f'zorro-dial: {node.get("name")}: {type(e).__name__}: {e}', file=sys.stderr)
+                    kids = [dialmodes.tile('lucide:triangle-alert', 'Could not load',
+                                           str(e)[:40] or type(e).__name__, None, id=f'__err:{key}')]
                 self.kids[key] = kids
                 GLib.idle_add(lambda: self.area.queue_draw() and False)
             threading.Thread(target=work, daemon=True).start()
@@ -1224,8 +1226,11 @@ class Dial(Gtk.Window):
                         self.area.queue_draw()
                     threading.Thread(target=work, daemon=True).start()
                 else:
-                    act()
+                    # close first (input free again), then act: a slow command (a clipboard
+                    # owner that does not answer) can no longer freeze keyboard and mouse.
+                    # Not a daemon thread: the process waits for it before it ends.
                     self.close_dial()
+                    threading.Thread(target=act, daemon=False).start()
                     return
             elif a.get('kids'):         # nothing to start ("N more"): a click unfolds it
                 lv = next((sl[4] for sl in self.slots if same(sl[3], a)), None)

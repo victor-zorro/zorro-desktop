@@ -143,7 +143,7 @@ class Messages(Part):
         src = next((s for s in SOURCES if s[0] == app), None)
         if src:
             spawn(*src[3])
-        elif subprocess.run(['wmctrl', '-x', '-a', app], capture_output=True).returncode != 0:
+        elif subprocess.run(['wmctrl', '-x', '-a', app], capture_output=True, timeout=3).returncode != 0:
             spawn('gtk-launch', app.lower())
 
     def message_node(self, m):
@@ -158,7 +158,8 @@ class Messages(Part):
                         tile('lucide:app-window', f'Go to {m["src"]}'[:22], '', lambda: self.go_to(m['src']),
                              id=f'go:{m["id"]}'),
                         tile('lucide:copy', 'Copy text', text[:40],
-                             lambda: subprocess.run(['xclip', '-selection', 'clipboard'], input=text, text=True),
+                             lambda: subprocess.run(['xclip', '-selection', 'clipboard'], input=text, text=True,
+                                                    timeout=5),
                              id=f'copy:{m["id"]}'),
                         tile('lucide:trash-2', 'Dismiss', 'remove it', lambda: run('dunstctl', 'history-rm', str(m['id'])),
                              id=f'rm:{m["id"]}', keep=True, refresh=True, up=2)])
@@ -787,8 +788,8 @@ def mpris_call(name, method):
         from gi.repository import Gio
         Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
             name, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player', method, None, None, 0, 2000, None)
-    except Exception:                   # noqa: BLE001
-        pass
+    except Exception as e:              # noqa: BLE001 - the player went away: say so in the log
+        print(f'zorro-dial: {name} {method}: {e}', file=sys.stderr)
 
 
 def scapi():

@@ -326,7 +326,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   dialogs, drawing; `zsettings/pages_thinkpad.py` → printers and Bluetooth pages; the orb's
   window class out of `main()`.
 
-- [ ] **4.5 Stop hiding errors** (M)
+- [x] **4.5 Stop hiding errors** (M)
   Dialer `expand()` turns any error into an empty ring (`zorro-dial` 649); MPRIS helpers
   the same (`dialmodes.py` 725-746). Return one tile "could not load: <reason>" and print
   to stderr. Add timeouts to `wmctrl` / `xclip` calls and run tile actions off the main
