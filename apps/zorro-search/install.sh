@@ -13,7 +13,7 @@ files=(
 mkdir -p "$data" ~/.local/bin ~/.config/systemd/user
 for f in "${files[@]}"; do
     read -r name url sum <<<"$f"
-    if ! echo "$sum  $data/$name" | sha256sum -c --quiet 2>/dev/null; then
+    if ! { [ -f "$data/$name" ] && echo "$sum  $data/$name" | sha256sum -c --quiet >/dev/null 2>&1; }; then
         echo "zorro-search: downloading $name"
         curl -fsSL -o "$data/$name.part" "$url"
         echo "$sum  $data/$name.part" | sha256sum -c --quiet
