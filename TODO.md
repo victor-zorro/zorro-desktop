@@ -119,7 +119,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
 
 ## Phase 2: quick speed wins
 
-- [ ] **2.1 Login: the box waits 3.3 s even with the CRT start off** (S)
+- [x] **2.1 Login: the box waits 3.3 s even with the CRT start off** (S)
   `apps/zorro-dm/theme/js/login.js` about line 41 (`appear()`).
   Fix: expose `cfg.crt` on `FX`; wait about 500 ms when it is false.
 
@@ -164,7 +164,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   painting the full image twice per motion; don't create a cursor per motion event.
   Measure PrtSc → first draw before and after.
 
-- [ ] **2.8 Lock screen keeps animating** (S-M)
+- [x] **2.8 Lock screen keeps animating** (S-M)
   `apps/zorro-dm/theme/js/login.js` (no `FX.pause` call), `fx.js` about 861-867,
   `zorro-greeter` about 33-42.
   Fix: after 60 s without input call `FX.pause(true)`, wake on key or mouse; pass a lower

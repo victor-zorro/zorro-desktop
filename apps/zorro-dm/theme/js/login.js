@@ -38,7 +38,8 @@
   function appear() {
     if (appeared) return;
     appeared = true;
-    const wait = Math.max(0, 3300 - (performance.now() - FX.startedAt));
+    // with the CRT start the picture needs 3.3 s to settle; without it only a short fade
+    const wait = Math.max(0, (FX.crt ? 3300 : 600) - (performance.now() - FX.startedAt));
     setTimeout(() => {
       for (const el of [login, $('clock'), $('power')]) {
         el.classList.remove('hidden'); el.classList.add('appear');
@@ -129,6 +130,17 @@
       else say('');
     }
   });
+
+  // nobody there for a minute: the background stops drawing (battery, and a blanked screen)
+  let idleTimer = 0;
+  function awake() {
+    if (FX.pause) FX.pause(false);
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => FX.pause && FX.pause(true), 60000);
+  }
+  for (const ev of ['keydown', 'mousemove', 'mousedown', 'wheel', 'touchstart'])
+    document.addEventListener(ev, awake, {passive: true});
+  awake();
 
   document.addEventListener('mousedown', (e) => {
     if (!e.target.closest('button')) setTimeout(() => entry.focus(), 0);

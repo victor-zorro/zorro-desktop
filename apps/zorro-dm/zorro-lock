@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 SOCK = '/run/zorro-dm/lock.sock'
+LOCKED = os.path.join(os.environ.get('XDG_RUNTIME_DIR', '/tmp'), 'zorro-locked')   # zorro-wall pauses
 
 
 def dunst(paused):
@@ -39,6 +40,10 @@ def main():
         release_sleep()
         os.execvp('dm-tool', ['dm-tool', 'lock'])
     dunst(True)
+    try:                                # zorro-wall stops drawing while this file is there
+        open(LOCKED, 'w').close()
+    except OSError:
+        pass
     try:
         s.sendall(b'lock\n')
         for line in s.makefile():
@@ -50,6 +55,10 @@ def main():
     finally:
         release_sleep()
         dunst(False)
+        try:
+            os.unlink(LOCKED)
+        except OSError:
+            pass
 
 
 if __name__ == '__main__':

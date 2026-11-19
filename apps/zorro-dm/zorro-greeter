@@ -39,6 +39,13 @@ def look_script():
             look = {}
     except (OSError, ValueError):
         look = {}
+    try:                                # on battery: a calmer background
+        with open('/sys/class/power_supply/AC/online') as fh:
+            if fh.read().strip() == '0':
+                look['fps'] = min(float(look.get('fps') or 30), 12)
+                look['fps_min'] = min(float(look.get('fps_min') or 8), 8)
+    except OSError:
+        pass
     return 'window.ZORRO_LOOK = ' + json.dumps(look) + ';'
 
 

@@ -982,6 +982,7 @@
       if (!paused) { lastFrame = 0; raf(); }
     },
     get fps() { return curFps; },
+    get crt() { return !!cfg.crt; },        // the slow CRT start: the login box waits for it
     startedAt: START,
   };
 })();

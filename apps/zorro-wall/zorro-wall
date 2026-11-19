@@ -23,6 +23,7 @@ HERE = Path(os.path.realpath(__file__)).parent
 THEME = HERE.parent / 'zorro-dm' / 'theme'
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'zorro-wall' / 'config.json'
 LOGIN_LOOK = Path('/etc/zorro-dm/look.json')
+LOCKED = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-locked'    # written by zorro-lock
 
 DEFAULTS = {
     'enabled': True,
@@ -139,8 +140,16 @@ class Wall(Gtk.Window):
         self.view.evaluate_javascript(code, -1, None, None, None, None, None)
 
     def on_visibility(self, _w, ev):
-        self.js(f'window.FX && FX.pause({"true" if ev.state == Gdk.VisibilityState.FULLY_OBSCURED else "false"})')
+        self.obscured = ev.state == Gdk.VisibilityState.FULLY_OBSCURED
+        self.set_pause()
         return False
+
+    def set_pause(self):
+        """no drawing while windows cover it or the screen is locked (zorro-lock's flag)"""
+        on = getattr(self, 'obscured', False) or LOCKED.exists()
+        if on != getattr(self, 'paused', None):
+            self.paused = on
+            self.js(f'window.FX && FX.pause({"true" if on else "false"})')
 
     def check(self):
         """settings changed, login look changed, or charger plugged / unplugged"""
@@ -151,6 +160,7 @@ class Wall(Gtk.Window):
             except OSError:
                 stamp.append(None)
         stamp.append(on_battery())
+        self.set_pause()
         if stamp != self.stamp:
             self.stamp = stamp
             self.conf = load_conf()
