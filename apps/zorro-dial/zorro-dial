@@ -73,7 +73,10 @@ DEFAULTS = {
                                           'FileTransfer', 'Monitor', 'HardwareSettings']},
     ],
     'ring_slots': [3, 4, 6],        # at most this many apps per slice on each ring
-    'anchor': 'orb',                # orb: fans out from the info circle's clock; centre
+    'anchor': 'orb',                # orb: around the info circle; bottom-right / bottom-left /
+                                    # top-right / top-left: its own clock in that corner; centre
+    'size': 1.0,                    # the rings' width (0.7 .. 1.6)
+    'icon_size': 1.0,               # the icons (0.7 .. 1.6)
     'notes_hide_vaults': [],        # Obsidian vaults left out of the Notes part (paths)
     'preview_size': 460,            # width of the file preview panel (pixels; height ~ 0.78x)
     'order': {},                    # slice name -> app ids in the order you dragged them
@@ -130,6 +133,19 @@ def save_arrangement(order, assign):
         user = {}
     user['order'] = order
     user['assign'] = {**user.get('assign', {}), **assign}
+    CONF.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONF.with_suffix('.tmp')
+    tmp.write_text(json.dumps(user, indent=2))
+    tmp.replace(CONF)
+
+
+def save_hidden(hide):
+    """write the apps left out of the launcher, keeping everything else in the config"""
+    try:
+        user = json.loads(CONF.read_text())
+    except (OSError, ValueError):
+        user = {}
+    user['hide'] = hide
     CONF.parent.mkdir(parents=True, exist_ok=True)
     tmp = CONF.with_suffix('.tmp')
     tmp.write_text(json.dumps(user, indent=2))
@@ -539,7 +555,15 @@ class Dial(Gtk.Window):
         orb: the hub is the info circle's clock and the rings fan out from its corner into
         the screen (120 degrees); centre: full circle in the middle of the screen."""
         W, H = self.geo.width, self.geo.height
-        if self.conf.get('anchor') == 'orb':
+        u = self.dial_scale()
+        anchor = self.conf.get('anchor')
+        corners = {'bottom-right': 225, 'bottom-left': 315, 'top-right': 135, 'top-left': 45}
+        if anchor in corners:               # its own clock in that corner, the fan into the screen
+            hub, m = 96 * u, 40
+            cx = m + hub if 'left' in anchor else W - m - hub
+            cy = m + hub if 'top' in anchor else H - m - hub
+            a0, a1 = corners[anchor] - 60, corners[anchor] + 60
+        elif anchor == 'orb':
             if not hasattr(self, '_orb'):
                 self._orb = orb_conf()      # read once: fan() runs on every draw and mouse move
             orb = self._orb
@@ -550,14 +574,14 @@ class Dial(Gtk.Window):
             hub = d / 2
             a0, a1 = mid - 60, mid + 60
         else:
-            cx, cy, hub, a0, a1 = W / 2, H / 2, 86, -90, 270
-        rings = [(hub + 12, hub + 96), (hub + 96, hub + 180), (hub + 180, hub + 270)]
+            cx, cy, hub, a0, a1 = W / 2, H / 2, 86 * u, -90, 270
+        rings = self.base_rings(hub, u)
         if self.mode == 'apps' and not self.filter and self.expanded is None:
             # more apps than three rings hold: the dial grows outward, as far as the screen allows
             room = min(max(cx, W - cx), max(cy, H - cy)) - 60
             for _ in range(self.app_rings(hub, a0, a1, room) - 3):
                 ro = rings[-1][1]
-                rings.append((ro, ro + 84))
+                rings.append((ro, ro + 84 * u))
         return cx, cy, hub, a0, a1, rings
 
     def app_rings(self, hub, a0, a1, room):
@@ -568,18 +592,35 @@ class Dial(Gtk.Window):
         if getattr(self, '_app_rings', (None,))[0] == key:
             return self._app_rings[1]
         span = (a1 - a0) / max(1, len(groups))
-        rings = [(hub + 12, hub + 96), (hub + 96, hub + 180), (hub + 180, hub + 270)]
-        while rings[-1][1] + 84 <= room and any(
+        u = self.dial_scale()
+        rings = self.base_rings(hub, u)
+        while rings[-1][1] + 84 * u <= room and any(
                 len(g) > sum(self.ring_cap(k, (ri + ro) / 2, span) for k, (ri, ro) in enumerate(rings))
                 for g in groups):
-            rings.append((rings[-1][1], rings[-1][1] + 84))
+            rings.append((rings[-1][1], rings[-1][1] + 84 * u))
         self._app_rings = (key, len(rings))
         return len(rings)
 
+    def dial_scale(self):
+        """Zorro app → Desktop → Dialer → Size: the rings' width"""
+        try:
+            return min(1.6, max(0.7, float(self.conf.get('size', 1.0))))
+        except (TypeError, ValueError):
+            return 1.0
+
+    def icon_scale(self):
+        try:
+            return min(1.6, max(0.7, float(self.conf.get('icon_size', 1.0))))
+        except (TypeError, ValueError):
+            return 1.0
+
     @staticmethod
-    def ring_size(k):
+    def base_rings(hub, u):
+        return [(hub + 12 * u, hub + 96 * u), (hub + 96 * u, hub + 180 * u), (hub + 180 * u, hub + 270 * u)]
+
+    def ring_size(self, k):
         """icon size on ring k (the outer rings all small)"""
-        return (44, 36, 30)[min(k, 2)]
+        return (44, 36, 30)[min(k, 2)] * self.icon_scale()
 
     def ring_cap(self, k, rm, span):
         size = self.ring_size(k)
@@ -635,6 +676,7 @@ class Dial(Gtk.Window):
         self.draw_preview(cr)
         am = math.radians((a0 + a1) / 2)
         if self.drag:
+            self.draw_bin(cr, self.drag[1], self.drag[2])
             a, x, y = self.drag
             pb = self.icon(a, 44)
             cr.new_path()
@@ -936,13 +978,13 @@ class Dial(Gtk.Window):
             lv = start + k
             ri, ro = rings[k]
             rm = (ri + ro) / 2
-            size = (30, 27, 25)[k]
+            size = (30, 27, 25)[k] * self.icon_scale()
             # names in the first ring only where icons repeat (a row of the same folder icon:
             # the notebooks); unique icons speak for themselves, their name shows on hover
             icons = [t.get('icon') for t in items]
             twins = {i for i in icons if icons.count(i) > 1}
             named = k > 0 or bool(twins)
-            step = math.degrees((74 if k > 0 else 58 if named else 44) / rm)
+            step = math.degrees((74 if k > 0 else 58 if named else 44) * self.icon_scale() / rm)
             cap = max(2, int((a1 - a0 - 4) / step))
             items = list(items)
             if len(items) > cap:                   # never dropped silently: "N more" unfolds the rest
@@ -1020,7 +1062,7 @@ class Dial(Gtk.Window):
         """a part's three rings of tiles: icon, label, and an optional value ring"""
         for k, ((ri, ro), row) in enumerate(zip(rings, rows)):
             rm = (ri + ro) / 2
-            size = (40, 34, 30)[k]
+            size = (40, 34, 30)[min(k, 2)] * self.icon_scale()
             for j, t in enumerate(row):
                 am = math.radians(a0 + (a1 - a0) * (j + 0.5) / len(row))
                 x, y = cx + math.cos(am) * rm, cy + math.sin(am) * rm
@@ -1197,8 +1239,47 @@ class Dial(Gtk.Window):
             if same(self.hit(ev.x, ev.y), press[0]):
                 self.activate(press[0])
             return
-        self.drop(drag[0], ev.x, ev.y)
+        if self.over_bin(ev.x, ev.y):
+            self.hide_app(drag[0])
+        else:
+            self.drop(drag[0], ev.x, ev.y)
         self.area.queue_draw()
+
+    # -- the bin: drop an app on it and it leaves the launcher (typing still finds it)
+    def bin_at(self):
+        """the bin's centre: the top-left corner, or top-right when the dial sits top-left"""
+        W = self.geo.width
+        return (W - 70, 70) if self.conf.get('anchor') == 'top-left' else (70, 70)
+
+    def over_bin(self, x, y):
+        bx, by = self.bin_at()
+        return (x - bx) ** 2 + (y - by) ** 2 <= 48 ** 2
+
+    def draw_bin(self, cr, x, y):
+        bx, by = self.bin_at()
+        hot = self.over_bin(x, y)
+        cr.new_path()
+        cr.arc(bx, by, 40, 0, 2 * math.pi)
+        cr.set_source_rgba(*(RED if hot else (1, 1, 1)), 0.25 if hot else 0.06)
+        cr.fill()
+        self.chroma_circle(cr, bx, by, 40, alpha=0.9 if hot else 0.4)
+        pb = self.lucide('trash-2', 30, 0.95 if hot else 0.6)
+        if pb:
+            Gdk.cairo_set_source_pixbuf(cr, pb, bx - 15, by - 15)
+            cr.paint()
+        self.text(cr, 'out of the launcher' if hot else 'drop here to remove', bx, by + 58, 8,
+                  bold=hot, alpha=0.9 if hot else 0.5, split=0)
+
+    def hide_app(self, a):
+        """the app leaves the slices (Zorro app → Desktop → Dialer → Apps brings it back)"""
+        for g in self.groups:
+            if a in g:
+                g.remove(a)
+        hide = list(self.conf.get('hide', []))
+        if a['id'] not in hide:
+            hide.append(a['id'])
+        self.conf['hide'] = hide
+        save_hidden(hide)
 
     def drop(self, a, x, y):
         """put the dragged app before the app it was dropped on, or at the end of the slice"""

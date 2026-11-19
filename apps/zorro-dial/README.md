@@ -49,3 +49,11 @@ The app launcher (called the Dialer): a dial around a clock, in the Chromatic se
 signals it and a fresh dial is on screen in ~0.1 s (without the daemon ~0.3 s; Super still works
 without it). After changing the code: log out and in, or `pkill -f 'zorro-dial --daemon'` and
 start it again.
+
+**Place and size** (Zorro app → Desktop → Dialer → Place): around the info circle's clock, in
+any corner (with its own clock there) or as a full circle in the middle; Dialer size and Icon
+size 70-160%.
+
+**Apps you never use**: drag one onto the bin that shows in the top-left corner while you drag
+(top-right when the Dialer sits top-left); it leaves the slices, typing still finds it. Zorro app
+→ Desktop → Dialer → Apps lists every app with a tick box to bring it back (or take it out).

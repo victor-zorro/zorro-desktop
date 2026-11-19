@@ -393,22 +393,33 @@ class DesktopPages:
             return box
         c = dial.load_conf()
 
-        def save(order=None):
-            # the dial writes the dragged order itself: keep what it wrote meanwhile
+        def save(order=None, hide=None):
+            # the dial writes the dragged order and its bin itself: keep what it wrote meanwhile
             now = dial.load_conf()
             c['order'] = now.get('order', {}) if order is None else order
+            c['hide'] = now.get('hide', []) if hide is None else hide
             c['notes_hide_vaults'] = now.get('notes_hide_vaults', [])     # set in Accounts → Obsidian
             write_atomic(dial.CONF, json.dumps(c, indent=2) + '\n')
 
         box.add(heading('Where the dialer opens', 'Place'))
         place = Gtk.ComboBoxText(halign=Gtk.Align.START)
-        place.append('orb', 'Fanning out from the clock (info circle)')
-        place.append('centre', 'A full circle in the middle of the screen')
+        for k, label in (('orb', 'Around the info circle\'s clock'),
+                         ('bottom-right', 'Bottom right corner'), ('bottom-left', 'Bottom left corner'),
+                         ('top-right', 'Top right corner'), ('top-left', 'Top left corner'),
+                         ('centre', 'A full circle in the middle of the screen')):
+            place.append(k, label)
         place.set_active_id(c.get('anchor', 'orb'))
         place.connect('changed', lambda w: (c.__setitem__('anchor', w.get_active_id()), save()))
-        box.add(place)
+        sizes = ui.form([
+            ('Place', place),
+            ('Dialer size', ui.scale(0.7, 1.6, 0.05, c.get('size', 1.0),
+                                     lambda v: (c.__setitem__('size', v), save()), lambda v: f'{v * 100:.0f}%')),
+            ('Icon size', ui.scale(0.7, 1.6, 0.05, c.get('icon_size', 1.0),
+                                   lambda v: (c.__setitem__('icon_size', v), save()), lambda v: f'{v * 100:.0f}%'))])
+        box.add(sizes)
         box.add(note('From the clock, the rings fan into the screen: the apps you use most '
-                     'sit right next to the clock, the outer rings hold more.'))
+                     'sit right next to the clock, the outer rings hold more. In a corner the '
+                     'Dialer has its own clock. Takes effect the next time it opens.'))
         box.add(heading('Slices (up to six)', 'Slices'))
         g = Gtk.Grid(column_spacing=10, row_spacing=6)
         g.attach(Gtk.Label(label='Name', xalign=0), 0, 0, 1, 1)
@@ -433,9 +444,24 @@ class DesktopPages:
         box.add(note('An app goes to the slice you chose for it (Apps), else to the first '
                      'slice whose categories match its .desktop file, else the last slice.'))
 
-        box.add(heading('Which slice each app is in', 'Apps'))
+        box.add(heading('Apps in the launcher', 'Apps'))
+        box.add(note('Untick what you never start from the Dialer: it leaves the slices (typing its '
+                     'name still finds it). In the Dialer: drag an app onto the bin in the corner.'))
         grid = Gtk.Grid(column_spacing=10, row_spacing=4)
-        for i, a in enumerate(sorted(dial.apps(), key=lambda a: a['name'].lower())[:40]):
+        hidden = set(c.get('hide', []))
+
+        def shown(w, app):
+            now = list(dial.load_conf().get('hide', []))      # the bin may have added some
+            if w.get_active():
+                now = [x for x in now if x != app]
+            elif app not in now:
+                now.append(app)
+            save(hide=now)
+        for i, a in enumerate(sorted(dial.apps(), key=lambda a: a['name'].lower())):
+            on = Gtk.CheckButton(active=a['id'] not in hidden)
+            on.set_tooltip_text('In the launcher')
+            on.connect('toggled', shown, a['id'])
+            grid.attach(on, 0, i, 1, 1)
             cb = Gtk.ComboBoxText()
             cb.append('', 'automatic')
             for s in c['slices']:
@@ -450,9 +476,9 @@ class DesktopPages:
                     c.setdefault('assign', {}).pop(app, None)
                 save()
             cb.connect('changed', pick)
-            grid.attach(Gtk.Label(label=a['name'], xalign=0, ellipsize=3, max_width_chars=24),
-                        (i % 2) * 2, i // 2, 1, 1)
-            grid.attach(cb, (i % 2) * 2 + 1, i // 2, 1, 1)
+            grid.attach(Gtk.Label(label=a['name'], xalign=0, ellipsize=3, max_width_chars=32,
+                                  hexpand=True), 1, i, 1, 1)
+            grid.attach(cb, 2, i, 1, 1)
         box.add(grid)
 
         box.add(heading('Rings', 'Rings'))
