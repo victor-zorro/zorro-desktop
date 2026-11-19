@@ -296,21 +296,28 @@ class FaceCheck:
         return bool(on and user and os.access(FACE, os.X_OK)
                     and os.path.exists(f'{FACE_DATA}/{user}.npy'))
 
+    WHY = {1: 'face not recognised', 2: 'no face learned for this user',
+           3: 'camera not found', 4: 'camera light not working'}
+
     def run(self):
-        ok = False
+        rc = None
         try:
             self.proc = subprocess.Popen([FACE, 'verify', self.user, '--timeout', '7'],
                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            killer = threading.Timer(12, self.stop)      # verify stops itself at 7 s; never wait forever
+            killer.daemon = True
+            killer.start()
             for _line in self.proc.stdout:
                 pass
-            ok = self.proc.wait() == 0
+            rc = self.proc.wait()
+            killer.cancel()
         except OSError as e:
             log('face check failed:', e)
         self.done = True
-        if ok:
+        if rc == 0:
             self.dm.events.put(('face_ok', self.rnd, self))
         else:
-            self.dm.send(type='face', state='fail')
+            self.dm.send(type='face', state='fail', why=self.WHY.get(rc, 'face check stopped'))
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -434,7 +441,10 @@ class DM:
 
         def look():
             nonlocal face, face_at
-            if not face_user or (face and not face.done) or time.monotonic() - face_at < 1:
+            if face and not face.done:
+                return                  # still looking: its answer comes
+            if not face_user or time.monotonic() - face_at < 1:
+                self.send(type='face', state='fail', why='')    # the page waits for an answer
                 return
             face_at = time.monotonic()
             face = FaceCheck(self, rnd, face_user)

@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import numpy as np
@@ -140,11 +141,14 @@ class Camera:
             buf += chunk
         return np.frombuffer(buf, np.uint8).reshape(H, W)
 
-    def pairs(self):
+    def pairs(self, until=None):
         """(lit, dark) for every two neighbouring frames that differ: the IR light flashes on
-        every other frame. Same-brightness neighbours (a dropped frame) are skipped."""
+        every other frame. Same-brightness neighbours (a dropped frame) are skipped.
+        Stops at time.time() >= until, also when no pair comes (the light is not flashing)."""
         prev = self.frame()
         while prev is not None:
+            if until and time.time() >= until:
+                return
             cur = self.frame()
             if cur is None:
                 return
@@ -263,15 +267,20 @@ def verify(user, timeout=6.0):
     if not dev:
         say('no camera')
         return 3
-    emitter(dev)
+    if not emitter(dev):
+        say('no camera light')
+        return 4
     c = conf()
-    faces, hits, t0 = Faces(), 0, time.time()
+    t0 = time.time()
+    faces, hits = Faces(), 0
     cam = Camera(dev)
+    # a camera that stops sending frames would block a read forever: stop ffmpeg at the end
+    watchdog = threading.Timer(timeout + 1, cam.p.kill)
+    watchdog.daemon = True
+    watchdog.start()
     say('looking')
     try:
-        for lit, dark in cam.pairs():
-            if time.time() - t0 > timeout:
-                break
+        for lit, dark in cam.pairs(until=t0 + timeout):
             e, why = faces.look(lit, dark)
             if e is None:
                 continue
@@ -284,6 +293,7 @@ def verify(user, timeout=6.0):
             else:
                 hits = 0
     finally:
+        watchdog.cancel()
         cam.close()
     say('no match')
     return 1

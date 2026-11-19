@@ -119,12 +119,14 @@
     setTimeout(() => entry.focus(), 0);
   });
   window.addEventListener('zorroface', (e) => {
-    const st = e.detail;
+    const m = typeof e.detail === 'string' ? {state: e.detail} : e.detail;
+    const st = m.state;
     if (st === 'available') face.hidden = false;
     else if (st === 'none') face.hidden = true;
-    else if (st === 'fail') {
+    if (st === 'fail' || st === 'none') {
       face.classList.remove('looking');
-      say('face not recognised', true);
+      if (m.why !== '') say(m.why || 'face not recognised', true);
+      else say('');
     }
   });
 

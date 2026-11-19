@@ -67,7 +67,7 @@ SHIM = r"""
   window.__zorro = (m) => {
     if (m.type === 'prompt') L.show_prompt._emit(m.text, m.secret ? 1 : 0);
     else if (m.type === 'message') L.show_message._emit(m.text, m.error ? 1 : 0);
-    else if (m.type === 'face') window.dispatchEvent(new CustomEvent('zorroface', {detail: m.state}));
+    else if (m.type === 'face') window.dispatchEvent(new CustomEvent('zorroface', {detail: m}));
     else if (m.type === 'complete') {
       L.in_authentication = false; L.is_authenticated = !!m.ok;
       L.authentication_complete._emit();

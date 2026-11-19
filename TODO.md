@@ -52,7 +52,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: before sending SIGTERM, check `/proc/<pid>/cmdline` contains `zorro-dial`; else ignore
   and overwrite the pid file.
 
-- [ ] **1.5 Face unlock: verify can hang forever** (S)
+- [x] **1.5 Face unlock: verify can hang forever** (S)
   `apps/zorro-face/zorro-face` about lines 143-154, 266-274; `apps/zorro-dm/zorro-dm`
   `FaceCheck.run` about 302-306.
   The timeout is only checked when a lit/dark frame pair arrives. With no IR flash no pair
@@ -60,7 +60,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: check the deadline on every frame; return "no camera light" when `emitter()` fails
   (its result is ignored now); kill the child from `FaceCheck.run` after about 10 s.
 
-- [ ] **1.6 Face unlock: a refused press leaves the icon stuck, wrong messages** (S)
+- [x] **1.6 Face unlock: a refused press leaves the icon stuck, wrong messages** (S)
   `apps/zorro-dm/zorro-dm` `look()` about 435-440 and 313; `theme/js/login.js` about 116.
   `look()` returns silently when it refuses; the page has already set `looking` and ignores
   further clicks. Every failure says "face not recognised", also exit codes 2 (not enrolled)
