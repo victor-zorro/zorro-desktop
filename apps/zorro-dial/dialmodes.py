@@ -274,7 +274,7 @@ class System(Part):
         g = [tile('lucide:battery-full', f'Battery {self.bat}%' if self.bat is not None else 'Battery',
                   self.bat_status, lambda: spawn('zorro-settings', '--page', 'power:0'),
                   value=(self.bat or 0) / 100),
-             tile('lucide:wifi', 'Wi-Fi' + (f' {self.wifi_sig}%' if self.wifi_sig else ''), '',
+             tile('lucide:signal', 'Signal' + (f' {self.wifi_sig}%' if self.wifi_sig else ''), 'Wi-Fi',
                   lambda: spawn('zorro-settings', '--page', 'wifi:0'), value=(self.wifi_sig or 0) / 100),
              tile('lucide:activity', f'CPU {self.cpu * 100:.0f}%', '', lambda: spawn('x-terminal-emulator', '-e', 'htop'),
                   value=self.cpu),
@@ -289,7 +289,7 @@ class System(Part):
               tile('lucide:bell', 'Do not disturb', 'on' if self.dnd else 'off', lambda: self.toggle('dnd'),
                    lit=self.dnd, keep=True)]
         pw = [tile('lucide:lock', 'Lock', '', lambda: spawn('loginctl', 'lock-session')),
-              tile('lucide:power', 'Sleep', '', lambda: spawn('systemctl', 'suspend')),
+              tile('lucide:moon', 'Sleep', '', lambda: spawn('systemctl', 'suspend')),
               tile('lucide:log-out', 'Log out', '', lambda: spawn('openbox', '--exit'), confirm=True),
               tile('lucide:rotate-ccw', 'Restart', '', lambda: spawn('systemctl', 'reboot'), confirm=True),
               tile('lucide:power', 'Power off', '', lambda: spawn('systemctl', 'poweroff'), confirm=True),

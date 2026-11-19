@@ -529,13 +529,23 @@ class Dial(Gtk.Window):
             if pb:
                 Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
                 cr.paint()
-        self.text(cr, 'type to search · drag to rearrange · Enter starts · Esc closes'
-                  if self.mode == 'apps' else
-                  'rest on something: it opens in the next ring · hold Super: at once · Esc: one back'
-                  if getattr(self.parts.get(self.mode), 'tree', False) else
-                  'click a part of the circle: it stays · Esc: back to apps',
-                  cx + math.cos(am) * (outer + 115), cy + math.sin(am) * (outer + 115), 9,
-                  bold=False, alpha=0.5, split=0)
+        hx, hy = cx + math.cos(am) * (outer + 115), cy + math.sin(am) * (outer + 115)
+        # on a small screen the hint would fall off the edge: keep it inside
+        hx = min(max(hx, 380), self.geo.width - 380)
+        hy = min(max(hy, 30), self.geo.height - 30)
+        if self.filter:                 # what you type, in full (the end of it if long)
+            shown = self.filter if len(self.filter) <= 48 else '…' + self.filter[-47:]
+            what = {'notes': 'notes', 'music': 'SoundCloud'}.get(self.mode, 'apps')
+            self.text(cr, f'search {what}:  {shown}' + ('▏' if int(time.time() * 2) % 2 else ' '),
+                      hx, hy, 11, bold=True, alpha=0.95, split=1.0)
+        else:
+            search = {'notes': 'type: search notes · ', 'music': 'type: search SoundCloud · '}.get(self.mode, '')
+            self.text(cr, 'type to search · drag to rearrange · Enter starts · Esc closes'
+                      if self.mode == 'apps' else
+                      search + 'rest on something: it opens in the next ring · Esc: one back'
+                      if getattr(self.parts.get(self.mode), 'tree', False) else
+                      'click a part of the circle: it stays · Esc: back to apps',
+                      hx, hy, 9, bold=False, alpha=0.5, split=0)
         return False
 
     def draw_hub(self, cr, cx, cy, hub):
@@ -606,11 +616,11 @@ class Dial(Gtk.Window):
                 block.append((f'click: {c[0]}', 8 * k, False, 0.9 if self.hub_hover == 'centre' else 0.5))
             self.text_block(cr, cx, cy, block)
             return
-        label = (f'“{self.filter}”' if self.filter else 'Settings' if self.expanded == 'gear' else
+        label = ((f'“{self.filter}”' if len(self.filter) <= 20 else f'“…{self.filter[-19:]}”') if self.filter else 'Settings' if self.expanded == 'gear' else
                  self.conf['slices'][self.expanded]['name'] if self.expanded is not None else
                  time.strftime('%A %-d %B'))
         self.text_block(cr, cx, cy, [(time.strftime('%H:%M'), max(14, 26 * k), True, 1),
-                                     (label[:22], max(8, 10 * k), False, 0.9)])
+                                     (label[:23], max(8, 10 * k), False, 0.9)])
 
     MUSIC_KEYS = (('skip-back', 'prev', -42), ('play', 'toggle', -14), ('square', 'stop', 14),
                   ('skip-forward', 'next', 42))
@@ -809,8 +819,8 @@ class Dial(Gtk.Window):
             ri, ro = rings[k]
             rm = (ri + ro) / 2
             size = (30, 27, 25)[k]
-            # room per item: the first ring is icons only (a name on hover), the others have names
-            step = math.degrees((44 if k == 0 else 74) / rm)
+            # room per item: the first ring has short names (the full one on hover), the others full
+            step = math.degrees((58 if k == 0 else 74) / rm)
             cap = max(2, int((a1 - a0 - 4) / step))
             items = list(items)
             if len(items) > cap:                   # never dropped silently: "N more" unfolds the rest
@@ -876,10 +886,13 @@ class Dial(Gtk.Window):
                     if ch:
                         Gdk.cairo_set_source_pixbuf(cr, ch, x + size * 0.55, y - size * 0.75)
                         cr.paint()
-                if k > 0 or is_open or hov:
-                    name = t['name'] if (is_open or hov) else (t['name'][:13] + '…' if len(t['name']) > 14 else t['name'])
-                    self.text(cr, name[:22], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
-                              alpha=0.9, split=0.8 if is_open else 0)
+                # a name under every tile (a row of the same folder icon says nothing); short in
+                # the first ring, where they sit closest
+                cut = 8 if k == 0 else 13
+                name = t['name'] if (is_open or hov) else \
+                    (t['name'][:cut] + '…' if len(t['name']) > cut + 1 else t['name'])
+                self.text(cr, name[:22], x, y + size * 0.7 + 8, 8, bold=is_open or hov,
+                          alpha=0.9, split=0.8 if is_open else 0)
             parent_angle, parent_r = next_angle, rm
 
     def draw_tiles(self, cr, cx, cy, rings, a0, a1, rows):

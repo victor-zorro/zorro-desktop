@@ -269,7 +269,9 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   c) One `--edge` margin for clock and power buttons (40/32 vs 32/26 now), one `.caption`
      class, one `--split`; face icon about 40 px with reserved space.
 
-- [ ] **3.6 Dialer arrangement** (S-M)
+- [x] **3.6 Dialer arrangement** (S-M)
+  Done: a, b, d; for c only the hint is kept on screen. Full scaling with one unit `u` is
+  still open (needs testing on a small screen / the VM).
   `apps/zorro-dial/zorro-dial`.
   a) Always draw a short label in the first ring (about line 847).
   b) A fixed search line with a caret showing the end of the text, and a per-part hint
