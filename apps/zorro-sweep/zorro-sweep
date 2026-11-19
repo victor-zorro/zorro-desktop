@@ -186,16 +186,20 @@ class Vault:
         self.stats = {'deleted': 0, 'moved': 0, **st.get('stats', {})}
         self.files = {}                          # lower-case name: path, for pictures and pdfs
         self.uses = {}                           # lower-case name: set of notes that link to it
+        ages = {}
         for p in self.path.rglob('*'):
             rel = p.relative_to(self.path)
             if rel.parts[0].startswith('.') or not p.is_file():
                 continue
             if p.suffix.lower() == '.md':
-                for r in refs(self.read(p)):
+                text = self.read(p)
+                for r in refs(text):
                     self.uses.setdefault(r, set()).add(p)
+                if p.parent == self.path:        # a note to scan: its date, from the same read
+                    ages[p] = when(front(text[:600])[0], p)
             else:
                 self.files.setdefault(p.name.lower(), p)
-        self.notes = sorted((p for p in self.path.glob('*.md')), key=self.age)
+        self.notes = sorted(self.path.glob('*.md'), key=lambda p: ages[p] if p in ages else self.age(p))
 
     @staticmethod
     def read(p):
@@ -477,6 +481,7 @@ class Sweep(Gtk.Window):
         return todo
 
     def next_card(self):
+        self._counts = None                 # something changed: count again
         q = self.queue()
         if not q and self.skipped:          # all seen: the skipped ones come round again
             self.skipped.clear()
@@ -509,6 +514,7 @@ class Sweep(Gtk.Window):
         return self.v.sorted_count() // ROUND + 1
 
     def update_count(self):
+        self._counts = None
         left = len(self.v.to_scan())
         st = self.v.stats
         self.count.set_text(f'{left} left to scan · {st["deleted"]} deleted · {self.v.sorted_count()} sorted')
@@ -1331,6 +1337,20 @@ class Sweep(Gtk.Window):
             self.draw_banner(cr, W, H, now)
         return False
 
+    def score_counts(self):
+        """the numbers of the score bar; counted once per card, not on every frame (each count
+        looks at every note on disk)"""
+        if getattr(self, '_counts', None) is None:
+            v = self.v
+            left = len(v.to_scan())
+            live = {p.name for p in v.path.glob('*.md')}
+            todo = {p.name for p in self.queue()} | {p.name for p in self.skipped} \
+                if self.mode == 'sort' else set()
+            self._counts = {'left': left, 'todo': len(todo),
+                            'total': left + v.stats['deleted'] + v.stats['moved']
+                            + len((v.kept | v.stays) & live)}
+        return self._counts
+
     def draw_score(self, cr, W):
         """round, the pips of this round, how much of the vault is scanned"""
         v = self.v
@@ -1338,10 +1358,10 @@ class Sweep(Gtk.Window):
         self.text(cr, f'ROUND {self.round()}', 24, 8, 12, FG, bold=True)
         self.text(cr, 'SORT' if sort else 'KEEP OR DELETE', 24, 28, 8, CYAN if sort else DIM)
         # pips: sweep = kept so far this round; sort = sorted of this round
+        c = self.score_counts()
         if sort:
-            todo = {p.name for p in self.queue()} | {p.name for p in self.skipped}
-            n = max(len(v.batch), 1) if v.batch else len(todo)
-            done = n - len(todo) if v.batch else 0
+            n = max(len(v.batch), 1) if v.batch else c['todo']
+            done = n - c['todo'] if v.batch else 0
         else:
             n, done = ROUND, min(len(v.batch), ROUND)
         n = max(n, 1)
@@ -1358,9 +1378,7 @@ class Sweep(Gtk.Window):
                 cr.set_line_width(1)
                 cr.stroke()
         # the whole vault: scanned / total
-        left = len(v.to_scan())
-        live = {p.name for p in v.path.glob('*.md')}
-        total = left + v.stats['deleted'] + v.stats['moved'] + len((v.kept | v.stays) & live)
+        left, total = c['left'], c['total']
         frac = 1 - left / total if total else 1
         self.text(cr, f'{left} to scan', W - 24, 8, 12, FG, bold=True, align='right')
         self.text(cr, f'{frac * 100:.0f}% of {total} scanned', W - 24, 28, 8, DIM, align='right')

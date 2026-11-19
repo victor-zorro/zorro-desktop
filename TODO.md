@@ -136,13 +136,13 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: fetch on first hover / click of the hub sector; start eager ones from `GLib.idle_add`
   after the first frame.
 
-- [ ] **2.4 Sweep notes: file checks on every frame** (S)
+- [x] **2.4 Sweep notes: file checks on every frame** (S)
   `apps/zorro-sweep/zorro-sweep` — `draw_score` calls `self.queue()` and `v.to_scan()`
   (about lines 1342, 1361); both `stat` every note (about 2,000) per drawn frame.
   Fix: keep the counts in attributes, recomputed in `next_card()` and after keep / delete /
   send / undo / vault change. `draw_score` only reads them.
 
-- [ ] **2.5 Sweep notes: each note read twice at start** (S)
+- [x] **2.5 Sweep notes: each note read twice at start** (S)
   `apps/zorro-sweep/zorro-sweep` `Vault.__init__` (about 189-198).
   The `rglob` loop reads every `.md` for its links, then `sorted(..., key=self.age)` reads
   the root notes again.
