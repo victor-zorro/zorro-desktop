@@ -105,8 +105,11 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
         outer.add(self.top)
         self.add(outer)
         if zorro_fx:
-            self.bg_snow = Snow(outer, radius=0, fps=24, max_parts=1500, profile='app',
+            self.bg_snow = Snow(outer, radius=0, fps=12, max_parts=1500, profile='app',
                                 enabled=lambda: zorro_fx.settings('app')['enabled'])
+            # a calm 12 fps while you use the window, still while another window is in front
+            self.connect('notify::is-active',
+                         lambda w, _p: self.bg_snow.set_fps(12 if w.is_active() else 0))
             css = Gtk.CssProvider()
             css.load_from_data(b'''
                 window.zfx-app scrolledwindow, window.zfx-app viewport,
@@ -114,7 +117,7 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Desktop
                 window.zfx-app list row:not(:selected) { background: none; }''')
             Gtk.StyleContext.add_provider_for_screen(
                 self.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-            self.timers.append(GLib.timeout_add(300, self.follow_app_bg))
+            self.timers.append(GLib.timeout_add(1000, self.follow_app_bg))
         self.show_all()
         if select:
             self.show_page(select)

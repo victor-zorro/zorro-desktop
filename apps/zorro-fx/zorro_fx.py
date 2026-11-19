@@ -282,6 +282,14 @@ class Snow:
             GLib.source_remove(self.timer)
             self.timer = None
 
+    def set_fps(self, fps):
+        """a new pace; 0 holds the particles still (e.g. while the window is in the back)"""
+        self.stop()
+        if fps > 0:
+            self.fps = fps
+            if self.widget.get_mapped():
+                self.start()
+
     def tick(self):
         from gi.repository import GLib
         on = self.enabled is None or self.enabled()
