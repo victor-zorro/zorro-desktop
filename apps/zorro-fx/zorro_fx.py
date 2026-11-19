@@ -50,7 +50,7 @@ PATTERNS = {
     'swirl': 'Swirling around the middle',
     'twinkle': 'Twinkling stars',
 }
-GREY, CYAN, RED, WHITE = (0.60, 0.60, 0.63), (0.10, 0.90, 1.0), (1.0, 0.16, 0.29), (0.94, 0.94, 0.96)
+from zorro_style import CYAN, GREY, RED, WHITE  # noqa: E402 - the one palette (zorro_style.py)
 COLOURS = {                 # name: (label, colours picked at random per particle)
     'snow': ('Lock screen grey', [GREY]),
     'white': ('White', [WHITE]),

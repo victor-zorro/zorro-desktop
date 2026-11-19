@@ -49,7 +49,12 @@ HINT = {'straight': 'look straight at the screen', 'left': 'turn your head a lit
         'right': 'turn your head a little to the right', 'up': 'tilt your head up a little',
         'down': 'tilt your head down a little'}
 STRANGER, SAME = 0.25, 0.80     # SFace: a stranger scores about this, you yourself about this
-BG = (0.02, 0.025, 0.035)
+sys.path.insert(0, str(HERE.parent / 'zorro-fx'))
+try:                            # the one palette (apps/zorro-fx/zorro_style.py)
+    from zorro_style import BG, CYAN, DIM, FG, FONT, RED
+except ImportError:
+    BG, FG, DIM = (0.02, 0.027, 0.039), (0.847, 0.847, 0.871), (0.435, 0.439, 0.475)
+    RED, CYAN, FONT = (1.0, 0.165, 0.29), (0.098, 0.902, 1.0), 'DejaVu Sans Mono'
 LINE = (0.55, 0.85, 1.0)        # cyan-white wireframe
 
 
@@ -452,7 +457,7 @@ class View(Gtk.Window):
         shown = int(len(grid) * frac)
         fshown = int(len(feats) * min(1.0, frac * 3))           # the features come first
         slice_y = by + bh * ((time.time() * 7.3) % 1.0)
-        passes = [((1.0, 0.16, 0.29), -4 * g, 0.55 * g), ((0.10, 0.90, 1.0), 4 * g, 0.55 * g),
+        passes = [(RED, -4 * g, 0.55 * g), (CYAN, 4 * g, 0.55 * g),
                   (LINE, 0, 1.0)] if g > 0.02 else [(LINE, 0, 1.0)]
         for col, dx, alpha in passes:
             cr.save()
@@ -482,7 +487,7 @@ class View(Gtk.Window):
             cr.fill()
 
     def draw_text(self, cr, W, top, g=0.0):
-        cr.select_font_face('monospace', cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
+        cr.select_font_face(FONT, cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_NORMAL)
         for text, size, y, a in ((self.text, 17, 32, 0.95), (self.sub, 11, 54, 0.55)):
             if not text:
                 continue
@@ -490,11 +495,11 @@ class View(Gtk.Window):
             ext = cr.text_extents(text)
             x = (W - ext.width) / 2 - ext.x_bearing
             if g > 0.02:                # the theme's red/cyan split
-                for col, dx in (((1.0, 0.16, 0.29), -2 * g - 1), ((0.10, 0.90, 1.0), 2 * g + 1)):
+                for col, dx in ((RED, -2 * g - 1), (CYAN, 2 * g + 1)):
                     cr.set_source_rgba(*col, a * 0.7)
                     cr.move_to(x + dx, y)
                     cr.show_text(text)
-            cr.set_source_rgba(0.9, 0.95, 1.0, a)
+            cr.set_source_rgba(*FG, a)
             cr.move_to(x, y)
             cr.show_text(text)
 
@@ -513,19 +518,20 @@ class View(Gtk.Window):
         cr.set_source_rgba(1, 1, 1, 0.08)
         cr.rectangle(bx, y, bw, bh)
         cr.fill()
+        # the theme's colours: red only while it is still weak, then grey into cyan
         g = cairo.LinearGradient(bx, 0, bx + bw, 0)
-        g.add_color_stop_rgb(0.0, 0.85, 0.25, 0.3)
-        g.add_color_stop_rgb(0.45, 0.9, 0.75, 0.3)
-        g.add_color_stop_rgb(1.0, 0.35, 0.9, 0.75)
+        g.add_color_stop_rgb(0.0, *RED)
+        g.add_color_stop_rgb(0.3, *DIM)
+        g.add_color_stop_rgb(1.0, *CYAN)
         cr.set_source(g)
         cr.rectangle(bx, y, bw * x, bh)
         cr.fill()
         cr.set_font_size(11)
         label = f'STRENGTH  {word(x).upper()}' if x > 0 else 'STRENGTH  —'
-        cr.set_source_rgba(0.9, 0.95, 1.0, 0.85)
+        cr.set_source_rgba(*FG, 0.85)
         cr.move_to(bx, y - 8)
         cr.show_text(label)
-        cr.set_source_rgba(0.9, 0.95, 1.0, 0.45)
+        cr.set_source_rgba(*FG, 0.45)
         cr.move_to(bx, y + bh + 18)
         cr.show_text(detail)
 

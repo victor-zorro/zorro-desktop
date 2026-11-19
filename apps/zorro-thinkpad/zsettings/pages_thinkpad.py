@@ -11,7 +11,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, Pages, heading, idle, note, radios
+from .ui import KEY_TABLE, MARKS, Pages, heading, idle, mark, note, radios
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -264,8 +264,8 @@ class ThinkpadPages:
         row.add(Gtk.Image.new_from_icon_name('printer-symbolic', Gtk.IconSize.DND))
         txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
         head = Gtk.Label(xalign=0)
-        mark = '<span foreground="#5fd068">✓</span>' if ok else '<span foreground="#ffb84a">⚠</span>'
-        head.set_markup(f'{mark}  <b>{GLib.markup_escape_text(title)}</b>')
+        sign = mark('ok') if ok else mark('warn')
+        head.set_markup(f'{sign}  <b>{GLib.markup_escape_text(title)}</b>')
         txt.add(head)
         d = note(detail)
         d.set_selectable(True)
@@ -377,7 +377,7 @@ class ThinkpadPages:
             for c in lst.get_children():
                 c.destroy()
         group = 'Other devices'
-        marks = {'ok': ('✓', '#5fd068'), 'warn': ('⚠', '#ffb84a'), 'off': ('○', '#8a8a92')}
+        marks = {k: MARKS[k] for k in ('ok', 'warn', 'off')}
         for icon, title, state, detail, acts in rows:
             row = Gtk.Box(spacing=12)
             img = Gtk.Image.new_from_icon_name(icon or 'go-next-symbolic', Gtk.IconSize.DND)

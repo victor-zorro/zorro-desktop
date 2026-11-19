@@ -31,7 +31,11 @@ STATE = Path(os.environ.get('XDG_STATE_HOME', HOME / '.local/state')) / 'zorro-d
 USAGE = STATE / 'usage.json'
 PIDFILE = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-dial.pid'
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' / 'config.json'
-RED, CYAN, FG = (1.0, 0.16, 0.29), (0.10, 0.90, 1.0), (0.85, 0.85, 0.87)
+sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+try:                                    # the one palette (apps/zorro-fx/zorro_style.py)
+    from zorro_style import CYAN, FG, RED
+except ImportError:
+    RED, CYAN, FG = (1.0, 0.165, 0.29), (0.098, 0.902, 1.0), (0.847, 0.847, 0.871)
 
 DEFAULTS = {
     'slices': [                     # 2 to 6 slices, clockwise from the top
@@ -891,7 +895,7 @@ class Dial(Gtk.Window):
                 if t.get('lit') or same(self.hover, t) or armed:
                     cr.new_path()
                     cr.arc(x, y, size * 0.75, 0, 2 * math.pi)
-                    cr.set_source_rgba(*((1, .2, .3) if armed else CYAN), 0.18 if t.get('lit') or armed else 0.1)
+                    cr.set_source_rgba(*(RED if armed else CYAN), 0.18 if t.get('lit') or armed else 0.1)
                     cr.fill()
                     self.chroma_circle(cr, x, y, size * 0.75, alpha=0.8 if t.get('lit') else 0.5)
                 if t.get('value') is not None:

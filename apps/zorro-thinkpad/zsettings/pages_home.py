@@ -28,7 +28,7 @@ CSS = b'''
          border: 1px solid rgba(255,255,255,0.08); }
 .zpill.on { background: rgba(25,230,255,0.16); border-color: rgba(25,230,255,0.6); }
 .zlink { padding: 2px 6px; }
-.zpreview { background: radial-gradient(circle at 40% 40%, #1d2633, #08090c); border-radius: 12px; }
+.zpreview { background: radial-gradient(circle at 40% 40%, #11151c, #05070a); border-radius: 12px; }
 levelbar.zbar block.filled { background: linear-gradient(90deg, #ff2a4a, #19e6ff); border-radius: 3px; }
 levelbar.zbar block.empty { background: rgba(255,255,255,0.08); border-radius: 3px; }
 '''

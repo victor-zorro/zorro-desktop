@@ -5,7 +5,7 @@ import re
 import threading
 
 from .base import run, spawn
-from .ui import Pages, heading, idle, note
+from .ui import Pages, heading, idle, mark, note
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('NM', '1.0')
@@ -168,7 +168,7 @@ class NetworkPages:
             if s in saved:
                 acts.append(('Forget', lambda con=saved[s], s=s: con.delete_async(
                     None, self.net_done, f'{s} forgotten')))
-            rows.append((s, detail, acts, '<span foreground="#5fd068">●</span>' if s == cur else ''))
+            rows.append((s, detail, acts, mark('on') if s == cur else ''))
         if not rows and on:
             rows.append(('No networks found', 'Click Scan', [], ''))
         self.net_rows(self.wifi_list, rows)
@@ -257,10 +257,10 @@ class NetworkPages:
                              'preferred over Wi-Fi. Fix (at the laptop):\n'
                              f'sudo ifdown {iface}; sudo sed -i -E "/^(allow-hotplug|iface) +{iface}/s/^/# /" '
                              '/etc/network/interfaces; sudo systemctl restart NetworkManager',
-                             [], '<span foreground="#ffb84a">⚠</span>'))
+                             [], mark('warn')))
                 continue
             if st == NM.DeviceState.UNAVAILABLE or not dev.get_carrier():
-                rows.append((iface, f'{drv} · no cable', [], '<span foreground="#8a8a92">○</span>'))
+                rows.append((iface, f'{drv} · no cable', [], mark('off')))
                 continue
             on = st == NM.DeviceState.ACTIVATED
             speed = dev.get_speed()
@@ -270,7 +270,7 @@ class NetworkPages:
             acts = [('Disconnect', lambda d=dev: d.disconnect_async(None, self.net_done, 'Disconnected'))] \
                 if on else [('Connect', lambda d=dev: c.activate_connection_async(
                     None, d, None, None, self.net_done, 'Connected'))]
-            rows.append((iface, detail, acts, '<span foreground="#5fd068">●</span>' if on else ''))
+            rows.append((iface, detail, acts, mark('on') if on else ''))
         self.net_rows(self.eth_list, rows or [('No wired port', '', [], '')])
 
     # -- NetBird
@@ -328,8 +328,8 @@ class NetworkPages:
             lat = p.get('latency') or 0
             ms = f' · {lat / 1e6:.0f} ms' if isinstance(lat, (int, float)) and lat else ''
             rows.append((name, f'{p.get("netbirdIp", "")}' + (f' · {how}{ms}' if on else ' · offline'),
-                         [], '<span foreground="#5fd068">●</span>' if on else
-                         '<span foreground="#8a8a92">○</span>'))
+                         [], mark('on') if on else
+                         mark('off')))
         self.net_rows(self.nb_list, rows[:40])
 
     # -- refresh while the tab is open

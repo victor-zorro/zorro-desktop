@@ -261,6 +261,14 @@ def cmd_notify(path, size):
 
 # ---- overlay background: the shared lock-screen look (apps/zorro-fx) -----------------------
 
+# the one palette (apps/zorro-fx/zorro_style.py); plain values if it is missing
+sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+try:
+    from zorro_style import CYAN, FG, FONT
+except ImportError:
+    CYAN, FG, FONT = (0.098, 0.902, 1.0), (0.847, 0.847, 0.871), 'DejaVu Sans Mono'
+
+
 def load_snow():
     """the particle look, imported only for the overlay (it pulls in numpy: ~90 ms, and the
     clipboard / notification processes don't need it)"""
@@ -574,7 +582,7 @@ def run_overlay(start_mode):
             cr.set_line_width(2)
             cr.set_dash([])
             if self.sel:
-                cr.set_source_rgb(0.25, 0.6, 1.0)
+                cr.set_source_rgb(*CYAN)
                 cr.rectangle(x + 1, y + 1, w - 2, h - 2)
                 cr.stroke()
                 for hx in (x, x + w / 2, x + w):
@@ -583,18 +591,18 @@ def run_overlay(start_mode):
                             cr.rectangle(hx - 4, hy - 4, 8, 8)
                 cr.fill()
                 label = f'{w} × {h}'
-                cr.select_font_face('Sans')
+                cr.select_font_face(FONT)
                 cr.set_font_size(13)
                 ext = cr.text_extents(label)
                 lx, ly = x + 4, (y - 8 if y > 26 else y + h + 20)
                 cr.set_source_rgba(0, 0, 0, 0.7)
                 cr.rectangle(lx - 4, ly - ext.height - 5, ext.width + 10, ext.height + 10)
                 cr.fill()
-                cr.set_source_rgb(1, 1, 1)
+                cr.set_source_rgb(*FG)
                 cr.move_to(lx + 1, ly)
                 cr.show_text(label)
             else:                       # window under the pointer, before any drag
-                cr.set_source_rgba(0.25, 0.6, 1.0, 0.9)
+                cr.set_source_rgba(*CYAN, 0.9)
                 cr.set_dash([6, 4])
                 cr.rectangle(x + 1, y + 1, w - 2, h - 2)
                 cr.stroke()

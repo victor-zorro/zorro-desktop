@@ -1,4 +1,18 @@
 """shared app widgets"""
+import sys
+
+from .base import APPS
+
+sys.path.insert(0, str(APPS / 'zorro-fx'))
+try:                                    # the one palette (apps/zorro-fx/zorro_style.py)
+    from zorro_style import MARKS, mark  # noqa: E402,F401
+except ImportError:
+    MARKS = {'on': ('●', '#19e6ff'), 'ok': ('✓', '#19e6ff'), 'warn': ('⚠', '#ff2a4a'), 'off': ('○', '#6f7079')}
+
+    def mark(state, symbol=None):
+        sym, col = MARKS.get(state, MARKS['off'])
+        return f'<span foreground="{col}">{symbol or sym}</span>'
+
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk

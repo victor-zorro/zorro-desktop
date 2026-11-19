@@ -213,7 +213,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
 
 ## Phase 3: one look, shared helpers
 
-- [ ] **3.1 One shared palette and font** (M)
+- [x] **3.1 One shared palette and font** (M)
   Colours are defined per app: `apps/zorro-dm/theme/style.css` 2-8, `apps/zorro-fx/
   zorro_fx.py` 53, `zorro-face/faceview.py` 455-519, `zorro-dial/zorro-dial` 34,
   `zorro-sweep/zorro-sweep` (BG, FG, DIM, RED, CYAN, GREEN), `zorro-shot` (blue frame, about

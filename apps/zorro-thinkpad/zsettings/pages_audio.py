@@ -4,7 +4,7 @@ import time
 
 from . import audio
 from .base import load_conf
-from .ui import Pages, heading, idle, note
+from .ui import Pages, heading, idle, mark, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk  # noqa: E402
@@ -121,9 +121,8 @@ class AudioPages:
                                                  Gtk.IconSize.DND))
             txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
             head = Gtk.Label(xalign=0)
-            mark = '<span foreground="#5fd068">●</span>' if d['default'] else \
-                '<span foreground="#8a8a92">○</span>'
-            head.set_markup(f'{mark}  <b>{GLib.markup_escape_text(d["desc"])}</b>')
+            sign = mark('on') if d['default'] else mark('off')
+            head.set_markup(f'{sign}  <b>{GLib.markup_escape_text(d["desc"])}</b>')
             txt.add(head)
             what = ' + '.join(names.get(n, n.split('.')[0]) for n in members) if d['together'] else d['kind']
             txt.add(note(what + (' · in use' if d['default'] else '')))
