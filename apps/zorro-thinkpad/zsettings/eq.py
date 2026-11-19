@@ -100,10 +100,19 @@ def stop():
     PIDFILE.unlink(missing_ok=True)
 
 
+_node = {'pid': None, 'id': None}
+
+
 def node_id():
+    """the equaliser's PipeWire node; looked up once per equaliser process (pw-dump is ~290 KB
+    of JSON, and a slider move asks for it every step)"""
+    pid = PIDFILE.read_text().strip() if PIDFILE.exists() else None
+    if pid and _node['pid'] == pid and _node['id'] is not None:
+        return _node['id']
     for o in json.loads(run('pw-dump', timeout=5) or '[]'):
         p = (o.get('info') or {}).get('props') or {}
         if o.get('type') == 'PipeWire:Interface:Node' and p.get('node.name') == NODE:
+            _node.update(pid=pid, id=o['id'])
             return o['id']
     return None
 
@@ -118,7 +127,7 @@ def start(target):
     PIDFILE.write_text(str(p.pid))
     for _ in range(40):                    # the node shows up within a second
         time.sleep(0.1)
-        if node_id() is not None:
+        if NODE in run('pactl', 'list', 'short', 'sinks') and node_id() is not None:
             run('pactl', 'set-default-sink', NODE)
             return True
     return False
@@ -130,10 +139,16 @@ def set_gains(target, gains, live=True):
     s['gains'][target] = [round(float(g), 1) for g in gains]
     update_conf('eq', gains=s['gains'])
     if live and running():
-        nid = node_id()
-        if nid is not None:
-            params = ' '.join(f'"eq_{i}:Gain" {g:.2f}' for i, g in enumerate(gains))
-            run('pw-cli', 'set-param', str(nid), 'Props', f'{{ params = [ {params} ] }}')
+        params = ' '.join(f'"eq_{i}:Gain" {g:.2f}' for i, g in enumerate(gains))
+        for _try in range(2):
+            nid = node_id()
+            if nid is None:
+                break
+            r = subprocess.run(['pw-cli', 'set-param', str(nid), 'Props', f'{{ params = [ {params} ] }}'],
+                               capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and 'Error' not in r.stdout + r.stderr:
+                break
+            _node['id'] = None              # PipeWire restarted: look the node up again
         CFG.write_text(config(target, gains))
 
 
