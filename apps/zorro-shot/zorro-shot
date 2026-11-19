@@ -261,24 +261,28 @@ def cmd_notify(path, size):
 
 # ---- overlay background: the shared lock-screen look (apps/zorro-fx) -----------------------
 
-sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
-try:
-    import zorro_fx
-    Snow = zorro_fx.Snow
-except ImportError:                     # zorro-fx missing: a plain dark box
-    zorro_fx = None
+def load_snow():
+    """the particle look, imported only for the overlay (it pulls in numpy: ~90 ms, and the
+    clipboard / notification processes don't need it)"""
+    sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
+    try:
+        import zorro_fx
+        return zorro_fx.Snow
+    except ImportError:                 # zorro-fx missing: a plain dark box
+        return PlainBox
 
-    class Snow:
-        def __init__(self, widget, radius=12, fps=30):
-            self.backdrop = None
-            widget.set_app_paintable(True)
-            widget.connect('draw', self.draw)
 
-        @staticmethod
-        def draw(_w, cr):
-            cr.set_source_rgba(0, 0, 0, 0.94)
-            cr.paint()
-            return False
+class PlainBox:
+    def __init__(self, widget, radius=12, fps=30):
+        self.backdrop = None
+        widget.set_app_paintable(True)
+        widget.connect('draw', self.draw)
+
+    @staticmethod
+    def draw(_w, cr):
+        cr.set_source_rgba(0, 0, 0, 0.94)
+        cr.paint()
+        return False
 
 
 def run_overlay(start_mode):
@@ -287,13 +291,30 @@ def run_overlay(start_mode):
     gi.require_version('Gdk', '3.0')
     from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
+    import threading
     shot = grab_screen()
+    # the window list takes ~30 xprop calls: read it while the overlay is being built
+    windows = []
+    finder = threading.Thread(target=lambda: windows.extend(visible_windows()), daemon=True)
+    finder.start()
     try:
         pixbuf = GdkPixbuf.Pixbuf.new_from_file(shot)
     finally:
         os.unlink(shot)
     W, H = pixbuf.get_width(), pixbuf.get_height()
-    windows = visible_windows()
+    Snow = load_snow()
+    import cairo
+    # the screenshot as cairo surfaces, made once (converting the pixbuf on every mouse move
+    # was the slow part of drawing): the full picture, and the dimmed one behind the selection
+    full = Gdk.cairo_surface_create_from_pixbuf(pixbuf, 1, None)
+    dim = cairo.ImageSurface(cairo.FORMAT_RGB24, W, H)
+    c = cairo.Context(dim)
+    c.set_source_surface(full, 0, 0)
+    c.paint()
+    c.set_source_rgba(0, 0, 0, 0.45)
+    c.paint()
+    del c
+    cursors = {}
     display = Gdk.Display.get_default()
     mon = display.get_primary_monitor() or display.get_monitor(0)
     prim = mon.get_geometry()
@@ -416,6 +437,7 @@ def run_overlay(start_mode):
             self.bar.queue_resize()
 
         def window_at(self, x, y):
+            finder.join()                   # ready long before the first click, in practice
             return next((r for r in windows
                          if r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]), None)
 
@@ -465,8 +487,12 @@ def run_overlay(start_mode):
                 names = {'move': 'move', 'n': 'n-resize', 's': 's-resize', 'e': 'e-resize',
                          'w': 'w-resize', 'ne': 'ne-resize', 'nw': 'nw-resize',
                          'se': 'se-resize', 'sw': 'sw-resize'}
-                self.get_window().set_cursor(Gdk.Cursor.new_from_name(
-                    display, names.get(e, 'crosshair')))
+                name = names.get(e, 'crosshair')
+                if name not in cursors:
+                    cursors[name] = Gdk.Cursor.new_from_name(display, name)
+                if getattr(self, 'cursor', None) != name:
+                    self.cursor = name
+                    self.get_window().set_cursor(cursors[name])
                 return True
             what, x0, y0, s0 = self.drag
             if what == 'new':
@@ -533,9 +559,7 @@ def run_overlay(start_mode):
 
         # -- drawing
         def on_draw(self, _w, cr):
-            Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0)
-            cr.paint()
-            cr.set_source_rgba(0, 0, 0, 0.45)
+            cr.set_source_surface(dim, 0, 0)
             cr.paint()
             rect = clamp(self.sel, W, H) if self.sel else self.hover
             if not rect:
@@ -544,7 +568,7 @@ def run_overlay(start_mode):
             cr.save()
             cr.rectangle(x, y, w, h)
             cr.clip()
-            Gdk.cairo_set_source_pixbuf(cr, pixbuf, 0, 0)
+            cr.set_source_surface(full, 0, 0)
             cr.paint()
             cr.restore()
             cr.set_line_width(2)

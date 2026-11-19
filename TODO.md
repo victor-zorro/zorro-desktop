@@ -155,7 +155,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: poll only while `self.is_active()`; collect static system info once; printers and
   NetBird every 30 s; add `--rescan no`; refresh Power labels only when that page shows.
 
-- [ ] **2.7 Screenshot: faster to the overlay** (S-M)
+- [x] **2.7 Screenshot: faster to the overlay** (S-M)
   `apps/zorro-shot/zorro-shot` about 51-83, 243-275.
   `visible_windows()` runs about 29 xprop / xwininfo processes (0.2 s) before the window
   shows; `import zorro_fx` pulls numpy (90 ms) into every mode, also `--serve` / `--notify`.
