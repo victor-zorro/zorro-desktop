@@ -76,6 +76,7 @@ class WinPos:
         self.fresh = {}                  # new window id -> when it appeared (desktop grace time)
         self.dirty_at = 0.0
         self.session_at = 0.0            # when the session list must be written
+        self.close_times = []            # when windows closed (all at once = logging out)
         self.folders_at = time.time() + FOLDERS_EVERY
         self.pending = []                # windows to put back after a restart
         self.pending_until = 0.0
@@ -243,9 +244,16 @@ class WinPos:
         return out
 
     def save_session(self):
+        wins = self.snapshot()
+        # several windows all gone within a few seconds and none left: a logout or shutdown
+        # that is taking its time (the window manager let go of everything): keep the list
+        recent = [t for t in self.close_times if t > time.time() - DROP_AFTER - 10]
+        if not wins and len(recent) >= 2 and max(recent) - min(recent) < 5:
+            self.session_at = 0.0
+            return
         STATE.mkdir(parents=True, exist_ok=True)
         tmp = SESSION.with_suffix('.tmp')
-        tmp.write_text(json.dumps({'saved': time.time(), 'windows': self.snapshot()}, indent=1))
+        tmp.write_text(json.dumps({'saved': time.time(), 'windows': wins}, indent=1))
         tmp.replace(SESSION)
         self.session_at = 0.0
 
@@ -351,6 +359,7 @@ class WinPos:
     def closed(self):
         """a window closed: written only after DROP_AFTER, so a shutdown (everything closing
         at once, then this program stopping) leaves the list as it was"""
+        self.close_times = (self.close_times + [time.time()])[-20:]
         if self.keep_session:
             self.session_at = max(self.session_at, time.time() + DROP_AFTER - SAVE_AFTER)
 

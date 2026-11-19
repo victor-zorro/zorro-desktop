@@ -2,7 +2,8 @@
 # zvm: Debian 13 test VM in plain QEMU/KVM (for trying install.sh, login managers, ...)
 #   zvm create [--force]   download Debian 13 cloud image, cloud-init: user zorro/zorro,
 #                          passwordless sudo, ssh key; snapshot 'clean'
-#   zvm start              boot in a GTK window (UEFI, 4 cores, 4 GB, ssh on 127.0.0.1:2222)
+#   zvm start [--headless] boot in a GTK window (UEFI, 4 cores, 4 GB, ssh on 127.0.0.1:2222);
+#                          --headless: no window (zvm shot still works)
 #   zvm ssh [cmd...]       shell / command in the VM
 #   zvm sync               copy ~/zorro-desktop working tree into the VM
 #   zvm shot [file.png]    screenshot of the VM screen
@@ -85,6 +86,8 @@ EOF
 }
 
 start() {
+  local display=(-display gtk,zoom-to-fit=on)
+  [[ ${1:-} == --headless ]] && display=(-display none)
   running && die "already running"
   [[ -f $DISK ]] || die "no VM yet: zvm create"
   local seed=()
@@ -96,7 +99,7 @@ start() {
     -drive "if=pflash,format=raw,file=$D/vars.fd" \
     -drive "file=$DISK,if=virtio,discard=unmap" "${seed[@]}" \
     -nic "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:$PORT-:22" \
-    -device virtio-vga,xres=1600,yres=900 -display gtk,zoom-to-fit=on \
+    -device virtio-vga,xres=1600,yres=900 "${display[@]}" \
     -device qemu-xhci -device usb-tablet \
     -monitor "unix:$MON,server,nowait" -pidfile "$PIDF" \
     >"$D/qemu.log" 2>&1 < /dev/null &
@@ -116,7 +119,7 @@ need_stopped() { running && die "stop the VM first (zvm stop)"; [[ -f $DISK ]] |
 
 case ${1:-} in
   create) create "${2:-}" ;;
-  start)  start ;;
+  start)  start "${2:-}" ;;
   stop)   stop_wait ;;
   ssh)    shift; vssh "$@" ;;
   sync)   running || die "VM not running"
