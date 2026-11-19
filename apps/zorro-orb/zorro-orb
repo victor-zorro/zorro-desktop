@@ -103,8 +103,8 @@ def info_battery():
 
 
 def info_network():
-    wifi = next((l.split(':') for l in run('nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL', 'dev',
-                                           'wifi').splitlines() if l.startswith('yes:')), None)
+    wifi = next((l.split(':') for l in run('nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL', 'dev', 'wifi', 'list',
+                                           '--rescan', 'no').splitlines() if l.startswith('yes:')), None)
     lines = []
     big = wifi[1] if wifi else 'offline'
     if wifi:
@@ -427,14 +427,18 @@ def main():
                 mt = CONF.stat().st_mtime
             except OSError:
                 mt = None
-            if mt != self.conf_mtime:
+            changed = mt != self.conf_mtime
+            if changed:
                 self.conf_mtime, self.conf = mt, load_conf()
             spill = int(zorro_fx.settings('orb')['spill']) if zorro_fx else 0
             if (int(self.conf['size']), spill) != self.geom:
                 self.layout()
+            clock = info_clock()
             with self.lock:
-                self.data['clock'] = info_clock()
-            self.area.queue_draw()
+                changed |= clock != self.data.get('clock')
+                self.data['clock'] = clock
+            if changed:                     # the clock text changes once a minute: draw then
+                self.area.queue_draw()
             return True
 
         def animate(self):

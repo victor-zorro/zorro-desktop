@@ -10,7 +10,8 @@ moving particles (zorro-fx profile `orb`, so it has the same look settings as th
   disk, temperature), Drive sync, messages (dunst notifications), sound and screen.
 - The window itself is round (X shape), so the desktop shows around it; with "spill" the
   particles drift out in a soft cloud.
-- Data is gathered in a thread every 3 s, so slow commands never stop the animation.
+- Data is gathered in a thread (every 3 s while a zone is hovered, every 15 s otherwise), so
+  slow commands never stop the animation. The clock is redrawn only when its minute changes.
 
 Settings: `~/.config/zorro-orb/config.json` (what and where) and `~/.config/zorro-fx/config.json`
 profile `orb` (look), both edited in the Zorro app → Desktop → Info circle.

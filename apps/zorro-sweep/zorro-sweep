@@ -1273,16 +1273,27 @@ class Sweep(Gtk.Window):
         cr.paint()
 
     def text(self, cr, s, x, y, size=10, rgb=FG, a=1.0, bold=False, mono=True, align=None, width=None):
-        lay = PangoCairo.create_layout(cr)
-        fd = Pango.FontDescription(f'{"DejaVu Sans Mono" if mono else "DejaVu Sans"} {size}')
-        if bold:
-            fd.set_weight(Pango.Weight.BOLD)
-        lay.set_font_description(fd)
-        if width:
-            lay.set_width(int(width * Pango.SCALE))
-            lay.set_ellipsize(Pango.EllipsizeMode.END)
-        lay.set_text(s, -1)
-        tw, th = lay.get_pixel_size()
+        # layouts are kept between frames: the screen redraws 60 times a second while moving
+        cache = self.__dict__.setdefault('_layouts', {})
+        key = (s, size, bold, mono, int(width or 0))
+        hit = cache.get(key)
+        if hit:
+            lay, tw, th = hit
+            PangoCairo.update_layout(cr, lay)
+        else:
+            lay = PangoCairo.create_layout(cr)
+            fd = Pango.FontDescription(f'{"DejaVu Sans Mono" if mono else "DejaVu Sans"} {size}')
+            if bold:
+                fd.set_weight(Pango.Weight.BOLD)
+            lay.set_font_description(fd)
+            if width:
+                lay.set_width(int(width * Pango.SCALE))
+                lay.set_ellipsize(Pango.EllipsizeMode.END)
+            lay.set_text(s, -1)
+            tw, th = lay.get_pixel_size()
+            if len(cache) > 400:
+                cache.clear()
+            cache[key] = (lay, tw, th)
         if align == 'center':
             x -= tw / 2
         elif align == 'right':

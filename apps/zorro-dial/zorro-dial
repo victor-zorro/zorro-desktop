@@ -398,11 +398,22 @@ class Dial(Gtk.Window):
 
     # -- drawing
     def text(self, cr, s, x, y, size, bold=True, alpha=1.0, split=1.4):
-        lay = PangoCairo.create_layout(cr)
-        lay.set_font_description(Pango.FontDescription.from_string(
-            f'DejaVu Sans {"Bold" if bold else ""} {size}'))
-        lay.set_text(s, -1)
-        _, ext = lay.get_pixel_extents()
+        # layouts are kept between frames (20 a second, dozens of labels each)
+        cache = self.__dict__.setdefault('_layouts', {})
+        key = (s, size, bold)
+        hit = cache.get(key)
+        if hit:
+            lay, ext = hit
+            PangoCairo.update_layout(cr, lay)
+        else:
+            lay = PangoCairo.create_layout(cr)
+            lay.set_font_description(Pango.FontDescription.from_string(
+                f'DejaVu Sans {"Bold" if bold else ""} {size}'))
+            lay.set_text(s, -1)
+            _, ext = lay.get_pixel_extents()
+            if len(cache) > 400:
+                cache.clear()
+            cache[key] = (lay, ext)
         x0, y0 = x - ext.width / 2, y - ext.height / 2
         for col, dx in ((RED, -split), (CYAN, split)):
             cr.move_to(x0 + dx, y0)
@@ -443,7 +454,9 @@ class Dial(Gtk.Window):
         the screen (120 degrees); centre: full circle in the middle of the screen."""
         W, H = self.geo.width, self.geo.height
         if self.conf.get('anchor') == 'orb':
-            orb = orb_conf()
+            if not hasattr(self, '_orb'):
+                self._orb = orb_conf()      # read once: fan() runs on every draw and mouse move
+            orb = self._orb
             d, m, corner = orb['size'], orb['margin'], orb['corner']
             cx = m + d / 2 if 'left' in corner else W - m - d / 2
             cy = m + d / 2 if 'top' in corner else H - m - d / 2
