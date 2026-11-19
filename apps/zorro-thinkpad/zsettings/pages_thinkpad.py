@@ -249,39 +249,14 @@ class ThinkpadPages:
 
     # actions used by hardware_rows()
     def webcam(self, dev):
-        spawn(['vlc', '--no-video-title-show', f'v4l2://{dev}'])
-        self.hw_msg.set_text('Webcam preview opens in VLC. Close it when done '
-                             '(the camera light goes on while it runs).')
+        """the live picture and its settings: one place, Home → Webcam"""
+        self.show_home()
+        self.cam_open()
 
     def mic_toggle(self):
         self.hw_do('…', lambda: run('wpctl', 'set-mute', '@DEFAULT_AUDIO_SOURCE@', 'toggle')
                    and None)
 
-    def mic_test(self):
-        def fn():
-            import tempfile
-            fd, wav = tempfile.mkstemp(suffix='.wav', prefix='zorro-mic-', dir=RUNTIME)
-            os.close(fd)
-            idle(self.hw_msg.set_text, '● Recording 3 seconds: say something…')
-            p = subprocess.Popen(['pw-record', wav], stderr=subprocess.DEVNULL)
-            time.sleep(3)
-            p.terminate()
-            p.wait()
-            idle(self.hw_msg.set_text, '▶ Playing it back…')
-            run('pw-play', wav, timeout=8)
-            try:
-                os.unlink(wav)
-            except OSError:
-                pass
-            return 'Microphone test done: did you hear yourself?'
-        self.hw_do('…', fn)
-
-    def speaker_test(self):
-        def fn():
-            for side in ('left', 'right'):
-                run('pw-play', str(SOUNDS / f'audio-channel-front-{side}.oga'))
-            return 'You should have heard "front left" from the left and "front right" from the right.'
-        self.hw_do('▶ Playing a voice on the left, then on the right…', fn)
 
 
     # -- lights

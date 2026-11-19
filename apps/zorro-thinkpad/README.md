@@ -25,8 +25,9 @@ wallpaper together, plus your own; every login / lock screen effect; face unlock
   Preferences, while it is closed). `python3 -m zsettings.lang apply` sets it again.
 - **Face unlock** (Look tab): `apps/zorro-face` — learn, test, delete, where the icon shows.
 
-- **Hardware**: every device with ✓ / ⚠, driver and a test: webcam preview (VLC), mic
-  mute + record-and-play-back test, speaker left/right test, Bluetooth on/off, connect /
+- **Hardware**: every device with ✓ / ⚠ and its driver: webcam (Preview opens the camera
+  page on Home), mic mute (the record-and-play-back and left/right tests are in the Audio tab),
+  Bluetooth on/off, connect /
   disconnect / forget, scan & pair, Wi-Fi, LTE modem, printer (CUPS), touchscreen,
   touchpad, fingerprint reader (with the BIOS hint when none is found).
 

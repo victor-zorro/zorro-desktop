@@ -153,7 +153,7 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
     def build_audio(self):
         snd = Group()                   # outputs, inputs, per app, several at once
         a_out, a_in, a_play, a_tog = self.audio_pages()
-        snd.section('aout', 'Audio', a_out)
+        snd.section('aout', None, a_out)              # the tab is called Audio already
         snd.section('ain', None, a_in)
         snd.section('aplay', None, a_play)
         snd.section('atog', None, a_tog)
@@ -161,12 +161,12 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
 
     def build_power(self):
         power = Group()
-        power.section('power', 'Power', self.power_page())
+        power.section('power', None, self.power_page())
         return power
 
     def build_hardware(self):
         hw = Group()                    # devices, and the ThinkPad's own keys and lights
-        hw.section('hw', 'Hardware', self.hw_page())
+        hw.section('hw', None, self.hw_page())
         hw.section('keys', 'ThinkPad', self.keys_page())
         hw.section('lights', None, self.lights_page())
         hw.section('sys', 'System', self.sysinfo_page())
@@ -195,7 +195,7 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
     def build_accounts(self):
         acc = Group()                   # the logins the desktop borrows: SoundCloud, Obsidian
         sc, ob = self.accounts_pages()
-        acc.section('sc', 'Accounts', sc)
+        acc.section('sc', None, sc)
         acc.section('ob', None, ob)
         return acc
 

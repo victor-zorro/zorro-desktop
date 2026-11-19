@@ -83,18 +83,14 @@ class DesktopPages:
         margin.connect('value-changed', lambda w: save(margin=int(w.get_value())))
         corners = {'bottom-right': 'Bottom right', 'bottom-left': 'Bottom left',
                    'top-right': 'Top right', 'top-left': 'Top left'}
-        colour = Gtk.ColorButton()
-        rgba = Gdk.RGBA()
-        rgba.parse(c.get('text_colour', '#d8d8de'))
-        colour.set_rgba(rgba)
-        colour.connect('color-set', lambda w: save(text_colour=w.get_rgba().to_string()))
         for i, (label, w) in enumerate((
                 ('Diameter', size), ('Corner', combo(c['corner'], lambda v: save(corner=v), corners)),
-                ('Distance from the edges', margin), ('Text colour', colour))):
+                ('Distance from the edges', margin))):
             g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
             g.attach(w, 1, i, 1, 1)
         box.add(g)
-        box.add(note('Changes show on the desktop within a second.'))
+        box.add(note('Changes show on the desktop within a second. Its text colour is the screen\'s '
+                     'text colour: Desktop → Text & colours.'))
         return box
 
     def fx_page(self, profile, box=None):

@@ -78,6 +78,38 @@ class AudioPages:
             self.au_refresh()
         return True
 
+    # the sound tests (Audio → Output / Input); they report here
+    def mic_test(self):
+        def fn():
+            import os
+            import subprocess
+            import tempfile
+            from .base import RUNTIME, run
+            fd, wav = tempfile.mkstemp(suffix='.wav', prefix='zorro-mic-', dir=RUNTIME)
+            os.close(fd)
+            idle(lambda: self.au_say('● Recording 3 seconds: say something…') and False)
+            p = subprocess.Popen(['pw-record', wav], stderr=subprocess.DEVNULL)
+            time.sleep(3)
+            p.terminate()
+            p.wait()
+            idle(lambda: self.au_say('▶ Playing it back…') and False)
+            run('pw-play', wav, timeout=8)
+            try:
+                os.unlink(wav)
+            except OSError:
+                pass
+            return 'Microphone test done: did you hear yourself?'
+        self.au_bg('…', fn)
+
+    def speaker_test(self):
+        def fn():
+            from .base import run
+            from .hardware import SOUNDS
+            for side in ('left', 'right'):
+                run('pw-play', str(SOUNDS / f'audio-channel-front-{side}.oga'))
+            return 'You should have heard "front left" from the left and "front right" from the right.'
+        self.au_bg('▶ Playing a voice on the left, then on the right…', fn)
+
     def au_bg(self, busy, fn):
         if busy:
             self.au_say(busy)

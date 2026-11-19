@@ -113,7 +113,12 @@ class Group:
         self.ids = {}
 
     def section(self, name, title, pages):
-        """title None: no heading of its own, the sub-pages follow the section above"""
+        """title None: no heading of its own, the sub-pages follow the section above.
+        A section with one page of the same name shows just that page, as a top-level row."""
+        parts = list(pages.parts())
+        flat = bool(title) and len(parts) == 1 and parts[0][0].lower() == title.lower()
+        if flat:
+            title = None
         if title:
             head = Gtk.ListBoxRow(selectable=False, activatable=False)
             lb = Gtk.Label(xalign=0, margin_start=12, margin_top=12, margin_bottom=2)
@@ -123,11 +128,11 @@ class Group:
             self.side.add(head)
         self.tops.add_named(pages.top, name)
         self.bottoms.add_named(pages.bottom, name)
-        for i, (sub, w) in enumerate(pages.parts()):
+        for i, (sub, w) in enumerate(parts):
             pid = f'{name}:{i}'
             self.content.add_named(w, pid)
             row = Gtk.ListBoxRow()
-            row.add(Gtk.Label(label=sub, xalign=0, margin_start=22, margin_end=12,
+            row.add(Gtk.Label(label=sub, xalign=0, margin_start=12 if flat else 22, margin_end=12,
                               margin_top=6, margin_bottom=6))
             row.zid, row.zsec = pid, name
             self.ids[pid] = row

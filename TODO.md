@@ -249,8 +249,10 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   `bg(fn, then, busy=)` with try/except in `zsettings/ui.py`. One spacing, one primary
   button style, one word per action ("Check again" vs "Refresh" vs "Scan").
 
-- [ ] **3.4 Settings app: tab order and one home per setting** (M)
-  Done: a (Vincent said go, 2026-11-19), d. Open: b, c (offer first).
+- [x] **3.4 Settings app: tab order and one home per setting** (M)
+  Done: a, d; b as duplicate headings only; c for text colour, webcam, sound tests.
+  Not done (offer if wanted): Desktop regrouped in three sections, power combos applying on
+  change, an own Icons sub-page.
   `zsettings/app.py` 53-93.
   a) Tabs: Network, Audio, Power, Hardware, Desktop, Look, Accounts. Merge Theme and Login
      screen into "Look", Presets first.

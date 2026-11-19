@@ -89,8 +89,7 @@ def hardware_rows(ui):
         rows.append(('microphone-disabled-symbolic' if muted else 'audio-input-microphone-symbolic',
                      'Microphone', 'warn' if muted else 'ok',
                      f'{name} · {"MUTED" if muted else f"on, level {vol}%"}',
-                     [('Unmute' if muted else 'Mute', ui.mic_toggle),
-                      ('Test: record 3 s', ui.mic_test)]))
+                     [('Unmute' if muted else 'Mute', ui.mic_toggle)]))      # the test: Audio tab
 
     # sound outputs and inputs: the Audio tab (pages_audio.py)
 
