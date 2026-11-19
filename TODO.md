@@ -103,7 +103,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   re-made each open and pile up in `$XDG_RUNTIME_DIR`.
   Fix: `hashlib.sha1(f'{p}|{mtime}|{THUMB}'.encode()).hexdigest()`; prune above 50 files.
 
-- [ ] **1.12 Drive watcher: lost events and a stuck folder** (S)
+- [x] **1.12 Drive watcher: lost events and a stuck folder** (S)
   `apps/zorro-drive/zorro-drive` about lines 349-350, 366-367.
   If `sync_folder` raises in the thread, `running.pop` never runs and that folder is never
   uploaded again. Events during a running sync are dropped.

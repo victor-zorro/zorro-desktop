@@ -352,26 +352,40 @@ def cmd_watch(_args):
                 time.sleep(10)
             continue
         proc = subprocess.Popen(
-            ['inotifywait', '-m', '-r', '-q', '--format', '%w%f',
+            ['inotifywait', '-m', '-r', '-q', '--format', '%e %w%f',
              '-e', 'close_write,moved_to,moved_from,create,delete', *roots],
             stdout=subprocess.PIPE, text=True)
-        pending, running = {}, {}
+        pending, running, dirty = {}, {}, set()
         next_check = 0
+
+        def work(f):
+            try:
+                sync_folder(f)
+            except Exception as e:      # noqa: BLE001 - never leave the folder marked running
+                print(f"zorro-drive watch: {folder_title(f)}: {e}", file=sys.stderr)
+            finally:
+                running.pop(f['id'], None)
+                if f['id'] in dirty:    # saved while it synced: once more, after the debounce
+                    dirty.discard(f['id'])
+                    pending[f['id']] = time.monotonic() + DEBOUNCE
         try:
             while True:
                 r, _, _ = select.select([proc.stdout], [], [], 1)
                 if r:
-                    path = proc.stdout.readline()
-                    if not path:
+                    line = proc.stdout.readline()
+                    if not line:
                         break                   # inotifywait died: restart it
-                    path = path.rstrip('\n')
+                    events, _, path = line.rstrip('\n').partition(' ')
                     if IGNORE.search(path):
                         continue
                     for root, f in roots.items():
                         if (path + '/').startswith(root + '/'):
-                            # changes written by a running sync are not new local edits
                             if f['id'] not in running and not is_locked(f['id']):
                                 pending[f['id']] = time.monotonic() + DEBOUNCE
+                            elif 'CLOSE_WRITE' in events:
+                                # during a sync: rclone writes *.partial and renames it, so a
+                                # file written in place is a save of yours: sync again after
+                                dirty.add(f['id'])
                             break
                 now = time.monotonic()
                 if now >= next_check:
@@ -383,12 +397,14 @@ def cmd_watch(_args):
                              and (st.get('retry_at') or 0) <= time.time())
                                 or st.get('message') == 'sync was interrupted'):
                             pending.setdefault(f['id'], now)
+                for fid in [x for x in dirty if x not in running and not is_locked(x)]:
+                    dirty.discard(fid)          # the timer's sync (another process) ended
+                    pending[fid] = now + DEBOUNCE
                 for fid, due in list(pending.items()):
                     if now >= due and fid not in running:
                         del pending[fid]
                         f = next(x for x in roots.values() if x['id'] == fid)
-                        t = threading.Thread(target=lambda f=f: (sync_folder(f),
-                                                                  running.pop(f['id'], None)))
+                        t = threading.Thread(target=work, args=(f,))
                         running[fid] = t
                         t.start()
                 if (CONF.stat().st_mtime if CONF.exists() else 0) != mtime:
