@@ -110,8 +110,12 @@ Then the **brush button** in the ribbon (or the command "Sweep notes: Open") ope
   Deleted notes, and pictures only they use, go to the vault's `.trash` folder.
 - **Sort**: after 10 kept notes, drag each one onto a notebook, or tap a notebook (laptop: 1–9).
   The notebooks are the folders of this vault, plus "Stays in …" and "+ New folder". There's no
-  "best match" here, and no moving to another vault: a plugin only sees its own vault. The
+  moving to another vault here: a plugin only sees its own vault. The
   laptop app still does both.
+- **Best match**: the notebook closest in meaning to the note is lit up ("best match"); tap it,
+  or press Enter. `zorro-sweep-presort` works these out on the laptop from the zorro-search
+  index and writes them into the plugin's data (`suggest`), so the phone gets them through Sync.
+  zorro-search runs it after every index update. Only folders of the same vault.
 - Undo under the card, two-finger pinch or Ctrl+scroll to zoom, double-tap to open the note.
 
 **Progress is shared.** The plugin keeps it in `.obsidian/plugins/zorro-sweep/data.json`, which

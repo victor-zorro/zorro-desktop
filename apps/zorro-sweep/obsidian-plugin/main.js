@@ -309,7 +309,7 @@ class SweepView extends ItemView {
     this.zoom = 1;
     this.drawUndo();
     this.hintEl.setText(this.mode === 'sort'
-      ? 'drag onto a notebook · tap a notebook · 1–9 · space skip · double-click open · ctrl+Z undo'
+      ? 'drag onto a notebook · tap a notebook · 1–9 · enter best match · space skip · double-click open · ctrl+Z undo'
       : '← keep · → delete · space skip · double-click open · ctrl+Z undo · +/− zoom');
     if (!q.length) {
       const e = this.stage.createDiv('zs-empty');
@@ -492,6 +492,7 @@ class SweepView extends ItemView {
   placeNotebooks() {
     for (const el of this.stage.querySelectorAll('.zs-nb')) el.remove();
     this.nbs = this.dests();
+    const best = this.cardFile && (this.d.suggest || {})[this.cardFile.path];
     const W = this.stage.clientWidth, H = this.stage.clientHeight;
     const narrow = W < 640;
     const cz = narrow ? { x: W * 0.1, y: H * 0.34, w: W * 0.8, h: H * 0.32 }
@@ -541,6 +542,10 @@ class SweepView extends ItemView {
       const t = el.createDiv('zs-nb-t');
       t.createDiv({ text: d.name });
       if (d.n != null) t.createDiv({ cls: 'zs-nb-n', text: `${d.n} notes` });
+      if (d.path && d.path === best) {             // the pre-sort's suggestion (zorro-sweep-presort)
+        el.addClass('is-best');
+        t.createDiv({ cls: 'zs-nb-best', text: 'best match' });
+      }
       el.addEventListener('click', () => { if (!this.busy) this.sendTo(i, false); });
       d.el = el;
     });
@@ -722,6 +727,10 @@ class SweepView extends ItemView {
     else if (this.mode === 'sweep' && k === 'ArrowLeft') this.fly('keep');
     else if (this.mode === 'sweep' && k === 'ArrowRight') this.fly('delete');
     else if (this.mode === 'sort' && /^[1-9]$/.test(k)) this.sendTo(Number(k) - 1, false);
+    else if (this.mode === 'sort' && k === 'Enter') {
+      const i = (this.nbs || []).findIndex((d) => d.el && d.el.hasClass('is-best'));
+      if (i >= 0) this.sendTo(i, false); else used = false;
+    }
     else if (k === 'PageDown' || k === 'PageUp') {
       const b = this.cardEl.querySelector('.zs-body');
       if (b) b.scrollBy(0, (k === 'PageDown' ? 1 : -1) * b.clientHeight * 0.8);

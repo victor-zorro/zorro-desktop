@@ -278,6 +278,16 @@ class Index:
 
 # ---- service and client -------------------------------------------------------------------
 
+def presort():
+    """Sweep notes' best-match suggestions follow the index (apps/zorro-sweep, if installed)"""
+    exe = Path.home() / '.local/bin/zorro-sweep-presort'
+    if exe.exists():
+        try:
+            subprocess.run([str(exe)], stdout=subprocess.DEVNULL, timeout=300)   # in the updater thread
+        except (OSError, subprocess.SubprocessError):
+            pass
+
+
 def serve():
     try:
         os.nice(10)
@@ -298,6 +308,7 @@ def serve():
                 n = idx.update(lambda *a: None)
                 if n:
                     print(f'index: {n} files read, {len(idx.meta)} pieces', flush=True)
+                    presort()
             except Exception as e:          # noqa: BLE001 - keep serving with the old index
                 print(f'index update failed: {e}', flush=True)
             state['busy'] = False

@@ -99,6 +99,9 @@
   font-size: 13px; color: var(--zs-fg); line-height: 1.25; }
 .zs-nb-n { font: 11px var(--zs-mono); color: var(--zs-dim); margin-top: 3px; }
 .zs-nb.is-hot .zs-nb-t, .zs-nb.is-hot .zs-nb-k { color: var(--zs-cyan); }
+.zs-nb.is-best svg > * { stroke: var(--zs-cyan); stroke-width: 2; fill: rgba(25, 230, 255, .07); }
+.zs-nb.is-best .zs-nb-t { color: var(--zs-cyan); }
+.zs-nb-best { font: 10px var(--zs-mono); letter-spacing: 2px; color: var(--zs-cyan); margin-top: 3px; text-transform: uppercase; }
 .zs-input { width: 100%; margin-bottom: 12px; }
 
 /* phone (and narrow panes): the top bar in two rows, room for Obsidian's bottom bar */

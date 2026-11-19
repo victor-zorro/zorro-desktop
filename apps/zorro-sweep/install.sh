@@ -7,6 +7,7 @@ here=$(dirname "$(realpath "$0")")
 mkdir -p ~/.local/bin ~/.local/share/applications
 ln -sfn "$here/zorro-sweep" ~/.local/bin/zorro-sweep
 ln -sfn "$here/zorro-sweep.desktop" ~/.local/share/applications/zorro-sweep.desktop
+ln -sfn "$here/zorro-sweep-presort" ~/.local/bin/zorro-sweep-presort
 
 # the Obsidian plugin, in every vault (Obsidian Sync takes it to the phone): copied, not linked,
 # so Sync sees real files. Enabled in community-plugins.json; the vault list is for its picker.
@@ -54,4 +55,5 @@ for v in vaults:
         os.replace(tmp, data)
 print(f"Sweep notes plugin in {len(vaults)} vault(s): {', '.join(names)}")
 PY
+"$here/zorro-sweep-presort" 2>/dev/null || true   # best-match suggestions (needs the search index)
 echo "Sweep notes installed (Dialer / rofi: Sweep notes; in Obsidian: the brush button)"

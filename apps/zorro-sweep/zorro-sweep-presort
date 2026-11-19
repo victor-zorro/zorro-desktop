@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Pre-sort for Sweep in Obsidian: for every note at the top of a vault (and directly in its
+top-level folders), the folder of that vault closest in meaning, from zorro-search's index.
+Written as "suggest" into the Obsidian plugin's data.json, where Sweep (laptop and phone)
+lights that notebook up as the best match. Only vaults that have the plugin.
+
+zorro-search runs this after each index update; by hand: zorro-sweep-presort [-v]"""
+import json
+import os
+import sys
+from pathlib import Path
+
+HERE = Path(os.path.realpath(__file__)).parent
+sys.path.insert(0, str(HERE))
+import gi                                       # noqa: E402
+gi.require_version('GLib', '2.0')
+from sweeplib import Meaning, attach_dir, vaults  # noqa: E402
+
+
+MIN = 0.08                     # least likeness for a suggestion (after centring)
+
+
+def folders(vault):
+    att = attach_dir(vault)
+    return sorted(f for f in vault.iterdir()
+                  if f.is_dir() and not f.name.startswith(('.', '_')) and f != att)
+
+
+def presort(vault, meaning):
+    data = vault / '.obsidian/plugins/zorro-sweep/data.json'
+    if not data.parent.joinpath('manifest.json').exists():
+        return None
+    np = meaning.np
+    pre = str(vault) + '/'
+    mine = [v for p, v in meaning.note.items() if p.startswith(pre)]
+    # measured from the vault's average note: what all notes share (language, the way you
+    # write) no longer pulls every note towards the biggest folder
+    mu = np.mean(mine, 0) if mine else 0
+    dests = [(f, meaning.centre(f)) for f in folders(vault)]
+    dests = [(f, meaning.unit(c - mu)) for f, c in dests if c is not None]
+    suggest = {}
+    if len(dests) > 1:
+        notes = list(vault.glob('*.md'))
+        for f, _ in dests:
+            notes += f.glob('*.md')
+        for p in notes:
+            v = meaning.of(p)
+            if v is None:
+                continue
+            v = meaning.unit(v - mu)
+            own = p.parent
+            best = max(((float(v @ c), f) for f, c in dests if f != own), default=None, key=lambda t: t[0])
+            if best and best[0] >= MIN:          # too far from every notebook: no suggestion
+                suggest[p.relative_to(vault).as_posix()] = best[1].relative_to(vault).as_posix()
+    try:
+        st = json.loads(data.read_text())
+    except (OSError, ValueError):
+        st = {}
+    if st.get('suggest') == suggest:
+        return len(suggest)
+    st['suggest'] = suggest
+    tmp = data.with_name('data.json.tmp')
+    tmp.write_text(json.dumps(st, indent=2, ensure_ascii=False))
+    os.replace(tmp, data)
+    return len(suggest)
+
+
+def main():
+    loud = '-v' in sys.argv
+    meaning = Meaning()
+    if not meaning.ok:
+        print('zorro-sweep-presort: no zorro-search index yet', file=sys.stderr)
+        return 1
+    for v in vaults():
+        n = presort(Path(v), meaning)
+        if loud and n is not None:
+            print(f'{Path(v).name}: {n} notes with a best match')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
