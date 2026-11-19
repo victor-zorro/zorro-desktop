@@ -90,7 +90,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   Fix: refresh `self.info[wid]` with `self.program(w)` inside `snapshot()`; keep the old
   value when /proc is already gone.
 
-- [ ] **1.10 Web-app launchers wipe winpos settings** (S)
+- [x] **1.10 Web-app launchers wipe winpos settings** (S)
   `config/bin/.local/bin/{whatsapp,instagram,linkedin,google-apps}`; winpos writes a block
   to the same `user.js` (`apps/zorro-winpos/zorro-winpos` about 437-443).
   The four scripts are one script copied, and each start overwrites `user.js`.

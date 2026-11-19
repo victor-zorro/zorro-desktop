@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# zwebapp [--tabs] CLASS PROFILE URL [URL...]
+# A website in its own Firefox window: its own profile (~/.local/share/firefox-PROFILE),
+# window class CLASS (icon, Alt+Tab entry, notifications, place remembered by zorro-winpos).
+# Already open? Pull that window to the current desktop instead of starting a second one.
+#   --tabs   reopen the last tabs; the URLs are only opened on the very first start
+# Its settings go in a marked block at the top of the profile's user.js, so the blocks other
+# tools write there (zorro-winpos: reopen windows, Zorro app: spell-check languages) stay.
+set -euo pipefail
+
+tabs=0
+if [[ ${1:-} == --tabs ]]; then tabs=1; shift; fi
+if (( $# < 3 )); then
+  echo "usage: zwebapp [--tabs] CLASS PROFILE URL [URL...]" >&2
+  exit 2
+fi
+class=$1 profile=$2
+shift 2
+
+if command -v wmctrl >/dev/null && wmctrl -lx | awk -v c=".$class" \
+    'substr($3, length($3) - length(c) + 1) == c {f=1} END {exit !f}'; then
+  exec wmctrl -x -R "$class"
+fi
+
+P="$HOME/.local/share/firefox-$profile"
+mkdir -p "$P"
+begin='// zorro: web app (zwebapp)' end='// zorro: end web app'
+if (( tabs )); then
+  prefs='user_pref("browser.startup.page", 3);'
+else
+  prefs="user_pref(\"browser.startup.page\", 1);
+user_pref(\"browser.startup.homepage\", \"$1\");"
+fi
+block="$begin
+$prefs
+user_pref(\"browser.shell.checkDefaultBrowser\", false);
+user_pref(\"browser.tabs.warnOnClose\", false);
+$end"
+# the rest of user.js without our old block (and without the old unmarked lines we used
+# to write, which would otherwise stay above the other blocks forever)
+rest=$(awk -v b="$begin" -v e="$end" '
+  $0 == b {skip=1; next}
+  skip && $0 == e {skip=0; next}
+  skip {next}
+  /^user_pref\("browser\.(startup\.(page|homepage)|shell\.checkDefaultBrowser|tabs\.warnOnClose)"/ && !inblock {next}
+  /^\/\/ zorro:/ {inblock = ($0 !~ /end/)}
+  {print}' "$P/user.js" 2>/dev/null || true)
+printf '%s\n%s' "$block" "${rest:+$rest
+}" > "$P/user.js.tmp" && mv "$P/user.js.tmp" "$P/user.js"
+
+if (( tabs )) && [[ -f $P/sessionstore.jsonlz4 || -d $P/sessionstore-backups ]]; then
+  exec firefox --new-instance --class "$class" --profile "$P"
+fi
+exec firefox --new-instance --class "$class" --profile "$P" "$@"

@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# Gmail, Calendar and Drive in their own Firefox profile and window
-# Already open? Pull that window to the current desktop instead of opening an empty new one.
-if command -v wmctrl >/dev/null && wmctrl -lx | awk '$3 ~ /\.GoogleApps$/ {f=1} END {exit !f}'; then
-  exec wmctrl -x -R GoogleApps
-fi
-P="$HOME/.local/share/firefox-google"
-mkdir -p "$P"
-printf 'user_pref("browser.startup.page", 3);\n' > "$P/user.js"   # restore tabs
-if [[ ! -f $P/sessionstore.jsonlz4 && ! -d $P/sessionstore-backups ]]; then
-  exec firefox --new-instance --class GoogleApps --profile "$P" \
-    https://mail.google.com https://calendar.google.com https://drive.google.com
-fi
-exec firefox --new-instance --class GoogleApps --profile "$P"
+# Gmail, Calendar and Drive in their own Firefox window (class GoogleApps), tabs reopened; see zwebapp
+exec zwebapp --tabs GoogleApps google \
+  https://mail.google.com https://calendar.google.com https://drive.google.com

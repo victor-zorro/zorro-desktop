@@ -1,15 +1,3 @@
 #!/usr/bin/env bash
-# LinkedIn in its own Firefox window (class LinkedIn): its own profile, icon, Alt+Tab entry and notifications.
-# Already open? Pull that window to the current desktop instead of starting a second one.
-if command -v wmctrl >/dev/null && wmctrl -lx | awk '$3 ~ /\.LinkedIn$/ {f=1} END {exit !f}'; then
-  exec wmctrl -x -R LinkedIn
-fi
-P="$HOME/.local/share/firefox-linkedin"
-mkdir -p "$P"
-cat > "$P/user.js" <<'PREFS'
-user_pref("browser.startup.page", 1);
-user_pref("browser.startup.homepage", "https://www.linkedin.com/feed/");
-user_pref("browser.shell.checkDefaultBrowser", false);
-user_pref("browser.tabs.warnOnClose", false);
-PREFS
-exec firefox --new-instance --class LinkedIn --profile "$P" https://www.linkedin.com/feed/
+# LinkedIn in its own Firefox window (class LinkedIn); see zwebapp
+exec zwebapp LinkedIn linkedin https://www.linkedin.com/feed/
