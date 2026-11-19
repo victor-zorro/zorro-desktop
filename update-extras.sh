@@ -10,10 +10,17 @@ else
 fi
 
 gh_deb() {
-  local repo=$1 pattern=$2 url
+  local repo=$1 pattern=$2 pkg=$3 json url tag have
   # a failed download (e.g. GitHub's limit for anonymous calls) skips this app, not the rest
-  url=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-    | grep -o '"browser_download_url": *"[^"]*"' | cut -d'"' -f4 \
+  json=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest") || json=''
+  tag=$(grep -m1 -o '"tag_name": *"[^"]*"' <<<"$json" | cut -d'"' -f4) || true
+  have=$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null) || have=''
+  # installed already at this release? (versions like 1.18.2+64 start with the tag)
+  if [[ -n $tag && -n $have && ( $have == "${tag#v}" || $have == "${tag#v}"[+~-]* ) ]]; then
+    echo "==> $repo: $pkg $have is current"
+    return 0
+  fi
+  url=$(grep -o '"browser_download_url": *"[^"]*"' <<<"$json" | cut -d'"' -f4 \
     | grep -E "$pattern" | head -n1) || true
   if [[ -z $url ]]; then echo "!! No .deb found for $repo ($ARCH), skipped"; return 0; fi
   echo "==> $repo: $(basename "$url")"
@@ -21,11 +28,10 @@ gh_deb() {
   sudo apt install -y "/tmp/${repo##*/}.deb" || echo "!! install failed: $repo"
 }
 
-gh_deb emqx/MQTTX "$MQTTX_PAT"
-gh_deb localsend/localsend "$LS_PAT"
+gh_deb emqx/MQTTX "$MQTTX_PAT" mqttx
+gh_deb localsend/localsend "$LS_PAT" localsend
 # Obsidian (notes; synced with Obsidian Sync): official .deb, amd64 only
-if [[ $ARCH == amd64 ]]; then gh_deb obsidianmd/obsidian-releases 'obsidian_.*_amd64\.deb$'; fi
-
+if [[ $ARCH == amd64 ]]; then gh_deb obsidianmd/obsidian-releases 'obsidian_.*_amd64\.deb$' obsidian; fi
 # --- rclone (Google Drive mount/sync) ------------------------------------
 # Official build: Debian's package is too old for reliable bisync.
 echo "==> rclone"

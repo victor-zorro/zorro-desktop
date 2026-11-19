@@ -47,38 +47,50 @@ if has laptop && [[ -f packages/laptop-$DISTRO.txt ]]; then install_list "laptop
 has laptop && sudo usermod -aG video "$USER"   # brightnessctl without sudo
 
 # --- Apt repositories ---------------------------------------------------
+# A repo is added once; a rerun skips the key downloads and the second apt update.
 log "Adding apt repositories"
 sudo install -d -m 0755 /etc/apt/keyrings
+repos_added=0
 
 # Mozilla (Firefox .deb; pin also beats Ubuntu's snap transitional package)
-curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
-  | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc >/dev/null
-echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
-  | sudo tee /etc/apt/sources.list.d/mozilla.list >/dev/null
+if [[ ! -s /etc/apt/sources.list.d/mozilla.list ]]; then
+  curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
+    | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc >/dev/null
+  echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
+    | sudo tee /etc/apt/sources.list.d/mozilla.list >/dev/null
+  repos_added=1
+fi
 printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
   | sudo tee /etc/apt/preferences.d/mozilla >/dev/null
 
 # Anthropic (Claude desktop)
-sudo curl -fsSLo /usr/share/keyrings/claude-desktop-archive-keyring.asc \
-  https://downloads.claude.ai/claude-desktop/key.asc
-echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
-  | sudo tee /etc/apt/sources.list.d/claude-desktop.list >/dev/null
+if [[ ! -s /etc/apt/sources.list.d/claude-desktop.list ]]; then
+  sudo curl -fsSLo /usr/share/keyrings/claude-desktop-archive-keyring.asc \
+    https://downloads.claude.ai/claude-desktop/key.asc
+  echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
+    | sudo tee /etc/apt/sources.list.d/claude-desktop.list >/dev/null
+  repos_added=1
+fi
 
 # NetBird
-curl -fsSL https://pkgs.netbird.io/debian/public.key \
-  | sudo gpg --dearmor --yes -o /usr/share/keyrings/netbird-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/netbird-archive-keyring.gpg] https://pkgs.netbird.io/debian stable main" \
-  | sudo tee /etc/apt/sources.list.d/netbird.list >/dev/null
+if [[ ! -s /etc/apt/sources.list.d/netbird.list ]]; then
+  curl -fsSL https://pkgs.netbird.io/debian/public.key \
+    | sudo gpg --dearmor --yes -o /usr/share/keyrings/netbird-archive-keyring.gpg
+  echo "deb [signed-by=/usr/share/keyrings/netbird-archive-keyring.gpg] https://pkgs.netbird.io/debian stable main" \
+    | sudo tee /etc/apt/sources.list.d/netbird.list >/dev/null
+  repos_added=1
+fi
 
 # Signal (amd64 only)
-if [[ $ARCH == amd64 ]]; then
+if [[ $ARCH == amd64 && ! -s /etc/apt/sources.list.d/signal-xenial.list ]]; then
   curl -fsSL https://updates.signal.org/desktop/apt/keys.asc \
     | sudo gpg --dearmor --yes -o /usr/share/keyrings/signal-desktop-keyring.gpg
   echo "deb [arch=amd64 signed-by=/usr/share/keyrings/signal-desktop-keyring.gpg] https://updates.signal.org/desktop/apt xenial main" \
     | sudo tee /etc/apt/sources.list.d/signal-xenial.list >/dev/null
+  repos_added=1
 fi
 
-sudo apt update
+if (( repos_added )); then sudo apt update; fi
 
 # --- Apps ---------------------------------------------------------------
 log "Apps from apt repositories"
@@ -219,7 +231,9 @@ sudo timedatectl set-ntp true || true
 # --- Locale: UTF-8, English language, European formats -------------------
 log "Locale: en_US.UTF-8 with en_IE formats (24h, A4, metric, €)"
 sudo apt install -y --no-install-recommends locales
-if [[ $DISTRO == debian ]]; then
+if locale -a 2>/dev/null | grep -qix 'en_us.utf8' && locale -a | grep -qix 'en_ie.utf8'; then
+  echo "locales already built"
+elif [[ $DISTRO == debian ]]; then
   # Debian's locale-gen ignores arguments; it builds what /etc/locale.gen lists
   sudo sed -i -E 's/^# *(en_US\.UTF-8 UTF-8)/\1/; s/^# *(en_IE\.UTF-8 UTF-8)/\1/' /etc/locale.gen
   sudo locale-gen

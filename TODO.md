@@ -205,7 +205,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
      (`zsettings/eq.py` about 103-136): cache the id after start.
   i) `fx.js` calls `gl.getAttribLocation` every frame (about 325, 336, 779): cache at init.
 
-- [ ] **2.13 install.sh: a rerun repeats heavy steps** (S-M)
+- [x] **2.13 install.sh: a rerun repeats heavy steps** (S-M)
   `install.sh` lines 29, 54-81, 96, 166, 224-225; `update-extras.sh`.
   Fix: write repo key / list files only when missing and run the second `apt update` only if
   one changed; guard locale-gen with `locale -a | grep -q en_IE.utf8`; in update-extras
