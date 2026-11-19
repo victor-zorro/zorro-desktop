@@ -35,7 +35,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   notify only when the error text changes; break the batch on `rate_limited`.
   Check: `journalctl --user -u zorro-drive-sync` shows the folder synced or skipped.
 
-- [ ] **1.2 Drive: timer counts from the start of a run** (S)
+- [x] **1.2 Drive: timer counts from the start of a run** (S)
   `apps/zorro-drive/systemd/zorro-drive-sync.timer` lines 5-6.
   `OnUnitActiveSec=30min` with runs of 16-26 minutes leaves gaps of 6-14 minutes.
   Fix: `OnUnitInactiveSec=30min`. Rerun the app's install.sh so the unit is reloaded.
