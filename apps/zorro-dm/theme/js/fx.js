@@ -13,6 +13,7 @@
     animal: 'whale',            // whale vaquita hammerhead turtle manta random
     line_colour: '#e6e6ec', density: 1, size: 1, swim_speed: 1,
     pass_seconds: 70, gap_seconds: 0, far: 0.33,
+    max_animals: 3,             // at most this many at once (on battery the screens ask for 1)
     snow_amount: 140, snow_speed: 1, snow_size: 1, snow_colour: '#9a9aa0', snow_alpha: 1,
     // defaults = the "Chromatic sea" preset (theme/presets.json)
     grain: 0.6, scratches: 0.25, dust: 0.25, scanlines: 0.6, vignette: 1, flicker: 0.3,
@@ -356,7 +357,7 @@
 
   // ---------- camera / projection -------------------------------------------
   const CAM = 3;                            // camera distance
-  let pass = null, nextPassAt = 0, firstPass = true;
+  let passes = [], nextPassAt = 0, firstPass = true;
   // 'random' deals the animals like cards: a shuffled round of all of them, so every one comes by
   // before any repeats, and never the same twice in a row. The round is remembered between
   // locks (localStorage) where the page may keep it; otherwise it lasts this page.
@@ -397,7 +398,7 @@
     firstPass = false;
     const dir = Math.random() < .5 ? 1 : -1; // 1: swims right-to-left
     const avg = Math.max(10, +cfg.pass_seconds || 70);
-    pass = {
+    const pass = {
       animal: pickAnimal(),
       t0: now, dur: avg * (.85 + Math.random() * .35), dir,
       y: -.18 + Math.random() * .3,
@@ -409,10 +410,10 @@
     };
     if (pass.far) { pass.z += 3; pass.len *= .8; }
     pass.t0 -= head * pass.dur * 1000;
+    return pass;
   }
 
-  function makeXform(t, now, tilt) {
-    const p = pass;
+  function makeXform(p, t, now, tilt) {
     const k = (now - p.t0) / (p.dur * 1000);
     const span = 2.6 + p.z * .9;
     const X = p.dir * (span - 2 * span * k);
@@ -440,7 +441,8 @@
 
   // segment batching by brightness bucket (front of the body brighter)
   const NB = 5;
-  const buckets = Array.from({ length: NB }, () => []);
+  let buckets = null;                       // the bucket set seg() fills (one per animal)
+  const bucketSets = [];
   function seg(a, b, rr) {
     const depth = (a[2] + b[2]) * .5 / rr;               // -1 front .. +1 back
     let i = Math.floor((1 - (depth * .5 + .5)) * NB);
@@ -459,27 +461,33 @@
 
   // the animal's lines for this frame, projected and sorted into brightness buckets;
   // false while the water is empty
-  function buildAnimal(t, now) {
-    if (pass && now - pass.t0 > pass.dur * 1000) {        // the animal has gone
-      pass = null;
-      nextPassAt = now + Math.max(0, +cfg.gap_seconds || 0) * 1000;
+  function buildAnimals(t, now) {
+    const before = passes.length;
+    passes = passes.filter((p) => now - p.t0 <= p.dur * 1000);      // the ones that swam off
+    if (passes.length < before) nextPassAt = Math.max(nextPassAt, now + Math.max(0, +cfg.gap_seconds || 0) * 1000);
+    const most = Math.max(1, Math.min(3, Math.round(+cfg.max_animals || 1)));
+    if (passes.length < most && now >= nextPassAt) {
+      passes.push(newPass(now));
+      // the next one joins later, so they don't all swim in together
+      const avg = Math.max(10, +cfg.pass_seconds || 70);
+      nextPassAt = now + avg * 1000 / most * (.5 + Math.random());
     }
-    if (!pass) {
-      if (now < nextPassAt) return false;                  // empty water for a while
-      newPass(now);
-    }
-    const m = MODELS[pass.animal](t);
-    const savedLen = pass.len;                           // per-animal scale and the size setting
-    pass.len = savedLen * (m.scale || 1) * Math.max(.2, +cfg.size || 1);
-    const rr = .12 * pass.len;
-    const P = makeXform(t, now, m.tilt || 0);
-    pass.len = savedLen;
-    for (const b of buckets) b.length = 0;
-    for (const ln of m.lines) {
-      let prev = null;
-      for (const pt of ln) { const q = P(pt); if (prev) seg(prev, q, rr); prev = q; }
-    }
-    return true;
+    const out = [];
+    passes.forEach((p, k) => {
+      if (!bucketSets[k]) bucketSets[k] = Array.from({ length: NB }, () => []);
+      buckets = bucketSets[k];
+      const m = MODELS[p.animal](t);
+      const len = p.len * (m.scale || 1) * Math.max(.2, +cfg.size || 1);   // per-animal scale and the size setting
+      const P = makeXform(Object.assign({}, p, { len }), t, now, m.tilt || 0);
+      const rr = .12 * len;
+      for (const b of buckets) b.length = 0;
+      for (const ln of m.lines) {
+        let prev = null;
+        for (const pt of ln) { const q = P(pt); if (prev) seg(prev, q, rr); prev = q; }
+      }
+      out.push({ far: p.far, z: p.z, buckets });
+    });
+    return out.sort((a, b) => b.z - a.z);                        // far ones first, near ones on top
   }
 
   // ---------- GPU scene: lines and snow drawn by WebGL into a texture --------
@@ -542,11 +550,11 @@
       }
       const nSnow = n / 7;
       // the animal as lines, nearer = brighter
-      if (buildAnimal(t, now)) {
+      for (const an of buildAnimals(t, now)) {
         const [cr, cg, cb] = hex(cfg.line_colour).map((v) => v / 255);
-        const fade = pass.far ? .45 : 1;
+        const fade = an.far ? .45 : 1;
         for (let i = 0; i < NB; i++) {
-          const b = buckets[i];
+          const b = an.buckets[i];
           const f = (70 + 170 * (i / (NB - 1))) / 240;
           const a = alpha * fade * (.25 + .75 * (i / (NB - 1)));
           if (verts.length < n + b.length / 4 * 14 + 14) {
@@ -603,15 +611,14 @@
       wx.fillRect(xx * wc.width, (yy < 0 ? yy + 1 : yy) * wc.height, r, r);
     }
 
-    if (!buildAnimal(t, now)) return;
-
     // stroke buckets in the line colour, nearer = brighter
     const [cr, cg, cb] = hex(cfg.line_colour);
-    const fade = pass.far ? .45 : 1;
-    wx.lineWidth = pass.far ? .8 : 1.15;
+    for (const an of buildAnimals(t, now)) {
+    const fade = an.far ? .45 : 1;
+    wx.lineWidth = an.far ? .8 : 1.15;
     wx.lineCap = 'round';
     for (let i = 0; i < NB; i++) {
-      const b = buckets[i];
+      const b = an.buckets[i];
       if (!b.length) continue;
       const f = (70 + 170 * (i / (NB - 1))) / 240;
       wx.strokeStyle = `rgb(${Math.round(cr * f)},${Math.round(cg * f)},${Math.round(cb * f)})`;
@@ -619,6 +626,7 @@
       wx.beginPath();
       for (let k = 0; k < b.length; k += 4) { wx.moveTo(b[k], b[k + 1]); wx.lineTo(b[k + 2], b[k + 3]); }
       wx.stroke();
+    }
     }
     wx.globalAlpha = 1;
   }
@@ -650,8 +658,10 @@
   // only changes ten times a second).
   const STEP_PX = 3;
   function animalFps(now) {
-    const p = pass;
-    if (!p || now < p.t0 || now - p.t0 > p.dur * 1000) return 0;
+    return passes.reduce((most, p) => Math.max(most, passFps(p, now)), 0);
+  }
+  function passFps(p, now) {
+    if ( now < p.t0 || now - p.t0 > p.dur * 1000) return 0;
     const k = (now - p.t0) / (p.dur * 1000);
     const span = 2.6 + p.z * .9;
     const f = CAM / (CAM + p.z);
@@ -775,7 +785,7 @@
     setLook(obj) {
       const animal = cfg.animal;
       Object.assign(cfg, obj || {});
-      if (cfg.animal !== animal) { pass = null; nextPassAt = 0; firstPass = true; }
+      if (cfg.animal !== animal) { passes = []; nextPassAt = 0; firstPass = true; }
       makeSnow();
       lastFrame = 0; wake();
     },

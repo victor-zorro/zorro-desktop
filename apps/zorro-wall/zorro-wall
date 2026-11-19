@@ -73,7 +73,10 @@ def look(c):
     for k in ('glitch_rate', 'grain', 'chroma'):        # keep the user's lower values
         if k in base:
             out[k] = min(float(base[k]), CALM[k])
-    out['fps'] = c['fps_battery'] if on_battery() else c['fps_ac']
+    battery = on_battery()
+    out['fps'] = c['fps_battery'] if battery else c['fps_ac']
+    if battery:
+        out['max_animals'] = 1          # up to 3 at once only on the charger
     out['fps_min'] = min(float(c.get('fps_calm', 8)), out['fps'])
     out['render_scale'] = c.get('render_scale', 0.5)
     return out
