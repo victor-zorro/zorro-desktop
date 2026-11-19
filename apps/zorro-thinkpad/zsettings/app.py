@@ -174,15 +174,18 @@ class Win(HomePages, FacePages, LangPages, AccountsPages, ThinkpadPages, Printer
         return hw
 
     def build_desktop(self):
-        desk = Group()
-        desk.section('wall', 'Wallpaper', self.wall_page())
-        desk.section('dial', 'Dialer', self.dial_page())
-        desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()))
-        desk.section('fx', 'Overlays', self.fx_page('overlay'))
-        desk.section('windows', 'Windows', self.windows_page())
-        desk.section('text', 'Text & colours', self.text_page())
-        desk.section('lang', 'Languages', self.lang_page())
-        desk.section('applook', 'This app', self.fx_page('app'))
+        desk = Group()                  # three groups; each part a small sub-heading
+        desk.heading('Desktop')
+        desk.section('wall', 'Wallpaper', self.wall_page(), sub=True)
+        desk.section('dial', 'Dialer', self.dial_page(), sub=True)
+        desk.section('orb', 'Info circle', self.fx_page('orb', self.orb_page()), sub=True)
+        desk.heading('Windows & text')
+        desk.section('windows', 'Windows', self.windows_page(), sub=True)
+        desk.section('text', None, self.text_page())         # Text & colours, Icons
+        desk.section('lang', None, self.lang_page())         # Spell checking
+        desk.heading('Effects')
+        desk.section('fx', 'Overlays', self.fx_page('overlay'), sub=True)
+        desk.section('applook', 'This app', self.fx_page('app'), sub=True)
         return desk
 
     def build_look(self):

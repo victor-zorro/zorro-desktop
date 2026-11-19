@@ -285,19 +285,17 @@ class DesktopPages:
                 setattr(self, 'icon_build_id', None)) and False)
         style.connect('changed', icons_changed)
         icon_op.connect('value-changed', icons_changed)
-        g = Gtk.Grid(column_spacing=12, row_spacing=8)
-        for i, (label, w) in enumerate((('App icons', style), ('Icons: visibility', icon_op),
-                                        ('Font', font), ('Size in apps', spin('font_size', 6, 20)),
-                                        ('Size in the terminal', spin('term_size', 6, 24)),
-                                        ('Text colour', colour('text')),
-                                        ('Accent colour', colour('accent')))):
-            g.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
-            g.attach(w, 1, i, 1, 1)
         box.add(heading('Screen font and colours', 'Text & colours'))
-        box.add(g)
+        box.add(ui.form([('Font', font), ('Size in apps', spin('font_size', 6, 20)),
+                         ('Size in the terminal', spin('term_size', 6, 24)),
+                         ('Text colour', colour('text')), ('Accent colour', colour('accent'))]))
         box.add(note('Used by GTK apps (windows opened from now on), the terminal (right '
                      'away), the window title bars and menus (accent) and the info circle '
                      '(text). Chromatic sea: text #d8d8de, accent cyan #19e6ff.'))
+        box.add(heading('App icons', 'Icons'))
+        box.add(ui.form([('Style', style), ('Visibility', icon_op)]))
+        box.add(note('The icons of the apps in the Dialer, Alt+Tab and the window menus. '
+                     'They are rebuilt a moment after a change.'))
         return box
 
     # -- windows: title bars, compositor, kitty
@@ -520,7 +518,7 @@ class DesktopPages:
         combo = lambda key, options: ui.combo(options, c['look'].get(key),                  # noqa: E731
                                               lambda v: save(look={**c['look'], key: v}))
 
-        box.add(heading('Living wallpaper', 'Wallpaper'))
+        box.add(heading('Living wallpaper', 'Look'))           # under the sub-heading Wallpaper
         own = grid([('Animal', combo('animal', LOOK_ANIMALS)),
                     ('Background', combo('background', LOOK_BACKGROUNDS))])
         own.set_sensitive(not c['follow_login'])

@@ -112,14 +112,31 @@ class Group:
         self.side.connect('row-selected', self.on_row)
         self.ids = {}
 
-    def section(self, name, title, pages):
+    def heading(self, title):
+        """a group heading in the sidebar (capitals) above several sections"""
+        head = Gtk.ListBoxRow(selectable=False, activatable=False)
+        lb = Gtk.Label(xalign=0, margin_start=12, margin_top=12, margin_bottom=2)
+        lb.set_markup(f'<small><b>{GLib.markup_escape_text(title.upper())}</b></small>')
+        lb.get_style_context().add_class('dim-label')
+        head.add(lb)
+        self.side.add(head)
+
+    def section(self, name, title, pages, sub=False):
         """title None: no heading of its own, the sub-pages follow the section above.
-        A section with one page of the same name shows just that page, as a top-level row."""
+        A section with one page of the same name shows just that page, as a top-level row.
+        sub: the title is a small sub-heading under a group heading (Group.heading)."""
         parts = list(pages.parts())
         flat = bool(title) and len(parts) == 1 and parts[0][0].lower() == title.lower()
         if flat:
             title = None
-        if title:
+        if title and sub:
+            head = Gtk.ListBoxRow(selectable=False, activatable=False)
+            lb = Gtk.Label(xalign=0, margin_start=16, margin_top=6, margin_bottom=0)
+            lb.set_markup(f'<small>{GLib.markup_escape_text(title)}</small>')
+            lb.get_style_context().add_class('dim-label')
+            head.add(lb)
+            self.side.add(head)
+        elif title:
             head = Gtk.ListBoxRow(selectable=False, activatable=False)
             lb = Gtk.Label(xalign=0, margin_start=12, margin_top=12, margin_bottom=2)
             lb.set_markup(f'<small><b>{GLib.markup_escape_text(title.upper())}</b></small>')
@@ -128,12 +145,13 @@ class Group:
             self.side.add(head)
         self.tops.add_named(pages.top, name)
         self.bottoms.add_named(pages.bottom, name)
-        for i, (sub, w) in enumerate(parts):
+        for i, (sub_name, w) in enumerate(parts):
             pid = f'{name}:{i}'
             self.content.add_named(w, pid)
             row = Gtk.ListBoxRow()
-            row.add(Gtk.Label(label=sub, xalign=0, margin_start=12 if flat else 22, margin_end=12,
-                              margin_top=6, margin_bottom=6))
+            row.add(Gtk.Label(label=sub_name, xalign=0,
+                              margin_start=12 if flat and not sub else 26 if title and sub else 22,
+                              margin_end=12, margin_top=6, margin_bottom=6))
             row.zid, row.zsec = pid, name
             self.ids[pid] = row
             self.side.add(row)

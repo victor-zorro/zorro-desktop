@@ -89,6 +89,8 @@ class ThinkpadPages:
             if combo.get_active_id() is None:
                 combo.set_active_id('balanced')
             self.prof[key] = combo
+            # applies on its own, like the mode pills on Home (one helper call per change)
+            combo.connect('changed', lambda w: later('power', lambda: self.on_power_apply(None), 300))
             grid.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
             grid.attach(combo, 1, i, 1, 1)
         box.add(grid)
@@ -99,15 +101,9 @@ class ThinkpadPages:
         lo = tlp.get('START_CHARGE_THRESH_BAT0', '75')
         self.charge = 'full' if lo in ('0', '95', '96') else 'long'
         box.add(radios([(k, v[0]) for k, v in CHARGE_PRESETS.items()], self.charge,
-                       lambda k: setattr(self, 'charge', k)))
+                       lambda k: (setattr(self, 'charge', k),
+                                  later('power', lambda: self.on_power_apply(None), 300))))
         box.add(note('Keeping a battery below 80% most of the time makes it last years longer.'))
-
-        row = Gtk.Box(spacing=6, margin_top=12)
-        apply = Gtk.Button(label='Apply')
-        apply.get_style_context().add_class('suggested-action')
-        apply.connect('clicked', self.on_power_apply)
-        row.add(apply)
-        box.add(row)
 
         box.add(heading('Screen stays on', 'Screen on'))
         calls = Gtk.Switch(halign=Gtk.Align.START,

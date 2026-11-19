@@ -251,8 +251,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
 
 - [x] **3.4 Settings app: tab order and one home per setting** (M)
   Done: a, d; b as duplicate headings only; c for text colour, webcam, sound tests.
-  Not done (offer if wanted): Desktop regrouped in three sections, power combos applying on
-  change, an own Icons sub-page.
+  Also done (Vincent: do 3): Desktop in three groups, power applies on change, Icons page.
   `zsettings/app.py` 53-93.
   a) Tabs: Network, Audio, Power, Hardware, Desktop, Look, Accounts. Merge Theme and Login
      screen into "Look", Presets first.
