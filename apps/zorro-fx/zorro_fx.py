@@ -485,8 +485,12 @@ class Snow:
     def paint_box(self, cr, s, bx, by, bw, bh):
         """what is behind (still image without compositor) and the dark box"""
         if self.backdrop is not None:
-            from gi.repository import Gdk
-            Gdk.cairo_set_source_pixbuf(cr, self.backdrop, *self.backdrop_at)
+            # turned into a cairo surface once per picture, not on every frame (30 a second)
+            if getattr(self, '_bd_src', None) is not self.backdrop:
+                from gi.repository import Gdk
+                self._bd_src = self.backdrop
+                self._bd_surf = Gdk.cairo_surface_create_from_pixbuf(self.backdrop, 1, None)
+            cr.set_source_surface(self._bd_surf, *self.backdrop_at)
             cr.paint()
         cr.save()
         self.outline(cr, bx, by, bw, bh)

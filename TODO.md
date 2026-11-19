@@ -175,7 +175,7 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   ffmpeg starts after `import cv2` (0.52 s). `conf()` re-reads its file every frame.
   Fix: start `Camera(dev)` right after `emitter()`, then build `Faces()`; read `conf()` once.
 
-- [ ] **2.10 zorro_fx: backdrop converted on every frame** (S)
+- [x] **2.10 zorro_fx: backdrop converted on every frame** (S)
   `apps/zorro-fx/zorro_fx.py` about 487-490.
   Fix: convert the pixbuf once into a cached cairo surface when the backdrop is set.
 
