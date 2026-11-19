@@ -517,9 +517,6 @@ def run_app():
     def systemctl(*a):
         return subprocess.run(['systemctl', '--user', *a], capture_output=True, text=True)
 
-    def mount_active(acc):
-        return systemctl('is-active', f'zorro-drive-mount@{acc}.service').stdout.strip() == 'active'
-
     class AddAccount(Gtk.Dialog):
         def __init__(self, parent):
             super().__init__(title='Add Google account', transient_for=parent, modal=True)
@@ -784,12 +781,15 @@ def run_app():
             for r in self.accounts.get_children():
                 self.accounts.remove(r)
             cfg = load()
-            for a in cfg['accounts']:
+            # one systemctl for all accounts instead of one per row
+            units = [f"zorro-drive-mount@{a['name']}.service" for a in cfg['accounts']]
+            states = systemctl('is-active', *units).stdout.split() if units else []
+            for a, st in zip(cfg['accounts'], states + ['inactive'] * len(units)):
                 row = Gtk.ListBoxRow()
                 row.acc = a['name']
                 box = Gtk.Box(spacing=6, border_width=6)
                 box.pack_start(Gtk.Label(label=a['name'], xalign=0), True, True, 0)
-                sw = Gtk.Switch(active=mount_active(a['name']), valign=Gtk.Align.CENTER,
+                sw = Gtk.Switch(active=st == 'active', valign=Gtk.Align.CENTER,
                                 tooltip_text=f"Whole Drive online in ~/Drive/{a['name']}/Online")
                 sw.connect('notify::active', self.on_mount, a['name'])
                 box.add(Gtk.Label(label='Online'))
@@ -809,10 +809,20 @@ def run_app():
             self.update_key_warning()
 
         def on_mount(self, sw, _p, acc):
-            unit = f'zorro-drive-mount@{acc}.service'
-            r = systemctl('enable' if sw.get_active() else 'disable', '--now', unit)
-            if r.returncode:
-                self.hint.set_text(r.stderr.strip())
+            """the mount waits for the network: in a thread; on failure the switch goes back"""
+            unit, on = f'zorro-drive-mount@{acc}.service', sw.get_active()
+            sw.set_sensitive(False)
+
+            def done(r, err):
+                sw.set_sensitive(True)
+                msg = err or (r.stderr.strip() if r.returncode else '')
+                if msg:
+                    sw.handler_block_by_func(self.on_mount)
+                    sw.set_active(not on)
+                    sw.handler_unblock_by_func(self.on_mount)
+                    self.hint.set_markup(f'<span foreground="#ff2a4a">Online for {GLib.markup_escape_text(acc)} '
+                                         f'failed: {GLib.markup_escape_text(msg[:200])}</span>')
+            in_thread(lambda: systemctl('enable' if on else 'disable', '--now', unit), done)
 
         def on_api_key(self, _b):
             acc = self.acc
@@ -879,15 +889,24 @@ def run_app():
             d.destroy()
             if resp == Gtk.ResponseType.CLOSE:
                 systemctl('try-restart', f'zorro-drive-mount@{acc}.service')
-                self.update_key_warning()
+                self.update_key_warning(fresh=True)
 
-        def update_key_warning(self):
+        def update_key_warning(self, fresh=False):
+            """rclone config dump is slow-ish: read in a thread, kept per account"""
             acc = self.acc
             self.key_btn.set_sensitive(bool(acc))
-            shared = bool(acc) and not rclone_value(acc, 'client_id')
-            self.key_warn.set_markup('<small>⚠ This account uses rclone\'s shared Google key: '
-                                     'set your own to avoid “quota exceeded”.</small>'
-                                     if shared else '')
+            cache = self.__dict__.setdefault('own_id', {})
+
+            def show(_r=None, _e=None):
+                if acc != self.acc:
+                    return
+                shared = bool(acc) and not cache.get(acc)
+                self.key_warn.set_markup('<small>⚠ This account uses rclone\'s shared Google key: '
+                                         'set your own client ID to avoid “quota exceeded”.</small>'
+                                         if shared else '')
+            if not acc or (acc in cache and not fresh):
+                return show()
+            in_thread(lambda: cache.__setitem__(acc, bool(rclone_value(acc, 'client_id'))), show)
 
         def on_add_account(self, _b):
             dlg = AddAccount(self)

@@ -333,7 +333,6 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   thread while input is grabbed (`zorro-dial` 294-301, 1180; `dialmodes.py` 145, 160, 892).
 
 - [x] **4.6 Blocking calls on the GTK thread** (S-M)
-  Done for the settings app. Drive's systemctl / rclone config calls in the window: still open.
   Settings: debounce sliders and text entries by 300 ms, batch the webcam reset as one
   `v4l2-ctl -c a=1,b=2` (`pages_home.py` 452-515, `webcam.py` 55-57), move `nmcli` / `pactl`
   calls to `bg()`. Drive: `systemctl enable --now`, `rclone config dump`, `systemctl
