@@ -10,7 +10,8 @@
 
 Output: ~/.local/share/icons/Zorro-Lucide (GTK, rofi and zorro-winicons pick it up by name).
 
-  build-icons [--opacity 0.5] [--style official|lucide]
+  build-icons [--opacity 0.5] [--style official|lucide] [--colour 0..1]
+--colour: how much of each app's own colour shows (0 = black and white, 1 = full colour).
 Without options it uses the Zorro app's choices (Desktop → Text & colours).
 Also writes user overrides for apps that point at an icon file instead of a name (Blender).
 """
@@ -36,6 +37,7 @@ BRANDS = {'zorro-google': 'gmail', 'zorro-whatsapp': 'whatsapp', 'zorro-instagra
           'zorro-linkedin': 'linkedin', 'zorro-penpot': 'penpot'}   # Firefox profile apps
 OURS = {'preferences-desktop', 'folder-remote', 'applets-screenshooter', 'accessories-screenshot'}
 SIZES = (256, 32)                     # PNG sizes for the official icons
+COLOUR = [0.0]                        # how much of the app's own colour stays (0 = black and white)
 
 
 def desktop_icons():
@@ -100,7 +102,9 @@ def greyscale(src, size, opacity):
     lum = .3 + .7 * lum                                  # black parts become dark grey
     out = np.zeros((size, size, 4), np.uint8)
     y0, x0 = (size - h) // 2, (size - w) // 2
-    out[y0:y0 + h, x0:x0 + w, :3] = (lum[..., None] * 255).astype(np.uint8)
+    c = min(1.0, max(0.0, COLOUR[0]))                    # fade the logo's own colour back in
+    rgb = lum[..., None] * (1 - c) + a[..., :3] * c
+    out[y0:y0 + h, x0:x0 + w, :3] = (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
     out[y0:y0 + h, x0:x0 + w, 3] = (a[..., 3] * opacity * 255).astype(np.uint8)
     return GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(out.tobytes()),
                                            GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
@@ -236,7 +240,10 @@ def main():
         conf = {}
     opacity = float(conf.get('icon_opacity', 0.5))
     style = conf.get('icon_style', 'official')
+    COLOUR[0] = float(conf.get('icon_colour', 0.0))
     a = sys.argv[1:]
+    if '--colour' in a:
+        COLOUR[0] = float(a[a.index('--colour') + 1])
     if '--opacity' in a:
         opacity = float(a[a.index('--opacity') + 1])
     if '--style' in a:

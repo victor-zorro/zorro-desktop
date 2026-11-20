@@ -265,26 +265,35 @@ class DesktopPages:
         icon_op.set_value(float(load_conf().get('icon_opacity', 0.5)))
         icon_op.set_value_pos(Gtk.PositionType.RIGHT)
         icon_op.connect('format-value', lambda w, v: f'{v * 100:.0f}%')
+        icon_col = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 0.05)
+        icon_col.set_hexpand(True)
+        icon_col.set_value(float(load_conf().get('icon_colour', 0.0)))
+        icon_col.set_value_pos(Gtk.PositionType.RIGHT)
+        icon_col.connect('format-value', lambda w, v: 'black and white' if v < 0.01 else
+                         'full colour' if v > 0.99 else f'{v * 100:.0f}% colour')
         build = APPS / 'zorro-icons' / 'build-icons'
         self.icon_build_id = None
 
         style = Gtk.ComboBoxText()
-        for k, v in (('official', 'Official app icons, black and white'),
+        for k, v in (('official', 'Official app icons'),
                      ('lucide', 'White Lucide line icons')):
             style.append(k, v)
         style.set_active_id(load_conf().get('icon_style', 'official'))
 
         def icons_changed(_w):
             update_conf(None, icon_opacity=round(icon_op.get_value(), 2),
-                        icon_style=style.get_active_id() or 'official')
+                        icon_style=style.get_active_id() or 'official',
+                        icon_colour=round(icon_col.get_value(), 2))
             if self.icon_build_id:
                 GLib.source_remove(self.icon_build_id)
             self.icon_build_id = GLib.timeout_add(700, lambda: (
                 spawn([str(build), '--opacity', str(round(icon_op.get_value(), 2)),
-                       '--style', style.get_active_id() or 'official']),
+                       '--style', style.get_active_id() or 'official',
+                       '--colour', str(round(icon_col.get_value(), 2))]),
                 setattr(self, 'icon_build_id', None)) and False)
         style.connect('changed', icons_changed)
         icon_op.connect('value-changed', icons_changed)
+        icon_col.connect('value-changed', icons_changed)
         box.add(heading('Screen font and colours', 'Text & colours'))
         scale = ui.scale(1.0, 1.5, 0.05, c.get('text_scale', 1.0), lambda v: setv('text_scale', v),
                          lambda v: f'{v * 100:.0f}%')
@@ -299,9 +308,12 @@ class DesktopPages:
                      'away), the window title bars and menus (accent) and the info circle '
                      '(text). Chromatic sea: text #d8d8de, accent cyan #19e6ff.'))
         box.add(heading('App icons', 'Icons'))
-        box.add(ui.form([('Style', style), ('Visibility', icon_op)]))
+        box.add(ui.form([('Style', style), ('Visibility', icon_op), ('Colour', icon_col)]))
+        icon_col.set_sensitive(style.get_active_id() != 'lucide')
+        style.connect('changed', lambda w: icon_col.set_sensitive(w.get_active_id() != 'lucide'))
         box.add(note('The icons of the apps in the Dialer, Alt+Tab and the window menus. '
-                     'They are rebuilt a moment after a change.'))
+                     'Colour fades each app\'s own logo colour in: left black and white, right '
+                     'full colour. They are rebuilt a moment after a change.'))
         return box
 
     # -- windows: title bars, compositor, kitty
