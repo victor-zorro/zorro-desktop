@@ -185,6 +185,9 @@ fi
 log "Drive app (apps/zorro-drive)"
 apps/zorro-drive/install.sh
 
+log "Transfer (apps/zorro-transfer)"
+apps/zorro-transfer/install.sh
+
 log "Screenshot overlay (apps/zorro-shot)"
 apps/zorro-shot/install.sh
 log "User folders (Downloads, Pictures, Documents) for browsers and file dialogs"

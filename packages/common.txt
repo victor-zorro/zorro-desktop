@@ -17,6 +17,8 @@ lightdm-gtk-greeter
 # LightDM above is only the fallback.
 python3-gi
 python3-gi-cairo
+# Transfer: pairing with a 6-digit code (SPAKE2, pulls python3-cryptography)
+python3-spake2
 # zorro-fx: thousands of particles per frame cheaply (falls back to plain Python)
 python3-numpy
 gir1.2-gtk-3.0

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Transfer
+GenericName=Set up another device
+Comment=Send this setup to another device, or get it from one (settings, logins, files, installers)
+Exec=zorro-transfer
+Icon=folder-remote
+Categories=Settings;System;
+Keywords=migrate;move;new;device;laptop;copy;setup;
