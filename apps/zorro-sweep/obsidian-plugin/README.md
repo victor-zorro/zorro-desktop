@@ -43,9 +43,21 @@ Progress is kept in the plugin's `data.json`, so with Obsidian Sync (or any sync
 `.obsidian/plugins`) you can stop on your phone and carry on on your computer. Keys are paths
 relative to the vault.
 
-**Best match (optional).** Another tool may write `"suggest": {"note.md": "Folder"}` into
-`data.json`; Sweep or Keep then lights that notebook up as the best match. The plugin itself
-doesn't read your notes for this and sends nothing anywhere.
+## Best match
+While you sort, the notebooks that fit the note best light up: **best match**, then a dimmer
+**2nd** and **3rd**. Tap one, or press Enter for the best match. Sweep or Keep works this out
+itself, on your device, from:
+- **words** the note shares with the notes already in a notebook (two or more; rare words
+  count more than common ones),
+- **tags** and **links** between the note and that notebook's notes,
+- the **notebook's name** appearing in the note,
+- **where you sorted before**: notebooks you pick often weigh a little more.
+
+When nothing fits clearly, nothing lights up.
+
+**Matching by meaning (optional).** Another tool may write a meaning search into `data.json`:
+`"suggest": {"note.md": [["Folder", 0.31], ["Other", 0.2]]}` (or simply `{"note.md": "Folder"}`).
+Sweep or Keep then mixes that in. The plugin itself never sends your notes anywhere.
 
 ## Privacy
 Everything stays in your vault. No network access, no telemetry.

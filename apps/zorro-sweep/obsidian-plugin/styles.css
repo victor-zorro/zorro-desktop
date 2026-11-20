@@ -139,3 +139,9 @@
 .zs.zs-theme .zs-side-l { color: var(--interactive-accent); opacity: .6; }
 .zs.zs-theme .zs-side-r { color: var(--text-error); opacity: .5; }
 .zs.is-narrow .zs-nb-best { font-size: 8px; letter-spacing: 1px; }
+/* the 2nd and 3rd best notebooks: the same light, dimmer */
+.zs-nb.is-best2 svg > *, .zs-nb.is-best3 svg > * { stroke: var(--zs-cyan); }
+.zs-nb.is-best2 svg > * { stroke-opacity: .6; stroke-width: 1.7; }
+.zs-nb.is-best3 svg > * { stroke-opacity: .35; }
+.zs-nb.is-best2 .zs-nb-best { opacity: .7; }
+.zs-nb.is-best3 .zs-nb-best { opacity: .45; }

@@ -1,7 +1,7 @@
 {
   "id": "sweep-or-keep",
   "name": "Sweep or Keep",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "minAppVersion": "1.6.0",
   "description": "Clean up a cluttered vault in rounds: swipe each note left to keep or right to delete, then drag the kept ones into notebooks.",
   "author": "Vincent Vriens",

@@ -4,11 +4,13 @@
  * round of kept ones, drag each onto a notebook (a folder in this vault). Progress lives in this
  * plugin's data.json, which Obsidian Sync carries along. Keys are paths relative to the vault
  * ('note.md', 'Folder/note.md'), so outside tools can share it: the zorro-desktop Sweep app on the
- * laptop reads and writes the same file, and may add 'suggest' ({note path: folder}, shown as
- * best match) and 'vaults' (names for the vault picker). Both are optional.
+ * laptop reads and writes the same file, and may add 'suggest' ({note path: [[folder, score], ...]}
+ * from a meaning search, or {note path: folder}) and 'vaults' (names for the vault picker). Both
+ * are optional: the plugin also matches notes to notebooks itself (words, tags, links, the
+ * notebook's name and where you sorted before), see Matcher.
  * Deleted notes go where Obsidian's "Deleted files" setting says (trash). */
 'use strict';
-const { Plugin, ItemView, MarkdownRenderer, Modal, Component, TFile, TFolder, Notice, PluginSettingTab, Setting } = require('obsidian');
+const { Plugin, ItemView, MarkdownRenderer, Modal, Component, TFile, TFolder, Notice, PluginSettingTab, Setting, getAllTags } = require('obsidian');
 
 const VIEW = 'sweep-or-keep';
 const DEFAULT_ROUND = 10;
@@ -45,9 +47,124 @@ function drawShape(parent, kind, w, h) {
   return svg;
 }
 
+// ---- which notebook fits a note: the plugin's own matching, on any device ------------------
+const STOP = new Set(('the and for that this with from have are was were you your but not all can will just they '
+  + 'them then than what when where which who how about into over also more some very there their here '
+  + 'http https www com html het een van voor met niet zijn maar als bij ook nog wel wat dan door naar uit '
+  + 'aan dit die dat dus heb hebben waren kan kunnen moet worden wordt deze onze jouw mijn zich zoals').split(' '));
+const tokens = (text) => (text.toLowerCase().replace(/https?:\/\/\S+/g, ' ').match(/\p{L}[\p{L}\p{N}]{2,}/gu) || [])
+  .filter((w) => !STOP.has(w));
+const stem = (w) => w.slice(0, 6);           // so recipe / recipes and bike / bikes meet
+const PER_FOLDER = 400;                       // the newest notes of a notebook make its profile
+
+class Matcher {
+  constructor(plugin) { this.p = plugin; this.app = plugin.app; this.cache = null; }
+
+  invalidate() { this.cache = null; }
+
+  tagsOf(f) {
+    const c = this.app.metadataCache.getFileCache(f);
+    return new Set(((c && getAllTags(c)) || []).map((t) => t.toLowerCase()));
+  }
+
+  notesUnder(folder) {
+    const out = [];
+    const walk = (fo) => { for (const c of fo.children) { if (c instanceof TFolder) walk(c); else if (c.extension === 'md') out.push(c); } };
+    walk(folder);
+    return out.sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, PER_FOLDER);
+  }
+
+  async profiles(dests) {
+    const key = dests.map((d) => d.path).join('|');
+    if (this.cache && this.cache.key === key) return this.cache;
+    const prof = {}, df = new Map();
+    for (const d of dests) {
+      const folder = this.app.vault.getAbstractFileByPath(d.path);
+      if (!(folder instanceof TFolder)) continue;
+      const files = this.notesUnder(folder);
+      const tf = new Map(), tags = new Map();
+      for (const f of files) {
+        const text = await this.app.vault.cachedRead(f);
+        for (const w of tokens(f.basename + ' ' + text.slice(0, 4000))) { const st = stem(w); tf.set(st, (tf.get(st) || 0) + 1); }
+        for (const t of this.tagsOf(f)) tags.set(t, (tags.get(t) || 0) + 1);
+      }
+      for (const st of tf.keys()) df.set(st, (df.get(st) || 0) + 1);
+      prof[d.path] = { tf, tags, n: Math.max(1, files.length), name: new Set(tokens(d.name).map(stem)),
+        paths: new Set(files.map((f) => f.path)) };
+    }
+    const N = Math.max(1, Object.keys(prof).length);
+    for (const pr of Object.values(prof)) {      // tf-idf: words every notebook has count little
+      let len = 0;
+      pr.v = new Map();
+      for (const [st, c] of pr.tf) {
+        const w = (1 + Math.log(c)) * Math.log(1 + N / df.get(st));
+        pr.v.set(st, w);
+        len += w * w;
+      }
+      pr.len = Math.sqrt(len) || 1;
+    }
+    this.cache = { key, prof, df, N };
+    return this.cache;
+  }
+
+  /** the up to 3 notebooks that fit this note best: [{path, score}], best first */
+  async rank(file, dests) {
+    dests = dests.filter((d) => d.path);
+    if (!dests.length) return [];
+    const { prof, df, N } = await this.profiles(dests);
+    const text = await this.app.vault.cachedRead(file);
+    const tf = new Map();
+    for (const w of tokens(file.basename + ' ' + text.slice(0, 8000))) { const st = stem(w); tf.set(st, (tf.get(st) || 0) + 1); }
+    const nv = new Map();
+    let nlen = 0;
+    for (const [st, c] of tf) {
+      const w = (1 + Math.log(c)) * Math.log(1 + N / (df.get(st) || N));
+      nv.set(st, w);
+      nlen += w * w;
+    }
+    nlen = Math.sqrt(nlen) || 1;
+    const myTags = this.tagsOf(file);
+    const links = this.app.metadataCache.resolvedLinks || {};
+    const out = links[file.path] || {};
+    const choices = this.p.data.choices || {};
+    const mostChosen = Math.max(1, ...Object.values(choices));
+    // the meaning search (data.suggest), when the laptop wrote one for this note
+    let meaning = (this.p.data.suggest || {})[file.path];
+    if (typeof meaning === 'string') meaning = [[meaning, 1]];
+    const mScore = new Map((Array.isArray(meaning) ? meaning : []).map(([fo, sc]) => [fo, Math.max(0, +sc || 0)]));
+    const mMax = Math.max(0, ...mScore.values());
+    const rows = dests.filter((d) => prof[d.path]).map((d) => {
+      const pr = prof[d.path];
+      let dot = 0, shared = 0;
+      for (const [st, w] of nv) { const fw = pr.v.get(st); if (fw) { dot += w * fw; shared++; } }
+      // one word in common ("things", "list") is chance; two or more start to say something
+      const words = shared >= 2 ? dot / (pr.len * nlen) : 0;
+      let tag = 0;
+      for (const t of myTags) tag += (pr.tags.get(t) || 0) / pr.n;
+      let link = 0;
+      for (const p of pr.paths) { if (out[p]) link++; if ((links[p] || {})[file.path]) link++; }
+      const name = [...pr.name].some((st) => tf.has(st)) ? 1 : 0;
+      const lex = words + .5 * Math.min(1, tag) + .3 * Math.min(1, link / 2) + .35 * name;
+      return { path: d.path, lex, mean: mScore.get(d.path) || 0,
+        prior: Math.log1p(choices[d.path] || 0) / Math.log1p(mostChosen) };
+    });
+    const lexMax = Math.max(0, ...rows.map((r) => r.lex));
+    for (const r of rows) {
+      const lexN = lexMax > 0 ? r.lex / lexMax : 0;
+      const meanN = mMax > 0 ? r.mean / mMax : 0;
+      r.score = (mMax > 0 ? .55 * meanN + .45 * lexN : lexN) + .08 * r.prior;
+      r.any = r.lex > .02 || r.mean > 0;
+    }
+    const good = rows.filter((r) => r.any && r.score > 0).sort((a, b) => b.score - a.score);
+    if (!good.length) return [];
+    return good.filter((r) => r.score >= good[0].score * .45).slice(0, 3).map(({ path, score }) => ({ path, score }));
+  }
+}
+
 module.exports = class SweepPlugin extends Plugin {
   async onload() {
     await this.loadState();
+    this.matcher = new Matcher(this);
     this.registerView(VIEW, (leaf) => new SweepView(leaf, this));
     this.addRibbonIcon('brush', 'Sweep or Keep', () => this.open());
     this.addSettingTab(new SweepSettings(this.app, this));
@@ -71,7 +188,7 @@ module.exports = class SweepPlugin extends Plugin {
     const d = this.data;
     await this.saveData(Object.assign(disk, {
       kept: [...this.kept], stays: [...this.stays], batch: d.batch, stats: d.stats, source: d.source,
-      roundSize: d.roundSize, look: d.look, vaults: d.vaults,
+      roundSize: d.roundSize, look: d.look, vaults: d.vaults, choices: d.choices || {},
     }));
   }
 
@@ -502,7 +619,6 @@ class SweepView extends ItemView {
   placeNotebooks() {
     for (const el of this.stage.querySelectorAll('.zs-nb')) el.remove();
     this.nbs = this.dests();
-    const best = this.cardFile && (this.d.suggest || {})[this.cardFile.path];
     const W = this.stage.clientWidth, H = this.stage.clientHeight;
     const narrow = W < 640;
     const cz = narrow ? { x: W * 0.1, y: H * 0.34, w: W * 0.8, h: H * 0.32 }
@@ -552,12 +668,25 @@ class SweepView extends ItemView {
       const t = el.createDiv('zs-nb-t');
       t.createDiv({ text: d.name });
       if (d.n != null) t.createDiv({ cls: 'zs-nb-n', text: `${d.n} notes` });
-      if (d.path && d.path === best) {             // a suggestion written from outside (data.suggest)
-        el.addClass('is-best');
-        t.createDiv({ cls: 'zs-nb-best', text: 'best match' });
-      }
+      d.t = t;
       el.addEventListener('click', () => { if (!this.busy) this.sendTo(i, false); });
       d.el = el;
+    });
+    this.showRanks();
+  }
+
+  /** light up the notebooks that fit the card best: best match, then 2nd and 3rd dimmer */
+  async showRanks() {
+    const file = this.cardFile, nbs = this.nbs;
+    if (!file || !nbs) return;
+    let ranks = [];
+    try { ranks = await this.p.matcher.rank(file, nbs); } catch (e) { return; }
+    if (this.cardFile !== file || this.nbs !== nbs) return;       // the card moved on meanwhile
+    ranks.forEach((r, k) => {
+      const d = nbs.find((x) => x.path === r.path);
+      if (!d || !d.el) return;
+      d.el.addClass(k === 0 ? 'is-best' : `is-best${k + 1}`);
+      d.t.createDiv({ cls: 'zs-nb-best', text: ['best match', '2nd', '3rd'][k] });
     });
   }
 
@@ -649,6 +778,9 @@ class SweepView extends ItemView {
     this.p.kept.delete(from);
     this.p.stays.delete(from);
     this.d.stats.moved++;
+    this.d.choices = this.d.choices || {};
+    this.d.choices[d.path] = (this.d.choices[d.path] || 0) + 1;     // where you sort counts next time
+    this.p.matcher.invalidate();
     this.undo.push({ what: 'send', from, to, label: `“${file.basename}” → ${d.name}` });
     await this.p.save();
     this.toast(`→ ${d.name}`);
@@ -677,6 +809,9 @@ class SweepView extends ItemView {
         if (f instanceof TFile) await this.app.fileManager.renameFile(f, this.free(u.from));
         this.p.kept.add(u.from);
         this.d.stats.moved = Math.max(0, this.d.stats.moved - 1);
+        const to = u.to.slice(0, u.to.lastIndexOf('/'));
+        if (this.d.choices && this.d.choices[to]) this.d.choices[to]--;
+        this.p.matcher.invalidate();
       } else if (u.what === 'delete') {
         for (const s of u.saved) {
           const dir = s.path.includes('/') ? s.path.slice(0, s.path.lastIndexOf('/')) : '';

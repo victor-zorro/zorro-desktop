@@ -111,10 +111,12 @@ Then the **brush button** in the ribbon (or the command "Sweep or Keep: Open") o
 - **Sort**: after 10 kept notes, drag each one onto a notebook, or tap a notebook (laptop: 1–9).
   The notebooks are the folders of this vault, plus "Stays in …" and "+ New folder". Moving a note
   to another vault isn't possible here (a plugin only sees its own vault); the laptop app does it.
-- **Best match**: the notebook closest in meaning to the note is lit up ("best match"); tap it,
-  or press Enter. `zorro-sweep-presort` works these out on the laptop from the zorro-search
-  index and writes them into the plugin's data (`suggest`), so the phone gets them through Sync.
-  zorro-search runs it after every index update. Only folders of the same vault.
+- **Best match**: the top 3 notebooks light up (best match, 2nd, 3rd); tap one, or Enter for
+  the best. The plugin matches by itself (shared words, tags, links, the notebook's name, where
+  you sorted before). On the laptop `zorro-sweep-presort` adds meaning from the zorro-search
+  index (top 3 with scores in the plugin's data, `suggest`), so the phone gets it through Sync;
+  zorro-search runs it after every index update. The laptop app matches by meaning the same
+  way (measured from the vault's average note, same lower limit).
 - Undo under the card, two-finger pinch or Ctrl+scroll to zoom, double-tap to open the note.
 
 **Progress is shared.** The plugin keeps it in `.obsidian/plugins/sweep-or-keep/data.json`, which

@@ -306,18 +306,35 @@ class Meaning:
         for i, m in enumerate(meta):
             rows.setdefault(m['p'], []).append(i)
         self.note = {p: self.unit(vecs[ix].mean(0)) for p, ix in rows.items()}
+        self.mu = None
         self.ok = True
+
+    def set_vault(self, vault):
+        """measure from this vault's average note from now on: what all its notes share
+        (language, the way you write) then no longer pulls every note to the biggest notebook.
+        The same as zorro-sweep-presort, so the laptop app and Obsidian suggest alike."""
+        if not self.ok:
+            return
+        pre = str(vault) + '/'
+        mine = [v for p, v in self.note.items() if p.startswith(pre)]
+        self.mu = self.np.mean(mine, 0) if mine else None
 
     def unit(self, v):
         n = self.np.linalg.norm(v)
         return v / n if n else v
 
     def of(self, path):
-        return self.note.get(str(path)) if self.ok else None
+        v = self.note.get(str(path)) if self.ok else None
+        if v is None or self.mu is None:
+            return v
+        return self.unit(v - self.mu)
 
     def centre(self, folder, flat=False):
         if not self.ok:
             return None
         pre = str(folder) + '/'
         vs = [v for p, v in self.note.items() if p.startswith(pre) and (not flat or '/' not in p[len(pre):])]
-        return self.unit(self.np.mean(vs, 0)) if vs else None
+        if not vs:
+            return None
+        c = self.np.mean(vs, 0)
+        return self.unit(c - self.mu) if self.mu is not None else self.unit(c)

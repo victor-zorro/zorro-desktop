@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Pre-sort for Sweep in Obsidian: for every note at the top of a vault (and directly in its
-top-level folders), the folder of that vault closest in meaning, from zorro-search's index.
+top-level folders), the 3 folders of that vault closest in meaning (with their scores), from zorro-search's index.
 Written as "suggest" into the Obsidian plugin's data.json, where Sweep (laptop and phone)
 lights that notebook up as the best match. Only vaults that have the plugin.
 
@@ -30,14 +30,9 @@ def presort(vault, meaning):
     data = state_file(vault)
     if data.parent.name not in ('sweep-or-keep', 'zorro-sweep'):   # no plugin in this vault
         return None
-    np = meaning.np
-    pre = str(vault) + '/'
-    mine = [v for p, v in meaning.note.items() if p.startswith(pre)]
-    # measured from the vault's average note: what all notes share (language, the way you
-    # write) no longer pulls every note towards the biggest folder
-    mu = np.mean(mine, 0) if mine else 0
+    meaning.set_vault(vault)                     # measured from the vault's average note
     dests = [(f, meaning.centre(f)) for f in folders(vault)]
-    dests = [(f, meaning.unit(c - mu)) for f, c in dests if c is not None]
+    dests = [(f, c) for f, c in dests if c is not None]
     suggest = {}
     if len(dests) > 1:
         notes = list(vault.glob('*.md'))
@@ -47,11 +42,12 @@ def presort(vault, meaning):
             v = meaning.of(p)
             if v is None:
                 continue
-            v = meaning.unit(v - mu)
             own = p.parent
-            best = max(((float(v @ c), f) for f, c in dests if f != own), default=None, key=lambda t: t[0])
-            if best and best[0] >= MIN:          # too far from every notebook: no suggestion
-                suggest[p.relative_to(vault).as_posix()] = best[1].relative_to(vault).as_posix()
+            top = sorted(((float(v @ c), f) for f, c in dests if f != own), key=lambda t: -t[0])[:3]
+            top = [(sc, f) for sc, f in top if sc >= MIN]      # too far from a notebook: not suggested
+            if top:                              # the plugin mixes these with its own matching
+                suggest[p.relative_to(vault).as_posix()] = [[f.relative_to(vault).as_posix(), round(sc, 3)]
+                                                            for sc, f in top]
     try:
         st = json.loads(data.read_text())
     except (OSError, ValueError):

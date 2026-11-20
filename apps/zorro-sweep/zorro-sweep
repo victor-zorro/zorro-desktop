@@ -195,6 +195,7 @@ class Sweep(Gtk.Window):
     # ---- what is shown -------------------------------------------------------------------
     def find_dests(self):
         """other vaults, and the folders in this one"""
+        self.meaning.set_vault(self.v.path)        # matched like the Obsidian plugin's pre-sort
         out = []
         for f in sorted(self.v.path.iterdir()):
             if f.is_dir() and not f.name.startswith(('.', '_')) and f != attach_dir(self.v.path):
@@ -295,7 +296,9 @@ class Sweep(Gtk.Window):
             for i, d in enumerate(self.dests):
                 if d['vec'] is not None:
                     card['scores'][i] = float(vec @ d['vec'])
-        card['best'] = max(card['scores'], key=card['scores'].get) if card['scores'] else None
+        best = max(card['scores'], key=card['scores'].get) if card['scores'] else None
+        # too far from every notebook: no suggestion (the same limit as zorro-sweep-presort)
+        card['best'] = best if best is not None and card['scores'][best] >= 0.08 else None
         return card
 
     def set_mode(self, m):
