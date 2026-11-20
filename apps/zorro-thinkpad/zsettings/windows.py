@@ -222,6 +222,23 @@ def picom_running():
     return bool(run('pgrep', '-x', 'picom').strip())
 
 
+def apply_touchpad(clickfinger=None):
+    """two-finger click = right-click on the touchpad (libinput clickfinger), or the
+    ThinkPad default: the pad's bottom-right corner (button areas). Set at login and on change."""
+    if clickfinger is None:
+        from .base import load_conf
+        clickfinger = bool((load_conf().get('touchpad') or {}).get('clickfinger', False))
+    for ln in run('xinput', 'list', '--name-only').splitlines():
+        name = ln.strip()
+        if 'touchpad' not in name.lower():
+            continue
+        props = run('xinput', 'list-props', name)
+        if 'libinput Click Method Enabled' not in props:
+            continue
+        run('xinput', 'set-prop', name, 'libinput Click Method Enabled',
+            *(('0', '1') if clickfinger else ('1', '0')))
+
+
 def apply_windows(login=False):
     """write theme, picom and kitty settings and make them live"""
     c = win_conf()
@@ -232,6 +249,10 @@ def apply_windows(login=False):
     write_kitty(c, want)
     write_gtk_css(c)
     write_dpi(c)
+    try:
+        apply_touchpad()
+    except Exception as e:                  # noqa: BLE001 - never stops the rest
+        print('zorro: touchpad:', e)
     if not login:
         run('openbox', '--reconfigure')
     was = picom_running()

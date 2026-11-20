@@ -11,7 +11,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, Pages, button, device_list, device_row, heading, idle, later, mark, note, radios
+from .ui import KEY_TABLE, Pages, button, device_list, device_row, heading, idle, in_bg, later, mark, note, radios
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -157,6 +157,26 @@ class ThinkpadPages:
         src = 'battery' if sysread('/sys/class/power_supply/AC/online', '1') == '0' else 'charger'
         self.profile_label.set_text(f'Now on the {src}, mode: {PROFILES.get(prof, prof)}')
         return True
+
+    def pad_page(self):
+        """Hardware → Touchpad: how to right-click"""
+        from .ui import switch
+        from .windows import apply_touchpad
+        box = Pages()
+        box.add(heading('Touchpad', 'Touchpad'))
+        on = bool((load_conf().get('touchpad') or {}).get('clickfinger', False))
+
+        def set_(v):
+            update_conf('touchpad', clickfinger=bool(v))
+            in_bg(apply_touchpad, bool(v))
+        row = Gtk.Box(spacing=12, margin_top=6)
+        row.add(Gtk.Label(label='Click with two fingers for a right-click', xalign=0))
+        row.add(switch(on, set_))
+        box.add(row)
+        box.add(note('On: press the pad with two fingers anywhere for a right-click (three for a '
+                     'middle click). Off: press its bottom-right corner. The red TrackPoint\'s '
+                     'buttons above the pad always work.'))
+        return box
 
     def hw_page(self):
         box = Pages()

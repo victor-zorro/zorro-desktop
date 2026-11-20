@@ -57,9 +57,10 @@ PIDFILE = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-dial.pid'
 CONF = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config')) / 'zorro-dial' / 'config.json'
 sys.path.insert(0, str(Path(os.path.realpath(__file__)).parent.parent / 'zorro-fx'))
 try:                                    # the one palette (apps/zorro-fx/zorro_style.py)
-    from zorro_style import CYAN, FG, RED
+    from zorro_style import BG, CYAN, FG, RED
 except ImportError:
     RED, CYAN, FG = (1.0, 0.165, 0.29), (0.098, 0.902, 1.0), (0.847, 0.847, 0.871)
+    BG = (0.020, 0.027, 0.039)
 
 DEFAULTS = {
     'slices': [                     # 2 to 6 slices, clockwise from the top
@@ -319,6 +320,8 @@ class Dial(Gtk.Window):
         self.slots = []                 # (x, y, r, app, slice, position) placed this frame
         self.press = None               # (app, x, y) while the mouse button is down on an app
         self.drag = None                # (app, x, y) while an app is being dragged
+        self.hold_id = None             # timer: an app held still for a moment opens its menu
+        self.menu = None                # {'rows': [(label, fn)], 'x', 'y', 'rects', 'hover'}
         self.expanded = None            # a full slice shown across the dial ("+N" clicked)
         self.renaming, self.rename_text = None, ""   # a slice name being typed (right-click it)
         self.labels, self.add_label = [], None
@@ -748,9 +751,8 @@ class Dial(Gtk.Window):
             self.music_keys(cr, cx, cy, hub)
         self.draw_preview(cr)
         am = math.radians((a0 + a1) / 2)
-        if self.mode == 'apps' and not self.filter and self.expanded is None:
-            px, py = (self.drag[1], self.drag[2]) if self.drag else (-1e4, -1e4)
-            self.draw_bin(cr, px, py, quiet=not self.drag)
+        if self.mode == 'apps' and not self.filter and self.expanded is None and self.drag:
+            self.draw_bin(cr, self.drag[1], self.drag[2])
         if self.drag:
             a, x, y = self.drag
             pb = self.icon(a, 44 * self.iu)
@@ -773,7 +775,7 @@ class Dial(Gtk.Window):
                       hx, hy, size, bold=True, alpha=0.95, split=1.0)
         else:
             search = {'notes': 'type: search notes · ', 'music': 'type: search SoundCloud · '}.get(self.mode, '')
-            line = ('type to search · drag to rearrange · Enter starts · Esc closes'
+            line = ('type to search · drag to rearrange, onto the clock to remove · hold for more · Esc closes'
                     if self.mode == 'apps' else
                     search + 'rest on something: it opens in the next ring · Esc: one back'
                     if getattr(self.parts.get(self.mode), 'tree', False) else
@@ -781,6 +783,8 @@ class Dial(Gtk.Window):
             size = self.pt(9)
             hx, hy = self.hint_at(cr, line, hx, hy, size, False, cx, cy, am, outer)
             self.text(cr, line, hx, hy, size, bold=False, alpha=0.5, split=0)
+        if self.menu:
+            self.draw_menu(cr)
         return False
 
     def hint_at(self, cr, s, hx, hy, size, bold, cx, cy, am, outer):
@@ -1348,11 +1352,18 @@ class Dial(Gtk.Window):
         return int(rel / ((a1 - a0) / n)) if rel <= a1 - a0 else None
 
     def on_motion(self, _w, ev):
+        if self.menu:
+            k = self.menu_at(ev.x, ev.y)
+            if k != self.menu['hover']:
+                self.menu['hover'] = k
+                self.area.queue_draw()
+            return
         if self.press and not self.drag and not self.filter and self.expanded is None \
                 and self.mode == 'apps' and 'more' not in self.press[0] \
                 and not self.press[0].get('gear'):
             a, px, py = self.press
             if (ev.x - px) ** 2 + (ev.y - py) ** 2 > 12 ** 2:
+                self.hold_stop()
                 self.drag = (a, ev.x, ev.y)
         if self.drag:
             self.drag = (self.drag[0], ev.x, ev.y)
@@ -1388,6 +1399,7 @@ class Dial(Gtk.Window):
             self.dwell = None
 
     def on_release(self, _w, ev):
+        self.hold_stop()
         press, drag = self.press, self.drag
         self.press = self.drag = None
         if ev.button != 1 or not press:
@@ -1404,44 +1416,111 @@ class Dial(Gtk.Window):
 
     # -- the bin: drop an app on it and it leaves the launcher (typing still finds it)
     def bin_at(self):
-        """the bin's centre: the top-left corner, or top-right when the dial sits top-left"""
-        W, m = self.geo.width, 70 * self.u
-        cx, cy = self.fan()[:2]          # the dial's clock in the top-left quarter: top-right
-        return (W - m, m) if cx < W / 2 and cy < self.geo.height / 2 else (m, m)
+        """the bin sits on the Dialer's clock while you drag: close to every app"""
+        return self.fan()[:2]
+
+    def bin_r(self):
+        return max(48 * self.u, self.fan()[2] * 0.75)
 
     def over_bin(self, x, y):
         bx, by = self.bin_at()
-        return (x - bx) ** 2 + (y - by) ** 2 <= (48 * self.u) ** 2
+        return (x - bx) ** 2 + (y - by) ** 2 <= self.bin_r() ** 2
 
-    def draw_bin(self, cr, x, y, quiet=False):
+    def draw_bin(self, cr, x, y):
+        """while an app is dragged: the clock becomes a bin"""
         bx, by = self.bin_at()
-        u = self.u
+        u, r = self.u, self.bin_r()
         hot = self.over_bin(x, y)
-        if quiet:                           # not dragging: a faint bin, saying how
-            cr.new_path()
-            cr.arc(bx, by, 30 * u, 0, 2 * math.pi)
-            cr.set_source_rgba(1, 1, 1, 0.04)
-            cr.fill()
-            pb = self.lucide('trash-2', 22 * u, 0.35)
-            if pb:
-                Gdk.cairo_set_source_pixbuf(cr, pb, bx - pb.get_width() / 2, by - pb.get_height() / 2)
-                cr.paint()
-            say = 'drag an app here, or right-click it, to remove it'
-            tx, ty = self.inside(cr, say, bx, by + 46 * u, self.pt(8), bold=False, pad=36 * u)
-            self.text(cr, say, tx, ty, self.pt(8), bold=False, alpha=0.4, split=0)
-            return
         cr.new_path()
-        cr.arc(bx, by, 40 * u, 0, 2 * math.pi)
-        cr.set_source_rgba(*(RED if hot else (1, 1, 1)), 0.25 if hot else 0.06)
+        cr.arc(bx, by, r, 0, 2 * math.pi)
+        cr.set_source_rgba(*BG, 0.95)               # covers the clock
+        cr.fill_preserve()
+        cr.set_source_rgba(*RED, 0.45 if hot else 0.0)
         cr.fill()
-        self.chroma_circle(cr, bx, by, 40 * u, alpha=0.9 if hot else 0.4)
-        pb = self.lucide('trash-2', 30 * u, 0.95 if hot else 0.6)
+        self.chroma_circle(cr, bx, by, r, alpha=0.9 if hot else 0.5)
+        pb = self.lucide('trash-2', 34 * u, 0.95 if hot else 0.7)
         if pb:
-            Gdk.cairo_set_source_pixbuf(cr, pb, bx - pb.get_width() / 2, by - pb.get_height() / 2)
+            Gdk.cairo_set_source_pixbuf(cr, pb, bx - pb.get_width() / 2, by - pb.get_height() / 2 - 8 * u)
             cr.paint()
         say = 'out of the launcher' if hot else 'drop here to remove'
-        tx, ty = self.inside(cr, say, bx, by + 58 * u, self.pt(8), bold=hot)
-        self.text(cr, say, tx, ty, self.pt(8), bold=hot, alpha=0.9 if hot else 0.5, split=0)
+        self.text(cr, say, bx, by + 26 * u, self.pt(8), bold=hot, alpha=0.95 if hot else 0.6, split=0)
+
+    # -- hold an app still for a moment: a small menu (no right-click needed)
+    def hold_start(self, press):
+        self.hold_stop()
+        self.hold_id = GLib.timeout_add(650, self.on_hold, press)
+
+    def hold_stop(self):
+        if self.hold_id:
+            GLib.source_remove(self.hold_id)
+            self.hold_id = None
+
+    def on_hold(self, press):
+        self.hold_id = None
+        if self.press is not press or self.drag:
+            return False
+        self.press = None                   # the release that follows doesn't start it
+        a, x, y = press
+        names = [sl['name'] for sl in self.conf['slices'][:6]]
+        here = next((i for i, g in enumerate(self.groups) if a in g), None)
+        rows = [('Remove from the launcher', lambda: self.hide_app(a))]
+        rows += [(f'Move to {n}', lambda gi=gi: self.move_to(a, gi)) for gi, n in enumerate(names)
+                 if gi != here and gi < len(self.groups)]
+        rows.append(('Cancel', lambda: None))
+        self.menu = {'rows': rows, 'x': x, 'y': y, 'rects': [], 'hover': None, 'name': a.get('name', '')}
+        self.area.queue_draw()
+        return False
+
+    def move_to(self, a, gi):
+        """the app to the end of another slice (like dragging it there)"""
+        src = next((i for i, g in enumerate(self.groups) if a in g), None)
+        if src is None or src == gi:
+            return
+        self.groups[src].remove(a)
+        self.groups[gi].append(a)
+        names = [sl['name'] for sl in self.conf['slices'][:6]]
+        order = dict(self.conf.get('order', {}))
+        for i in (src, gi):
+            order[names[i]] = [b['id'] for b in self.groups[i]]
+        self.conf['order'] = order
+        self.conf['assign'][a['id']] = names[gi]
+        save_arrangement(order, {a['id']: names[gi]})
+
+    def draw_menu(self, cr):
+        m = self.menu
+        u, size = self.u, self.pt(10)
+        exts = [self.text_ext(cr, lab, size, False) for lab, _ in m['rows']]
+        tw, th = self.text_ext(cr, m['name'], size, True)
+        w = max([e[0] for e in exts] + [tw]) + 40 * u
+        rh = 34 * u
+        h = rh * (len(m['rows']) + 1) + 8 * u
+        W, H = self.geo.width, self.geo.height
+        x = min(max(m['x'] + 24 * u, 12 * u), W - w - 12 * u)
+        y = min(max(m['y'] - rh, 12 * u), H - h - 12 * u)
+        cr.new_path()
+        cr.rectangle(x, y, w, h)
+        cr.set_source_rgba(*BG, 0.94)
+        cr.fill_preserve()
+        cr.set_source_rgba(1, 1, 1, 0.18)
+        cr.set_line_width(1)
+        cr.stroke()
+        self.text(cr, m['name'], x + w / 2, y + rh / 2 + 4 * u, size, bold=True, alpha=0.9, split=0.8)
+        m['rects'] = []
+        for k, (lab, _fn) in enumerate(m['rows']):
+            ry = y + rh * (k + 1) + 4 * u
+            m['rects'].append((x, ry, w, rh))
+            if m['hover'] == k:
+                cr.rectangle(x + 1, ry, w - 2, rh)
+                cr.set_source_rgba(*(RED if k == 0 else CYAN), 0.18)
+                cr.fill()
+            self.text(cr, lab, x + w / 2, ry + rh / 2, size, bold=False,
+                      alpha=0.95 if m['hover'] == k else 0.7, split=0)
+
+    def menu_at(self, x, y):
+        for k, (rx, ry, rw, rh) in enumerate((self.menu or {}).get('rects', [])):
+            if rx <= x <= rx + rw and ry <= y <= ry + rh:
+                return k
+        return None
 
     def hide_app(self, a):
         """the app leaves the slices (Zorro app → Desktop → Dialer → Apps brings it back)"""
@@ -1480,6 +1559,13 @@ class Dial(Gtk.Window):
         save_arrangement(order, assign)
 
     def on_click(self, _w, ev):
+        if self.menu:                       # a row of the hold menu, or anywhere else: close it
+            k = self.menu_at(ev.x, ev.y)
+            rows, self.menu = self.menu['rows'], None
+            if k is not None:
+                rows[k][1]()
+            self.area.queue_draw()
+            return
         a = self.hit(ev.x, ev.y)
         z = self.hub_at(ev.x, ev.y)
         if self.mode == 'apps' and not self.filter and self.expanded is None:
@@ -1504,6 +1590,9 @@ class Dial(Gtk.Window):
                                              GLib.idle_add(self.area.queue_draw)), daemon=True).start()
         elif a and ev.button == 1:
             self.press = (a, ev.x, ev.y)    # start on release; moving it drags instead
+            if self.mode == 'apps' and not self.filter and not a.get('tile') and a.get('id') \
+                    and not a['id'].startswith('__') and 'more' not in a and not a.get('gear'):
+                self.hold_start(self.press)  # held still: its menu
         elif z == 'centre' and ev.button == 1 and self.music_key_at(ev.x, ev.y):
             what = self.music_key_at(ev.x, ev.y)
             threading.Thread(target=lambda: (self.parts['music'].control(what),
@@ -1534,6 +1623,10 @@ class Dial(Gtk.Window):
 
     def on_key(self, _w, ev):
         k = Gdk.keyval_name(ev.keyval) or ''
+        if self.menu:                       # the hold menu: Esc closes it, other keys too
+            self.menu = None
+            self.area.queue_draw()
+            return True
         if self.renaming is not None:       # typing a slice's new name
             if k in ('Return', 'KP_Enter'):
                 self.finish_rename(True)

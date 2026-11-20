@@ -28,7 +28,7 @@ TABS = (('network', 'Network'), ('audio', 'Audio'), ('power', 'Power'), ('hardwa
         ('desktop', 'Desktop'), ('login', 'Look'), ('accounts', 'Accounts'))
 SECTION_TAB = {'wifi': 'network', 'eth': 'network', 'lte': 'network', 'nb': 'network',
                'aout': 'audio', 'ain': 'audio', 'aplay': 'audio', 'atog': 'audio',
-               'power': 'power', 'hw': 'hardware', 'keys': 'hardware', 'lights': 'hardware',
+               'power': 'power', 'hw': 'hardware', 'pad': 'hardware', 'keys': 'hardware', 'lights': 'hardware',
                'sys': 'hardware', 'wall': 'desktop', 'dial': 'desktop', 'orb': 'desktop',
                'fx': 'desktop', 'windows': 'desktop', 'text': 'desktop', 'lang': 'desktop',
                'applook': 'desktop', 'apps': 'desktop', 'theme': 'login', 'look': 'login', 'face': 'login',
@@ -169,6 +169,7 @@ class Win(HomePages, FacePages, LangPages, AppsPages, AccountsPages, ThinkpadPag
     def build_hardware(self):
         hw = Group()                    # devices, and the ThinkPad's own keys and lights
         hw.section('hw', None, self.hw_page())
+        hw.section('pad', None, self.pad_page())
         hw.section('keys', 'ThinkPad', self.keys_page())
         hw.section('lights', None, self.lights_page())
         hw.section('sys', 'System', self.sysinfo_page())
