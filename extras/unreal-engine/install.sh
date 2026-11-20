@@ -20,7 +20,19 @@ unzip -o "$zip" -d "$dest" | awk -v n="$total" '/inflating:|extracting:|creating
 if [[ ! -d $dest/Engine ]]; then inner=$(find "$dest" -mindepth 2 -maxdepth 2 -type d -name Engine | head -n1); [[ -n $inner ]] && { top=$(dirname "$inner"); mv "$top"/* "$dest"/; rmdir "$top"; }; fi
 ed=$dest/Engine/Binaries/Linux/UnrealEditor
 [[ -x $ed ]] || { echo "!! no UnrealEditor in the zip"; exit 1; }
-icon=$(find "$dest/Engine/Source/Programs/UnrealVersionSelector" "$dest/Engine/Content" -iname 'Icon*512*.png' -o -iname 'UnrealEngine*.png' 2>/dev/null | head -n1 || true)
-desktop_entry unreal-engine "Unreal Engine" "$ed %f" "${icon:-applications-games}" "Game engine"
+# its logo under a theme name, so the Zorro icon theme makes it black and white like the rest
+icon=applications-games
+for png in "$dest/Engine/Source/Runtime/Launch/Resources/Linux/UnrealEngine.png" \
+           "$dest/Engine/Content/Slate/Starship/Common/UELogo.png"; do
+  if [[ -f $png ]]; then
+    mkdir -p ~/.local/share/icons/hicolor/256x256/apps
+    cp "$png" ~/.local/share/icons/hicolor/256x256/apps/unreal-engine.png
+    icon=unreal-engine
+    break
+  fi
+done
+desktop_entry unreal-engine "Unreal Engine" "$ed %f" "$icon" "Game engine"
+build="$(dirname "$(realpath "$0")")/../../apps/zorro-icons/build-icons"
+[[ -x $build ]] && "$build" >/dev/null 2>&1 || true
 rm -rf "$dest.old"
 echo "==> Unreal Engine installed (Dialer: Unreal Engine). The zip in Downloads can go."
