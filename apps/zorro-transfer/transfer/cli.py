@@ -1,6 +1,7 @@
 """zorro-transfer: set up another device like this one, over the network (LAN or NetBird).
 
-  zorro-transfer                 the app (Settings → Transfer opens the same)
+  zorro-transfer [--send|--get]  the app (Settings → Desktop → Transfer opens the same),
+                                 on the sending or the getting side
   zorro-transfer send            offer this device: shows a code (the app runs this)
   zorro-transfer find            senders on the network and among the NetBird peers
   zorro-transfer get HOST [--code CODE] [--groups a,b]
@@ -16,9 +17,9 @@ from . import engine
 
 def main():
     a = sys.argv[1:]
-    if not a:
+    if not a or a[0] in ('--send', '--get'):
         from .gui import main as gui
-        return gui()
+        return gui(a[0] if a else None)
     if a[0] in ('-h', '--help'):
         print(__doc__)
         return 0

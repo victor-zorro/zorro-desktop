@@ -2,11 +2,14 @@
 
 Sender  (zorro-transfer send): only while the app started it. Listens on PORT, shows a 6-digit
         code, answers "who sends?" on the local network, serves only the files of the groups
-        the receiver asked for. Stops when the app is closed and nothing is being sent.
+        the receiver asked for. Stops when the app is closed and nothing is being sent (an
+        unfinished transfer: once the receiver stopped trying).
 Receiver (zorro-transfer get): pairs with the code, asks for the groups, fetches file by file
         into a staging folder. A file that was half done continues where it stopped; a lost
         connection is retried for a while with the session secret (no new code). Apply then
-        moves everything into place, keeping what it replaces as NAME.before-transfer.
+        moves everything into place, keeping what it replaces as NAME.before-transfer; "by
+        itself" (auto) it does so when everything is here, after the steps that need the
+        admin password ran at the start (fetch_first + root_setup).
 
 Both write their progress to ~/.local/state/zorro-transfer/ (sender.json, receiver.json), which
 the app shows on each device."""
@@ -91,6 +94,11 @@ class Sender:
                                         'name': device_name(), 'port': net.PORT,
                                         'updated': time.time(), 'sessions': self.sessions})
 
+    def unfinished(self):
+        """a transfer that started and did not finish: the receiver comes back for it"""
+        return any(s.get('status') != 'done' and time.time() - s.get('updated', s.get('started', 0)) < RETRY_FOR
+                   for s in self.sessions.values() if s.get('total'))
+
     def gui_alive(self):
         return self.gui_pid is None or Path(f'/proc/{self.gui_pid}').exists()
 
@@ -113,8 +121,10 @@ class Sender:
                 pass
             if self.active:
                 idle_since = time.time()
-            # the app closed: stop once nothing is being sent (a minute for a reconnect)
-            if not self.gui_alive() and not self.active and time.time() - idle_since > 60:
+            # the app closed: stop once nothing is being sent (a minute for a reconnect; while
+            # a transfer is unfinished, as long as the receiver keeps trying)
+            wait = RETRY_FOR + 60 if self.unfinished() else 60
+            if not self.gui_alive() and not self.active and time.time() - idle_since > wait:
                 break
             if Path(STATE / 'sender.stop').exists():
                 (STATE / 'sender.stop').unlink(missing_ok=True)
@@ -381,6 +391,8 @@ class Receiver:
                 self.save(status='receiving', error='')
                 self.fetch_on(t, stage)
                 self.save(status='received')
+                if self.st.get('auto'):
+                    return self.apply_when_free()
                 notify('Transfer: everything is here', 'Open Transfer and press "Put in place".')
                 return True
             except PermissionError as e:
@@ -394,11 +406,79 @@ class Receiver:
                 self.save(status='reconnecting', error=str(e))
                 time.sleep(5)
 
-    def fetch_on(self, t, stage):
+    def fetch_first(self, groups):
+        """before the big part: only the login look and the accounts list (a few KB), so the
+        steps that need the admin password can run now, while you are here"""
+        self.save(groups=groups, status='starting', files=None, error='')
+        t = self.open()
+        try:
+            self.fetch_on(t, STAGE / self.st['session'], first=True)
+        finally:
+            t.close()
+
+    def root_setup(self, passwords):
+        """login look and accounts with one admin password (zorro-transfer-helper); notes"""
+        stage = STAGE / self.st['session']
+        look, people = stage / 'system/etc/zorro-dm/look.json', stage / 'generated/accounts.json'
+        req = {'look': None, 'accounts': [], 'passwords': passwords or {}}
+        try:
+            if look.exists():
+                req['look'] = json.loads(look.read_text())
+            if people.exists():
+                req['accounts'] = json.loads(people.read_text())
+        except (OSError, ValueError):
+            pass
+        notes = []
+        if req['look'] is None and not req['accounts']:
+            pass
+        elif not Path(items.SETUP_HELPER).exists():
+            notes.append('login look and accounts: first run  sudo ~/zorro-desktop/apps/'
+                         'zorro-transfer/install-system.sh  then "Put in place" again')
+        else:
+            try:
+                r = subprocess.run(['pkexec', items.SETUP_HELPER, 'setup'], input=json.dumps(req),
+                                   capture_output=True, text=True, timeout=300)
+                out = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 else None
+            except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+                out = None
+            if out is None:
+                notes.append('login look and accounts not set (password cancelled)')
+            else:
+                if out.get('look') is not None:
+                    notes.append('login look saved' if out['look'] else 'login look not saved')
+                if out.get('me') is not None:
+                    notes.append('your name and groups set (groups count from the next login)'
+                                 if out['me'] else 'your groups not set')
+                for key, text in (('made', 'accounts made'), ('skipped', 'no password, not made'),
+                                  ('failed', 'not made')):
+                    if out.get(key):
+                        notes.append(f'{text}: ' + ', '.join(out[key]))
+        self.save(root_done=True, root_notes=notes)
+        return notes
+
+    def apply_when_free(self):
+        """put in place by itself; apps whose files would change: wait until they are closed"""
+        told = None
+        while True:
+            try:
+                self.apply()
+                notes = self.st.get('notes') or []
+                notify('Transfer: done', 'Everything is in place.' + (' ' + '; '.join(notes) if notes else ''))
+                return True
+            except PermissionError as e:
+                self.save(status='waiting for apps', error=str(e))
+                if str(e) != told:
+                    notify('Transfer: almost done', f'Close {e} to finish.')
+                    told = str(e)
+                time.sleep(10)
+
+    def fetch_on(self, t, stage, first=False):
         net.send_json(t, {'op': 'manifest', 'groups': self.st['groups']})
         files = net.recv_json(t)['files']
         total = sum(f['size'] for f in files)
         self.save(files=files, total=total)
+        if first:
+            files = [f for f in files if f['path'].startswith(('system/', 'generated/accounts'))]
         done = 0
         t0, last = time.time(), 0
         speed_mark = (time.time(), 0)
@@ -489,6 +569,8 @@ class Receiver:
             meta.unlink(missing_ok=True)
             done += f['size']
         flush()
+        if first:
+            return
         self.save(done=total, current='', speed=0, took=time.time() - t0)
         net.send_json(t, {'op': 'finished'})
         net.recv_json(t)
@@ -546,9 +628,10 @@ class Receiver:
     def after(self, stage, passwords):
         """rebuild what Settings makes from the choices; system files with a password"""
         notes = []
-        people = stage / 'generated/accounts.json'
-        if people.exists():
-            notes += items.accounts_import(people, passwords)
+        if self.st.get('root_done'):        # done at the start (put in place by itself)
+            notes += self.st.get('root_notes') or []
+        else:
+            notes += self.root_setup(passwords)
         wifi = stage / 'generated/wifi.json'
         if wifi.exists():
             n = items.wifi_import(wifi)
@@ -563,15 +646,6 @@ class Receiver:
         if icons.exists():
             subprocess.run([str(icons)], capture_output=True, timeout=300)
             notes.append('icons rebuilt')
-        look = stage / 'system/etc/zorro-dm/look.json'
-        if look.exists():
-            if Path(items.LOOK_HELPER).exists():
-                r = subprocess.run(['pkexec', items.LOOK_HELPER, 'greeter-look', look.read_text()],
-                                   capture_output=True, timeout=120)
-                notes.append('login look saved' if r.returncode == 0 else
-                             'login look not saved (password cancelled)')
-            else:
-                notes.append('login look: set up the login screen first (apps/zorro-dm)')
         return notes
 
 

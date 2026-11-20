@@ -1,0 +1,120 @@
+#!/usr/bin/python3 -I
+"""zorro-transfer-helper: Transfer's root steps on the new device, all in one go (so the admin
+password is asked once, at the start, and the rest runs on its own).
+Installed root-owned in /usr/local/libexec, run through pkexec.
+
+  setup      reads JSON on stdin: {"look": {...} or null, "accounts": [...],
+             "passwords": {name: password}}
+    look           the login look -> zorro-look-helper greeter-look (it checks every value)
+    accounts       {"name", "full", "groups": [...], "me": bool} each
+      me: true     the person running Transfer (their name here may differ from the old one):
+                   full name set, added to the groups; the password stays
+      a new name   the account is made (home folder, bash), its password from "passwords"
+                   (none: not made), full name, groups
+      an existing name (not me)   left alone: never someone else's account changed
+  Prints one JSON line: {"look": true/false/null, "me": ..., "made": [...], "skipped": [...],
+  "failed": [...]}
+
+Groups: only the desktop ones below, only those that exist here, never removed from one.
+Passwords never travel between the devices: they are typed on this one."""
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+
+os.environ['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin'
+LOOK = '/usr/local/libexec/zorro-look-helper'
+GROUPS = ('sudo', 'audio', 'video', 'plugdev', 'netdev', 'bluetooth', 'lpadmin', 'scanner',
+          'render', 'kvm', 'cdrom', 'floppy', 'dip', 'users', 'dialout', 'input', 'libvirt')
+NAME = re.compile(r'[a-z_][a-z0-9_-]{0,31}')
+
+
+def die(msg):
+    print(f'zorro-transfer-helper: {msg}', file=sys.stderr)
+    sys.exit(2)
+
+
+def caller():
+    try:
+        return pwd.getpwuid(int(os.environ['PKEXEC_UID'])).pw_name
+    except (KeyError, ValueError):
+        die('run through pkexec')
+
+
+def exists(name):
+    try:
+        pwd.getpwnam(name)
+        return True
+    except KeyError:
+        return False
+
+
+def group_exists(g):
+    return subprocess.run(['getent', 'group', g], capture_output=True).returncode == 0
+
+
+def account(a, passwords):
+    """one account; 'updated', 'made', 'exists', 'skipped' or 'failed'"""
+    try:
+        name, full, groups, me = a['name'], a.get('full', ''), a.get('groups', []), a.get('me')
+    except (KeyError, TypeError, AttributeError):
+        return 'failed'
+    if not isinstance(full, str) or len(full) > 100 or any(c in full for c in ':,\n\r\0'):
+        full = ''
+    if not isinstance(groups, list):
+        groups = []
+    groups = [g for g in groups if g in GROUPS and group_exists(g)]
+    if me:
+        name = caller()                     # always yourself, whatever the old name was
+    elif not isinstance(name, str) or not NAME.fullmatch(name):
+        return 'failed'
+    elif exists(name):
+        return 'exists'                     # someone else's: left alone
+    else:
+        password = passwords.get(name) if isinstance(passwords, dict) else None
+        if not isinstance(password, str) or not password or '\n' in password:
+            return 'skipped'
+        if subprocess.run(['useradd', '-m', '-s', '/bin/bash', '-c', full, name]).returncode:
+            return 'failed'
+        if subprocess.run(['chpasswd'], input=f'{name}:{password}\n', text=True).returncode:
+            subprocess.run(['passwd', '-l', name])       # no password set: locked, not open
+            return 'failed'
+    if me and full:
+        subprocess.run(['usermod', '-c', full, name], check=False)
+    if groups:
+        subprocess.run(['usermod', '-aG', ','.join(groups), name], check=False)
+    return 'updated' if me else 'made'
+
+
+def setup():
+    try:
+        req = json.loads(sys.stdin.read(1 << 20))
+        assert isinstance(req, dict)
+    except (ValueError, AssertionError):
+        die('bad setup data')
+    out = {'look': None, 'me': None, 'made': [], 'skipped': [], 'failed': []}
+    look = req.get('look')
+    if isinstance(look, dict):
+        out['look'] = os.path.exists(LOOK) and subprocess.run(
+            [LOOK, 'greeter-look', json.dumps(look)], capture_output=True).returncode == 0
+    for a in req.get('accounts') or []:
+        r = account(a, req.get('passwords') or {})
+        if isinstance(a, dict) and a.get('me'):
+            out['me'] = r == 'updated'
+        elif r in ('made', 'skipped', 'failed'):
+            out[r].append(str(a.get('name')) if isinstance(a, dict) else '?')
+    print(json.dumps(out))
+
+
+def main():
+    caller()
+    if sys.argv[1:] == ['setup']:
+        setup()
+        sys.exit(0)
+    die('usage: setup  (JSON on stdin)')
+
+
+if __name__ == '__main__':
+    main()

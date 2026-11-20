@@ -78,7 +78,7 @@ def btn(text, cb, primary=False):
 
 
 class Win(Gtk.Window):
-    def __init__(self):
+    def __init__(self, first=None):
         super().__init__(title='Transfer')
         self.set_default_size(620, 520)
         self.set_icon_name('folder-remote')
@@ -92,8 +92,13 @@ class Win(Gtk.Window):
         snd, rcv = engine.read_state('sender.json'), engine.read_state('receiver.json')
         if alive(snd.get('pid')) and snd.get('status') != 'stopped':
             self.send_page(start=False)
-        elif rcv.get('status') in ('starting', 'receiving', 'reconnecting', 'interrupted', 'received', 'apps open'):
+        elif rcv.get('status') in ('starting', 'receiving', 'reconnecting', 'interrupted', 'received', 'apps open',
+                                   'waiting for apps', 'putting in place'):
             self.get_progress_page()
+        elif first == '--send':
+            self.send_page(start=True)
+        elif first == '--get':
+            self.get_page()
         else:
             self.start_page()
         self.show_all()
@@ -296,9 +301,16 @@ class Win(Gtk.Window):
             cb.add(box)
             self.picks[g['id']] = cb
             self.put(cb)
-        self.put(label('Nothing changes here until you press "Put in place" at the end; what it '
-                       'replaces is kept as a .before-transfer copy.', dim=True))
-        self.put(btn('Start', self.get_start, primary=True))
+        self.auto = Gtk.CheckButton(active=True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.add(label('<b>Put everything in place by itself</b>', markup=True))
+        box.add(label('The password is asked once, now; then it runs on its own until it is done '
+                      '(you can close this window). Off: you press "Put in place" at the end.', dim=True))
+        self.auto.add(box)
+        self.put(self.auto)
+        self.put(label('What it replaces on this device is kept as a .before-transfer copy.', dim=True))
+        self.start_btn = self.put(btn('Start', self.get_start, primary=True))
+        self.start_line = self.put(label('', dim=True))
         self.show_all()
         return False
 
@@ -306,9 +318,44 @@ class Win(Gtk.Window):
         groups = [g for g, cb in self.picks.items() if cb.get_active()]
         if not groups:
             return
+        if not self.auto.get_active():
+            engine.Receiver().save(auto=False)
+            return self.launch(groups)
+        # by itself: first the few small files that need the password, then the password, once
+        self.start_btn.set_sensitive(False)
+        self.start_line.set_text('Getting ready…')
+
+        def first():
+            r = engine.Receiver()
+            try:
+                r.fetch_first(groups)
+            except (OSError, ConnectionError, ValueError, PermissionError) as e:
+                GLib.idle_add(self.start_line.set_text, f'Could not start: {e}. Try Start again.')
+                GLib.idle_add(self.start_btn.set_sensitive, True)
+                return
+            GLib.idle_add(self.get_ready, groups)
+        threading.Thread(target=first, daemon=True).start()
+
+    def get_ready(self, groups):
+        r = engine.Receiver()
+        passwords = {}
+        people = r.new_accounts()
+        if people:
+            passwords = self.ask_passwords(people) or {}
+        self.start_line.set_text('Asking the admin password (login look, accounts)…')
+
+        def root():
+            r.root_setup(passwords)
+            r.save(auto=True)
+            GLib.idle_add(self.launch, groups)
+        threading.Thread(target=root, daemon=True).start()
+        return False
+
+    def launch(self, groups):
         subprocess.Popen([ME, 'continue', '--groups', ','.join(groups)], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         GLib.timeout_add(400, lambda: self.get_progress_page() and False)
+        return False
 
     def get_progress_page(self):
         self.clear()
@@ -327,8 +374,14 @@ class Win(Gtk.Window):
     def get_tick(self):
         st = engine.read_state('receiver.json')
         status = st.get('status', '')
-        if status in ('starting', 'receiving', 'reconnecting') and not alive(st.get('pid')):
+        running = alive(st.get('pid'))
+        if status in ('starting', 'receiving', 'reconnecting') and not running:
             status = 'interrupted'
+        if status in ('received', 'waiting for apps'):
+            if st.get('auto') and running:
+                status = 'putting in place' if status == 'received' else status
+            elif status == 'waiting for apps':
+                status = 'apps open'
         total, done = st.get('total') or 0, st.get('done') or 0
         self.gbar.set_fraction(min(1, done / total) if total else 0)
         self.gbar.set_text(f'{human(done)} of {human(total)}' if total else '')
@@ -341,6 +394,11 @@ class Win(Gtk.Window):
         elif status == 'interrupted':
             self.gline.set_text(f"Stopped: {st.get('error', '')}. It goes on where it stopped once the "
                                 f"other device sends again (open Transfer there: Send this setup).")
+        elif status == 'putting in place':
+            self.gline.set_text('Everything is here; putting it in place…')
+        elif status == 'waiting for apps':
+            self.gline.set_text(f"Everything is here. It goes into place by itself once these are "
+                                f"closed: {st.get('error', '')}")
         elif status == 'apps open':
             self.gline.set_text(f"Close these first, then press Put in place again: {st.get('error', '')}")
         elif status == 'received':
@@ -358,7 +416,7 @@ class Win(Gtk.Window):
             self.gstate = status
             for c in self.gbtns.get_children():
                 self.gbtns.remove(c)
-            if status in ('starting', 'receiving', 'reconnecting'):
+            if status in ('starting', 'receiving', 'reconnecting', 'putting in place', 'waiting for apps'):
                 self.gbtns.add(btn('Go on in the background', self.destroy))
             elif status == 'interrupted':
                 self.gbtns.add(btn('Try again', self.get_continue, primary=True))
@@ -432,8 +490,8 @@ class Win(Gtk.Window):
         threading.Thread(target=work, daemon=True).start()
 
 
-def main():
+def main(first=None):
     socket.setdefaulttimeout(None)
-    Win()
+    Win(first)
     Gtk.main()
     return 0

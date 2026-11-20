@@ -9,6 +9,7 @@ from .pages_look import LookPages
 from .pages_face import FacePages
 from .pages_lang import LangPages
 from .pages_apps import AppsPages
+from .pages_transfer import TransferPages
 from .pages_accounts import AccountsPages
 from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
@@ -31,11 +32,11 @@ SECTION_TAB = {'wifi': 'network', 'eth': 'network', 'lte': 'network', 'nb': 'net
                'power': 'power', 'hw': 'hardware', 'pad': 'hardware', 'keys': 'hardware', 'lights': 'hardware',
                'sys': 'hardware', 'wall': 'desktop', 'dial': 'desktop', 'orb': 'desktop',
                'fx': 'desktop', 'windows': 'desktop', 'text': 'desktop', 'lang': 'desktop',
-               'applook': 'desktop', 'apps': 'desktop', 'theme': 'login', 'look': 'login', 'face': 'login',
+               'applook': 'desktop', 'apps': 'desktop', 'transfer': 'desktop', 'theme': 'login', 'look': 'login', 'face': 'login',
                'sc': 'accounts', 'ob': 'accounts'}
 
 
-class Win(HomePages, FacePages, LangPages, AppsPages, AccountsPages, ThinkpadPages, PrinterPages, BluetoothPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
+class Win(HomePages, FacePages, LangPages, AppsPages, TransferPages, AccountsPages, ThinkpadPages, PrinterPages, BluetoothPages, DesktopPages, LookPages, MobilePages, NetworkPages, AudioPages,
           Gtk.ApplicationWindow):
     def __init__(self, app, select=None):
         super().__init__(application=app, title='Zorro')
@@ -191,6 +192,7 @@ class Win(HomePages, FacePages, LangPages, AppsPages, AccountsPages, ThinkpadPag
         desk.section('applook', 'This app', self.fx_page('app'), sub=True)
         desk.heading('Apps')
         desk.section('apps', None, self.apps_page())         # Install apps
+        desk.section('transfer', None, self.transfer_page())  # Transfer: set up another device
         return desk
 
     def build_look(self):

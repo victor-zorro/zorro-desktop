@@ -68,8 +68,7 @@ SKIP_FILES = ('.lock', '.tmp', 'lock', '.parentlock', 'SingletonLock', 'Singleto
 # home folders that are not personal files: the repo comes from GitHub, installed programs
 # from their installer, Installers is its own group
 NOT_FILES = {'zorro-desktop', 'UnrealEngine', 'Installers', 'snap'}
-LOOK_HELPER = '/usr/local/libexec/zorro-look-helper'    # installs the login look (password)
-ACCOUNTS_HELPER = '/usr/local/libexec/zorro-accounts-helper'   # makes accounts (password)
+SETUP_HELPER = '/usr/local/libexec/zorro-transfer-helper'   # login look + accounts (password)
 NO_SHELL = ('/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false')
 
 
@@ -171,47 +170,6 @@ def new_accounts(path):
             if not a.get('me'):
                 out.append(a)
     return out
-
-
-def accounts_import(path, passwords):
-    """you: full name and groups; others: made with the password typed here (passwords:
-    {name: password}; without one an account is skipped). Notes for the summary."""
-    try:
-        people = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return []
-    if not Path(ACCOUNTS_HELPER).exists():
-        return ['accounts: run the Transfer system install first (sudo apps/zorro-transfer/'
-                'install-system.sh)']
-    made, skipped, failed, me = [], [], [], ''
-    new = {a['name'] for a in new_accounts(path)}
-    for a in people:
-        if not a.get('me') and a['name'] not in new:
-            continue                        # already here: left alone
-        pw = '' if a.get('me') else passwords.get(a['name'], '')
-        if not a.get('me') and not pw:
-            skipped.append(a['name'])
-            continue
-        data = json.dumps({k: a.get(k) for k in ('name', 'full', 'groups', 'me')})
-        try:
-            r = subprocess.run(['pkexec', ACCOUNTS_HELPER, 'account', data], input=pw + '\n',
-                               capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.SubprocessError):
-            r = None
-        ok = r is not None and r.returncode == 0
-        if a.get('me'):
-            me = 'your name and groups set (groups count from the next login)' if ok else \
-                 'your groups not set (password cancelled)'
-        else:
-            (made if ok else failed).append(a['name'])
-    notes = [me] if me else []
-    if made:
-        notes.append('accounts made: ' + ', '.join(made))
-    if skipped:
-        notes.append('no password, not made: ' + ', '.join(skipped))
-    if failed:
-        notes.append('not made: ' + ', '.join(failed))
-    return notes
 
 
 def wifi_export():

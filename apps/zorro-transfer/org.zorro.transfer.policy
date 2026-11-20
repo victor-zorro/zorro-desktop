@@ -3,14 +3,14 @@
  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
 <policyconfig>
   <vendor>zorro-desktop</vendor>
-  <action id="org.zorro.transfer.accounts">
-    <description>Make user accounts from another device</description>
-    <message>Transfer wants to make user accounts and set your groups</message>
+  <action id="org.zorro.transfer.setup">
+    <description>Set up this device from another one: login look, user accounts</description>
+    <message>Transfer wants to save the login look and set up the user accounts</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/zorro-accounts-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/libexec/zorro-transfer-helper</annotate>
   </action>
 </policyconfig>

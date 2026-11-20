@@ -24,7 +24,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-face/` — face unlock with the IR camera (OpenCV YuNet + SFace) for the lock screen / login
   - `apps/zorro-search/` — search notes and documents by meaning (multilingual-e5-small, local service); the Dialer's Notes search
   - `apps/zorro-sweep/` — Sweep notes: rounds of swiping notes left (keep) / right (delete), every 10 kept get dragged into notebooks (best match by meaning); `obsidian-plugin/` = the same game inside Obsidian (laptop + Android, via Sync), published as "Sweep or Keep" (publish-plugin.sh), progress shared in the plugin's data.json
-  - `apps/zorro-transfer/` — Transfer: set up another device like this one (Settings, logins, files, `~/Installers`) over the LAN or NetBird; 6-digit code (SPAKE2) → TLS 1.3 PSK, resumable, both sides show progress, runs on in the background
+  - `apps/zorro-transfer/` — Transfer: set up another device like this one (Settings, logins, files, `~/Installers`) over the LAN or NetBird; 6-digit code (SPAKE2) → TLS 1.3 PSK, resumable, both sides show progress, runs on in the background; on the new device one password at the start, then unattended (Settings → Desktop → Transfer)
   - `apps/zorro-fx/` — shared overlay look (particles, lock-screen style) for the indicator and zorro-shot; settings in the ThinkPad app; `zorro_style.py` = the one palette + font for all apps
 - Test risky changes in the VM first: `zvm start`, `zvm sync`, `zvm ssh`, `zvm shot`, `zvm reset` (config/bin/.local/bin/zvm)
 - `templates/` — snippets used to generate files (Openbox keybinds)
