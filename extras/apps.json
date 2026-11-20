@@ -15,11 +15,11 @@
    "name": "Unreal Engine",
    "icon": "unreal-engine",
    "about": "Game engine by Epic. Needs your Epic account: download the Linux zip first",
-   "size": "about 45 GB unpacked, the zip is about 25 GB",
+   "size": "about 70 GB unpacked, the zip is about 40 GB",
    "how": "manual",
    "download": "https://www.unrealengine.com/en-US/linux",
    "file": "Linux_Unreal_Engine_*.zip",
-   "installed": "~/UnrealEngine/Engine/Binaries/Linux/UnrealEditor"
+   "installed": "~/.local/share/applications/unreal-engine.desktop"
   },
   {
    "id": "localsend",

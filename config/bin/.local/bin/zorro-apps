@@ -31,6 +31,30 @@ def apps():
     return out
 
 
+def run(a, extra):
+    """the install script, its output to ours and to ~/.cache/zorro-apps/ID.log; it keeps
+    going when whoever reads our output goes away (Settings closed mid-install)"""
+    log_dir = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'zorro-apps'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    with open(log_dir / f"{a['id']}.log", 'wb') as log:
+        p = subprocess.Popen([a['script'], *extra], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL)
+        out = sys.stdout.buffer
+        while True:
+            chunk = os.read(p.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            log.write(chunk)
+            log.flush()
+            if out:
+                try:
+                    out.write(chunk)
+                    out.flush()
+                except (BrokenPipeError, OSError):
+                    out = None              # nobody listens any more: the log still gets it
+        return p.wait()
+
+
 def main():
     args = sys.argv[1:]
     if args[:1] in (['-h'], ['--help']):
@@ -44,7 +68,7 @@ def main():
         if not a:
             print(f'zorro-apps: no app "{args[1]}" (see: zorro-apps)', file=sys.stderr)
             return 2
-        return subprocess.call([a['script'], *args[2:3]])
+        return run(a, args[2:3])
     for a in apps():
         mark = '✓' if a['is_installed'] else ' '
         extra = f"  (download first: {a['download']})" if a.get('how') == 'manual' and not a['is_installed'] else ''

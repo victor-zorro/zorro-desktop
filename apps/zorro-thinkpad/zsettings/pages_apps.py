@@ -141,7 +141,8 @@ class AppsPages:
                 tick()
                 try:
                     p = subprocess.Popen([ZAPPS, 'install', a['id'], *arg], stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                                         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                         start_new_session=True)    # goes on if Settings closes
                     buf = b''
                     while True:                   # curl's bar redraws with \r, so split on both
                         chunk = os.read(p.stdout.fileno(), 4096)
