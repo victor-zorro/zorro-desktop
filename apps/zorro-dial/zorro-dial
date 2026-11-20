@@ -451,9 +451,11 @@ class Dial(Gtk.Window):
         if any(a['id'] == 'nemo.desktop' for a in self.all):
             hidden.add('thunar.desktop')        # one file manager in the slices: Nemo
         self.settings = []
+        mine = hidden - set(DEFAULTS['hide'])   # the ones you removed yourself
         for a in self.all:
             if a['id'] != 'zorro-settings.desktop' and SETTINGS_CATS & set(a['cats']):
-                self.settings.append(a)         # all settings apps: behind the gear
+                if a['id'] not in mine:
+                    self.settings.append(a)     # all settings apps: behind the gear
                 continue
             if a['id'] in hidden:
                 continue
@@ -464,6 +466,13 @@ class Dial(Gtk.Window):
                 idx = next((i for i, s in enumerate(slices)
                             if any(c in s['categories'] for c in a['cats'])), len(slices) - 1)
             groups[idx].append(a)
+        zorro = next((a for a in self.all if a['id'] == 'zorro-settings.desktop'), None)
+        if zorro and zorro['id'] not in mine:
+            self.settings.insert(0, zorro)
+        if self.settings and groups and '__gear__' not in hidden:
+            pick = self.conf.get('assign', {}).get('__gear__')     # the gear: like an app
+            groups[names.index(pick) if pick in names else len(groups) - 1].append(
+                {'id': '__gear__', 'name': 'Settings', 'icon': 'lucide:settings', 'gear': True})
         # your dragged order first, then the rest by usage (most used inward)
         self.groups = []
         for s, g in zip(slices, groups):
@@ -471,15 +480,10 @@ class Dial(Gtk.Window):
             byid = {a['id']: a for a in g}
             first = [byid[i] for i in pinned if i in byid]
             rest = sorted((a for a in g if a['id'] not in pinned),
-                          key=lambda a: (-score(self.usage, a['id']), a['name'].lower()))
+                          key=lambda a: (not a.get('gear'), -score(self.usage, a['id']), a['name'].lower()))
             self.groups.append(first + rest)
-        zorro = next((a for a in self.all if a['id'] == 'zorro-settings.desktop'), None)
-        self.settings.sort(key=lambda a: a['name'].lower())
-        if zorro:
-            self.settings.insert(0, zorro)
-        if self.settings and self.groups:
-            self.groups[-1].insert(0, {'id': '__gear__', 'name': 'Settings', 'icon': 'lucide:settings',
-                                       'gear': True})
+        self.settings[1 if zorro and self.settings[:1] == [zorro] else 0:] = sorted(
+            self.settings[1 if zorro and self.settings[:1] == [zorro] else 0:], key=lambda a: a['name'].lower())
 
     def matches(self):
         f = self.filter.lower()
@@ -1359,8 +1363,7 @@ class Dial(Gtk.Window):
                 self.area.queue_draw()
             return
         if self.press and not self.drag and not self.filter and self.expanded is None \
-                and self.mode == 'apps' and 'more' not in self.press[0] \
-                and not self.press[0].get('gear'):
+                and self.mode == 'apps' and 'more' not in self.press[0]:
             a, px, py = self.press
             if (ev.x - px) ** 2 + (ev.y - py) ** 2 > 12 ** 2:
                 self.hold_stop()
@@ -1465,7 +1468,7 @@ class Dial(Gtk.Window):
         here = next((i for i, g in enumerate(self.groups) if a in g), None)
         rows = [('Remove from the launcher', lambda: self.hide_app(a))]
         rows += [(f'Move to {n}', lambda gi=gi: self.move_to(a, gi)) for gi, n in enumerate(names)
-                 if gi != here and gi < len(self.groups)]
+                 if here is not None and gi != here and gi < len(self.groups)]
         rows.append(('Cancel', lambda: None))
         self.menu = {'rows': rows, 'x': x, 'y': y, 'rects': [], 'hover': None, 'name': a.get('name', '')}
         self.area.queue_draw()
@@ -1527,6 +1530,8 @@ class Dial(Gtk.Window):
         for g in self.groups:
             if a in g:
                 g.remove(a)
+        if a in self.settings:              # one of the apps behind the gear
+            self.settings.remove(a)
         hide = list(self.conf.get('hide', []))
         if a['id'] not in hide:
             hide.append(a['id'])
@@ -1580,7 +1585,7 @@ class Dial(Gtk.Window):
             if self.renaming is not None:       # clicked elsewhere: keep what was typed
                 self.finish_rename(True)
         if a and ev.button == 3 and self.mode == 'apps' and not a.get('tile') and a.get('id') \
-                and not a['id'].startswith('__') and not self.filter:
+                and (not a['id'].startswith('__') or a.get('gear')) and not self.filter:
             self.hide_app(a)                # right-click an app: out of the launcher
             self.area.queue_draw()
             return
@@ -1591,7 +1596,7 @@ class Dial(Gtk.Window):
         elif a and ev.button == 1:
             self.press = (a, ev.x, ev.y)    # start on release; moving it drags instead
             if self.mode == 'apps' and not self.filter and not a.get('tile') and a.get('id') \
-                    and not a['id'].startswith('__') and 'more' not in a and not a.get('gear'):
+                    and (not a['id'].startswith('__') or a.get('gear')) and 'more' not in a:
                 self.hold_start(self.press)  # held still: its menu
         elif z == 'centre' and ev.button == 1 and self.music_key_at(ev.x, ev.y):
             what = self.music_key_at(ev.x, ev.y)

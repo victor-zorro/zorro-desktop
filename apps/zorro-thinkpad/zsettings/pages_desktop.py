@@ -458,7 +458,7 @@ class DesktopPages:
 
         box.add(heading('Apps in the launcher', 'Apps'))
         box.add(note('Untick what you never start from the Dialer: it leaves the slices (typing its '
-                     'name still finds it). In the Dialer: drag an app onto the bin in the corner.'))
+                     'name still finds it). In the Dialer: hold an app, or drag it onto the clock.'))
         grid = Gtk.Grid(column_spacing=10, row_spacing=4)
         hidden = set(c.get('hide', []))
 
@@ -469,7 +469,8 @@ class DesktopPages:
             elif app not in now:
                 now.append(app)
             save(hide=now)
-        for i, a in enumerate(sorted(dial.apps(), key=lambda a: a['name'].lower())):
+        gear = {'id': '__gear__', 'name': 'Settings (the gear: all settings apps)'}
+        for i, a in enumerate([gear] + sorted(dial.apps(), key=lambda a: a['name'].lower())):
             on = Gtk.CheckButton(active=a['id'] not in hidden)
             on.set_tooltip_text('In the launcher')
             on.connect('toggled', shown, a['id'])
