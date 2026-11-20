@@ -18,3 +18,8 @@ Icon=$4
 Categories=Development;Game;
 DESK
 }
+apt_app() {               # apt_app "Name" package…: from Debian/Ubuntu, without the extras
+  echo "==> $1 from the package list (asks your password)"
+  as_root apt-get install -y --no-install-recommends "${@:2}"
+  echo "==> $1 installed"
+}
