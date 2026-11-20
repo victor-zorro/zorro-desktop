@@ -14,7 +14,8 @@ free=$(df -Pk "$HOME" | awk 'NR==2{print $4}')
 [[ -e $dest ]] && { echo "==> an Unreal Engine is in $dest already: moving it to $dest.old"; rm -rf "$dest.old"; mv "$dest" "$dest.old"; }
 echo "==> unpacking $(basename "$zip") into $dest (this takes a while)"
 mkdir -p "$dest"
-unzip -q "$zip" -d "$dest"
+total=$(unzip -Z1 "$zip" | wc -l)
+unzip -o "$zip" -d "$dest" | awk -v n="$total" '/inflating:|extracting:|creating:/ { c++; p = int(c * 100 / n); if (p != l) { printf "unpacking %d%%\n", p; l = p; fflush() } }'
 # some zips have one folder around everything
 if [[ ! -d $dest/Engine ]]; then inner=$(find "$dest" -mindepth 2 -maxdepth 2 -type d -name Engine | head -n1); [[ -n $inner ]] && { top=$(dirname "$inner"); mv "$top"/* "$dest"/; rmdir "$top"; }; fi
 ed=$dest/Engine/Binaries/Linux/UnrealEditor

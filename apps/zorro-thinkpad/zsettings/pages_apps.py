@@ -3,8 +3,11 @@ Tick the ones you want, then Install selected. Each install is extras/<id>/insta
 through `zorro-apps install`; it asks your password itself when it needs root."""
 import json
 import os
+import re
 import shutil
 import subprocess
+import threading
+import time
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -35,6 +38,8 @@ class AppsPages:
         self.apps_btn = button('Install selected', self.apps_install, primary=True)
         row.add(self.apps_btn)
         box.add(row)
+        self.apps_bar = Gtk.ProgressBar(show_text=True, no_show_all=True, margin_top=8)
+        box.add(self.apps_bar)
         self.apps_out = note()
         self.apps_out.set_selectable(True)
         box.add(self.apps_out)
@@ -103,24 +108,65 @@ class AppsPages:
             return
         self.apps_btn.set_sensitive(False)
 
+        def show(text, frac=None):
+            """the line under the button, and the bar: a fraction, or None to pulse"""
+            def ui_():
+                self.apps_out.set_text(text)
+                self.apps_bar.show()
+                if frac is None:
+                    self.apps_bar.pulse()
+                    self.apps_bar.set_text('')
+                else:
+                    self.apps_bar.set_fraction(frac)
+                    self.apps_bar.set_text(f'{frac * 100:.0f} %')
+                return False
+            idle(ui_)
+
         def work():
             done = []
             for a, arg in todo:
-                idle(lambda n=a['name']: self.apps_out.set_text(f'{n}: installing…') and False)
-                last = ''
+                name, start = a['name'], time.monotonic()
+                state = {'step': 'starting…', 'frac': None, 'last': ''}
+
+                def tick():
+                    t = int(time.monotonic() - start)
+                    show(f"{name}: {state['step']}  ·  {t // 60}:{t % 60:02d}", state['frac'])
+
+                stop = threading.Event()
+
+                def ticker():                     # the time keeps running: you see it is busy
+                    while not stop.wait(1):
+                        tick()
+                threading.Thread(target=ticker, daemon=True).start()
+                tick()
                 try:
                     p = subprocess.Popen([ZAPPS, 'install', a['id'], *arg], stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
-                    for ln in p.stdout:
-                        ln = ln.strip()
-                        if ln.startswith(('==>', '!!')):
-                            last = ln.lstrip('=>! ')
-                            idle(lambda t=f"{a['name']}: {last}": self.apps_out.set_text(t) and False)
+                                         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                    buf = b''
+                    while True:                   # curl's bar redraws with \r, so split on both
+                        chunk = os.read(p.stdout.fileno(), 4096)
+                        if not chunk:
+                            break
+                        buf += chunk
+                        parts = re.split(rb'[\r\n]', buf)
+                        buf = parts.pop()
+                        for raw in parts:
+                            ln = raw.decode(errors='replace').strip()
+                            pct = re.search(r'(\d{1,3}(?:[.,]\d)?)\s*%', ln)
+                            if ln.startswith(('==>', '!!')):
+                                state['last'] = state['step'] = ln.lstrip('=>! ')
+                                state['frac'] = None
+                            elif pct and (re.fullmatch(r'[#\s]*\d{1,3}(?:[.,]\d)?\s*%', ln) or ln.startswith('unpacking')):
+                                state['frac'] = min(1.0, float(pct.group(1).replace(',', '.')) / 100)
+                            elif ln and not pct:       # apt and friends: their last line
+                                state['step'] = ln[:80]
+                            tick()
                     rc = p.wait()
                 except OSError as e:
-                    rc, last = 1, str(e)
-                done.append(f"{a['name']}: " + ('installed' if rc == 0 else
-                                                  'cancelled' if rc in (126, 127) else f'not installed ({last})'))
-            idle(lambda: (self.apps_out.set_text('\n'.join(done)), self.apps_fill()) and False)
+                    rc, state['last'] = 1, str(e)
+                stop.set()
+                done.append(f"{name}: " + ('installed' if rc == 0 else
+                                           'cancelled' if rc in (126, 127) else f"not installed ({state['last']})"))
+            idle(lambda: (self.apps_out.set_text('\n'.join(done)), self.apps_bar.hide(), self.apps_fill()) and False)
 
         in_bg(work)
