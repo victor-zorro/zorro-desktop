@@ -9,7 +9,7 @@ Type=Application
 Name=Penpot
 Comment=Design and prototyping (Penpot in its own window)
 Exec=sh -c '\$HOME/.local/bin/zwebapp Penpot penpot https://design.penpot.app'
-Icon=applications-graphics
+Icon=zorro-penpot
 StartupWMClass=Penpot
 Categories=Graphics;VectorGraphics;
 DESK

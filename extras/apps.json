@@ -78,7 +78,7 @@
   {
    "id": "penpot",
    "name": "Penpot",
-   "icon": "penpot",
+   "icon": "zorro-penpot",
    "about": "Design and prototypes in your Penpot account (web app, own window)",
    "size": "no download",
    "how": "auto",

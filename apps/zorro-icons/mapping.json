@@ -1,6 +1,8 @@
 {
   "_comment": "freedesktop / app icon name -> Lucide icon. Each also gets a -symbolic twin.",
   "apps": {
+    "gimp": "image", "krita": "paintbrush", "darktable": "aperture", "org.inkscape.Inkscape": "pen-tool",
+    "scribus": "newspaper", "zorro-penpot": "shapes",
     "firefox": "globe", "kitty": "square-terminal", "utilities-terminal": "square-terminal",
     "org.xfce.thunar": "folder", "Thunar": "folder", "system-file-manager": "folder",
     "vlc": "clapperboard", "org.xfce.ristretto": "image", "signal-desktop": "message-circle",
