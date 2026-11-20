@@ -1,0 +1,8 @@
+[Nemo Action]
+Name=Send with LocalSend
+Comment=Send the selected files to a phone or computer nearby (LocalSend)
+Exec=localsend_app %F
+Icon-Name=localsend_app
+Selection=notnone
+Extensions=any;
+Dependencies=localsend_app;

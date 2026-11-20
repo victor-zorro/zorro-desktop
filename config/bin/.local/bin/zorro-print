@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""zorro-print FILE...: print files from Nemo (right-click → Print…). A small window: which
+printer (the default first), how many copies, both sides (when the printer can); then CUPS's lp prints them
+(PDF, pictures and text, through CUPS's own filters)."""
+import os
+import subprocess
+import sys
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk  # noqa: E402
+
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def notify(text):
+    subprocess.Popen(['notify-send', '-i', 'document-print', 'Print', text])
+
+
+def main():
+    files = [f for f in sys.argv[1:] if os.path.isfile(f)]
+    if not files:
+        return 1
+    printers = [ln.split()[0] for ln in run('lpstat', '-e').splitlines() if ln.strip()]
+    if not printers:
+        notify('No printer yet: add one in Settings → Hardware → Printers')
+        return 1
+    default = (run('lpstat', '-d').split(':')[-1].strip() or printers[0])
+    dlg = Gtk.Dialog(title='Print')
+    dlg.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Print', Gtk.ResponseType.OK)
+    dlg.set_default_response(Gtk.ResponseType.OK)
+    g = Gtk.Grid(column_spacing=12, row_spacing=8, margin=14)
+    names = ', '.join(os.path.basename(f) for f in files)
+    g.attach(Gtk.Label(label=names if len(names) < 70 else f'{len(files)} files', xalign=0), 0, 0, 2, 1)
+    pick = Gtk.ComboBoxText()
+    for p in printers:
+        pick.append(p, p.replace('_', ' '))
+    pick.set_active_id(default if default in printers else printers[0])
+    copies = Gtk.SpinButton.new_with_range(1, 99, 1)
+    duplex = Gtk.CheckButton(label='Both sides of the paper')
+    for i, (lab, w) in enumerate((('Printer', pick), ('Copies', copies), ('', duplex)), start=1):
+        g.attach(Gtk.Label(label=lab, xalign=0), 0, i, 1, 1)
+        g.attach(w, 1, i, 1, 1)
+    dlg.get_content_area().add(g)
+    dlg.show_all()
+
+    def can_duplex(*_a):                    # only for a printer that can turn the paper itself
+        opts = run('lpoptions', '-p', pick.get_active_id() or '', '-l')
+        duplex.set_visible(any(k in opts for k in ('Duplex', 'sides/', 'Sides')))
+    pick.connect('changed', can_duplex)
+    can_duplex()
+    ok = dlg.run() == Gtk.ResponseType.OK
+    printer, n, both = pick.get_active_id(), int(copies.get_value()), duplex.get_visible() and duplex.get_active()
+    dlg.destroy()
+    if not ok:
+        return 0
+    cmd = ['lp', '-d', printer, '-n', str(n)] + (['-o', 'sides=two-sided-long-edge'] if both else []) + files
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    notify(f'{len(files)} file(s) to {printer}' if r.returncode == 0 else (r.stderr.strip() or 'Printing failed'))
+    return r.returncode
+
+
+if __name__ == '__main__':
+    sys.exit(main())

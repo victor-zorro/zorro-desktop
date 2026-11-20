@@ -1,0 +1,8 @@
+[Nemo Action]
+Name=Print…
+Comment=Print the selected files (choose the printer and the number of copies)
+Exec=zorro-print %F
+Icon-Name=document-print
+Selection=notnone
+Extensions=pdf;png;jpg;jpeg;gif;tif;tiff;bmp;webp;txt;md;ps;eps;
+Dependencies=lp;zorro-print;
