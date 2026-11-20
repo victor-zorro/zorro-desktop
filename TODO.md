@@ -348,6 +348,23 @@ Order: phase 1 first (things that are wrong today), then 2 (quick speed wins), t
   code does 3 s hovered and 15 s otherwise; zorro-thinkpad README still describes a
   "ThinkPad" tab; zorro-drive README says "no polling".
 
+## Backlog: Vincent tests (added 2026-11-20)
+
+- [ ] **Sweep or Keep best match on the real vaults** (Vincent, later)
+  After reloading Obsidian: do best match / 2nd / 3rd make sense in Notes, on the laptop and the
+  phone? Too many or too few suggestions? Tune in `obsidian-plugin/main.js` (Matcher: weights,
+  "two shared words", the 0.45 cut-off) and `zorro-sweep-presort` (MIN 0.08).
+- [ ] **Sweep or Keep on the phone** (Vincent): never tried there yet. Needs Sync's "Installed
+  community plugins" on, and community plugins turned on once on the phone.
+- [ ] **Login clock off** (Vincent): switch it off again in Settings → Look (saves by itself now).
+- [ ] **Install apps** (Vincent): the password prompt for LocalSend from Settings; a real Unreal
+  Engine zip.
+- [ ] **Sea animals** (Vincent, after `sudo apps/zorro-dm/install.sh` and
+  `sudo apps/zorro-thinkpad/install.sh`): do the 12 read well on the lock screen; sea otter,
+  dugong and hawksbill were the weakest.
+- [ ] **Directory submission of Sweep or Keep** (Vincent): community.obsidian.md, then paste any
+  review remarks.
+
 ## Checked, leave alone
 
 - winpos daemon: event driven, 0.0 % CPU, 19 MB.
