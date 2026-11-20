@@ -49,12 +49,25 @@ def main():
         groups = a[a.index('--groups') + 1].split(',') if '--groups' in a else None
         return 0 if r.fetch(groups) else 1
     if a[0] == 'apply':
+        r = engine.Receiver()
+        passwords = {}
+        for acc in r.new_accounts():
+            import getpass
+            while True:
+                pw = getpass.getpass(f"Password for {acc['name']} ({acc['full'] or 'no name'}), "
+                                     'empty to skip: ')
+                if not pw or pw == getpass.getpass('Again: '):
+                    break
+                print('not the same, once more')
+            passwords[acc['name']] = pw
         try:
-            moved, kept = engine.Receiver().apply()
+            moved, kept = r.apply(passwords)
         except PermissionError as e:
             print(f'!! close these first: {e}', file=sys.stderr)
             return 1
         print(f'{moved} files put in place, {kept} left (set up by this device)')
+        for note in engine.read_state('receiver.json').get('notes') or []:
+            print(note)
         return 0
     if a[0] == 'status':
         print(json.dumps({'sender': engine.read_state('sender.json'),

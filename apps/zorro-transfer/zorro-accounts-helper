@@ -1,0 +1,97 @@
+#!/usr/bin/python3 -I
+"""zorro-accounts-helper: Transfer's one root step, the user accounts of the old device.
+Installed root-owned in /usr/local/libexec, run through pkexec (asks the admin password).
+
+  account JSON     {"name", "full", "groups": [...], "me": bool}; a password on stdin for a
+                   new account
+    me: true       the person running Transfer (their name on this device may differ from
+                   the old one): full name set, added to the groups; the password stays
+    a new name     the account is made (home folder, bash), the password from stdin, full
+                   name, groups
+    an existing name (not me)   left alone: never someone else's account changed
+
+Groups: only the desktop ones below, only those that exist here, never removed from one.
+Passwords never travel: they are typed on this device."""
+import json
+import os
+import pwd
+import re
+import subprocess
+import sys
+
+os.environ['PATH'] = '/usr/sbin:/usr/bin:/sbin:/bin'
+GROUPS = ('sudo', 'audio', 'video', 'plugdev', 'netdev', 'bluetooth', 'lpadmin', 'scanner',
+          'render', 'kvm', 'cdrom', 'floppy', 'dip', 'users', 'dialout', 'input', 'libvirt')
+NAME = re.compile(r'[a-z_][a-z0-9_-]{0,31}')
+
+
+def die(msg):
+    print(f'zorro-accounts-helper: {msg}', file=sys.stderr)
+    sys.exit(2)
+
+
+def caller():
+    try:
+        return pwd.getpwuid(int(os.environ['PKEXEC_UID'])).pw_name
+    except (KeyError, ValueError):
+        die('run through pkexec')
+
+
+def exists(name):
+    try:
+        pwd.getpwnam(name)
+        return True
+    except KeyError:
+        return False
+
+
+def group_exists(g):
+    return subprocess.run(['getent', 'group', g], capture_output=True).returncode == 0
+
+
+def account(data):
+    try:
+        a = json.loads(data)
+        name, full, groups, me = a['name'], a.get('full', ''), a.get('groups', []), a.get('me')
+    except (ValueError, KeyError, TypeError, AttributeError):
+        die('bad account data')
+    if not isinstance(full, str) or len(full) > 100 or any(c in full for c in ':,\n\r\0'):
+        die('bad full name')
+    if not isinstance(groups, list):
+        die('bad groups')
+    groups = [g for g in groups if g in GROUPS and group_exists(g)]
+    if me:
+        name = caller()                     # always yourself, whatever the old name was
+    elif not isinstance(name, str) or not NAME.fullmatch(name):
+        die('bad account name')
+    elif exists(name):
+        print('exists')                     # someone else's: left alone
+        return
+    else:
+        password = sys.stdin.read().rstrip('\n')
+        if not password or '\n' in password:
+            die('a new account needs a password')
+        r = subprocess.run(['useradd', '-m', '-s', '/bin/bash', '-c', full, name])
+        if r.returncode:
+            die('useradd failed')
+        r = subprocess.run(['chpasswd'], input=f'{name}:{password}\n', text=True)
+        if r.returncode:
+            subprocess.run(['passwd', '-l', name])       # no password set: locked, not open
+            die('password not set (the account is locked)')
+    if me and full:
+        subprocess.run(['usermod', '-c', full, name], check=False)
+    if groups:
+        subprocess.run(['usermod', '-aG', ','.join(groups), name], check=False)
+    print('updated' if me else 'made')
+
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] == ['account'] and len(a) == 2:
+        account(a[1])
+        sys.exit(0)
+    die('usage: account JSON')
+
+
+if __name__ == '__main__':
+    main()

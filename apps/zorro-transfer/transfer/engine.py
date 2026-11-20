@@ -119,7 +119,8 @@ class Sender:
             if Path(STATE / 'sender.stop').exists():
                 (STATE / 'sender.stop').unlink(missing_ok=True)
                 break
-        (items.GEN / 'wifi.json').unlink(missing_ok=True)     # the Wi-Fi passwords: not left lying
+        for f in ('wifi.json', 'accounts.json'):       # the Wi-Fi passwords: not left lying
+            (items.GEN / f).unlink(missing_ok=True)
         self.save('stopped')
 
     def discovery(self):
@@ -502,9 +503,14 @@ class Receiver:
                 out.append(f['path'])
         return out
 
-    def apply(self):
+    def new_accounts(self):
+        """other people's accounts that apply() makes: they need a password typed here"""
+        return items.new_accounts(STAGE / self.st.get('session', '-') / 'generated/accounts.json')
+
+    def apply(self, passwords=None):
         """move what was received into place; what it replaces stays as NAME.before-transfer.
-        Apps whose files would change must be closed first: PermissionError with their names."""
+        Apps whose files would change must be closed first: PermissionError with their names.
+        passwords: {account name: password} for the new accounts (new_accounts())."""
         busy = items.running(self.st.get('groups') or [])
         if busy:
             raise PermissionError(', '.join(busy))
@@ -532,14 +538,17 @@ class Receiver:
             except OSError:
                 shutil.move(str(src), str(dst))
             moved += 1
-        notes = self.after(stage)
+        notes = self.after(stage, passwords or {})
         shutil.rmtree(stage, ignore_errors=True)
         self.save(status='applied', moved=moved, kept=kept, notes=notes)
         return moved, kept
 
-    def after(self, stage):
+    def after(self, stage, passwords):
         """rebuild what Settings makes from the choices; system files with a password"""
         notes = []
+        people = stage / 'generated/accounts.json'
+        if people.exists():
+            notes += items.accounts_import(people, passwords)
         wifi = stage / 'generated/wifi.json'
         if wifi.exists():
             n = items.wifi_import(wifi)

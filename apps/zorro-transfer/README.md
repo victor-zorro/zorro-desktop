@@ -38,13 +38,17 @@ What can go along (`transfer/items.py`):
 - **Personal files**: one tick box per folder in your home (folders up to 5 GB are ticked);
   online drives (rclone mounts) are never walked. Not the repo, `UnrealEngine` or
   `Installers` (its own group).
+- **User accounts**: you get your full name and groups on the new device (admin, printers,
+  video, kvm…; whatever your user is called there); the other people's accounts are made
+  there with a password you type on the new device: passwords never travel. Their files are
+  not copied (only they can read them). Accounts that already exist are left alone. This
+  needs the root part, `sudo apps/zorro-transfer/install-system.sh` (install.sh runs it):
+  `zorro-accounts-helper` through polkit, asks the admin password.
 
 Caches are left out (they rebuild themselves). Small files travel in batches, so thousands of
 notes don't each wait for the network. "Put in place" waits until the apps whose files it
 would replace are closed (Firefox, Obsidian…); the sender shows which of them are open on the
 sending device (close them there for a clean copy).
-
-User accounts come next.
 
     zorro-transfer                 the window
     zorro-transfer send            offer this device (the window runs this)

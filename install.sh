@@ -187,6 +187,7 @@ apps/zorro-drive/install.sh
 
 log "Transfer (apps/zorro-transfer)"
 apps/zorro-transfer/install.sh
+sudo apps/zorro-transfer/install-system.sh
 
 log "Screenshot overlay (apps/zorro-shot)"
 apps/zorro-shot/install.sh

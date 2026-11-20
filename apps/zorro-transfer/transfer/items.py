@@ -10,10 +10,14 @@ Special paths in a group:
                step after "Put in place" installs it (with a password)
   gen:wifi     made on the fly: the saved Wi-Fi networks with their passwords (nmcli), as
                generated/wifi.json; the new device adds them to NetworkManager
+  gen:accounts made on the fly: the people's accounts (name, full name, groups; no passwords),
+               as generated/accounts.json; the new device makes them (with a password)
   a glob       '.local/share/firefox-*': every match
 Caches are skipped in the logins and apps groups (they rebuild themselves)."""
+import grp
 import json
 import os
+import pwd
 import subprocess
 from pathlib import Path
 
@@ -46,6 +50,10 @@ GROUPS = {
              ['.config/obsidian', '.config/Claude', '.local/share/org.localsend.localsend_app',
               '.config/blender', '.config/godot', '.config/darktable', '.config/scribus',
               '.config/MQTTX', '.config/mpv']),
+    'accounts': ('User accounts', 'You get your full name and groups (admin, printers, video…) '
+                 'on the new device; the other people\'s accounts are made there, with a '
+                 'password you type there (passwords never travel). Their files are not '
+                 'copied: only they can read them', ['gen:accounts']),
 }
 # processes that must not run on the new device while these groups are put in place (their
 # files would be overwritten under them), nor while sending (a half-written copy)
@@ -61,6 +69,8 @@ SKIP_FILES = ('.lock', '.tmp', 'lock', '.parentlock', 'SingletonLock', 'Singleto
 # from their installer, Installers is its own group
 NOT_FILES = {'zorro-desktop', 'UnrealEngine', 'Installers', 'snap'}
 LOOK_HELPER = '/usr/local/libexec/zorro-look-helper'    # installs the login look (password)
+ACCOUNTS_HELPER = '/usr/local/libexec/zorro-accounts-helper'   # makes accounts (password)
+NO_SHELL = ('/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false')
 
 
 def all_groups():
@@ -94,11 +104,11 @@ def files(group):
                 st = p.stat()
                 out.append(('system' + rel[4:], st.st_size, int(st.st_mtime)))
             continue
-        if rel == 'gen:wifi':
-            p = wifi_export()
+        if rel.startswith('gen:'):
+            p = {'gen:wifi': wifi_export, 'gen:accounts': accounts_export}[rel]()
             if p:
                 st = p.stat()
-                out.append(('generated/wifi.json', st.st_size, int(st.st_mtime)))
+                out.append((f'generated/{p.name}', st.st_size, int(st.st_mtime)))
             continue
         for top in (sorted(HOME.glob(rel)) if '*' in rel else [HOME / rel]):
             if top.is_symlink() or not top.exists() or os.path.ismount(top):
@@ -123,6 +133,87 @@ def files(group):
     return out
 
 
+def private(name, data):
+    """a generated file only this user can read; the same content keeps the same file
+    (and its time), so an interrupted transfer continues"""
+    GEN.mkdir(parents=True, exist_ok=True)
+    os.chmod(GEN, 0o700)
+    p = GEN / name
+    if not p.exists() or p.read_text() != data:
+        with open(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
+            f.write(data)
+    return p
+
+
+def accounts_export():
+    """the people's accounts on this device (not system ones): name, full name, groups"""
+    people = []
+    for u in sorted(pwd.getpwall(), key=lambda u: u.pw_uid):
+        if not 1000 <= u.pw_uid < 60000 or u.pw_shell in NO_SHELL:
+            continue
+        groups = sorted(g.gr_name for g in grp.getgrall() if u.pw_name in g.gr_mem)
+        people.append({'name': u.pw_name, 'full': u.pw_gecos.split(',')[0], 'groups': groups,
+                       'me': u.pw_uid == os.getuid()})
+    return private('accounts.json', json.dumps(people, indent=1)) if people else None
+
+
+def new_accounts(path):
+    """the other people's accounts in a received list that this device does not have yet"""
+    try:
+        people = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for a in people:
+        try:
+            pwd.getpwnam(a['name'])
+        except KeyError:
+            if not a.get('me'):
+                out.append(a)
+    return out
+
+
+def accounts_import(path, passwords):
+    """you: full name and groups; others: made with the password typed here (passwords:
+    {name: password}; without one an account is skipped). Notes for the summary."""
+    try:
+        people = json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return []
+    if not Path(ACCOUNTS_HELPER).exists():
+        return ['accounts: run the Transfer system install first (sudo apps/zorro-transfer/'
+                'install-system.sh)']
+    made, skipped, failed, me = [], [], [], ''
+    new = {a['name'] for a in new_accounts(path)}
+    for a in people:
+        if not a.get('me') and a['name'] not in new:
+            continue                        # already here: left alone
+        pw = '' if a.get('me') else passwords.get(a['name'], '')
+        if not a.get('me') and not pw:
+            skipped.append(a['name'])
+            continue
+        data = json.dumps({k: a.get(k) for k in ('name', 'full', 'groups', 'me')})
+        try:
+            r = subprocess.run(['pkexec', ACCOUNTS_HELPER, 'account', data], input=pw + '\n',
+                               capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            r = None
+        ok = r is not None and r.returncode == 0
+        if a.get('me'):
+            me = 'your name and groups set (groups count from the next login)' if ok else \
+                 'your groups not set (password cancelled)'
+        else:
+            (made if ok else failed).append(a['name'])
+    notes = [me] if me else []
+    if made:
+        notes.append('accounts made: ' + ', '.join(made))
+    if skipped:
+        notes.append('no password, not made: ' + ', '.join(skipped))
+    if failed:
+        notes.append('not made: ' + ', '.join(failed))
+    return notes
+
+
 def wifi_export():
     """the saved Wi-Fi networks with their passwords, into a private file (0600)"""
     try:
@@ -145,16 +236,7 @@ def wifi_export():
         if len(vals) >= 4 and vals[0]:
             nets.append({'name': name, 'ssid': vals[0], 'key_mgmt': vals[1], 'psk': vals[2],
                          'hidden': vals[3] == 'yes'})
-    if not nets:
-        return None
-    GEN.mkdir(parents=True, exist_ok=True)
-    os.chmod(GEN, 0o700)
-    p = GEN / 'wifi.json'
-    data = json.dumps(nets, indent=1)
-    if not p.exists() or p.read_text() != data:     # same networks: same file (resume works)
-        with open(os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as f:
-            f.write(data)
-    return p
+    return private('wifi.json', json.dumps(nets, indent=1)) if nets else None
 
 
 def wifi_import(path):

@@ -374,15 +374,58 @@ class Win(Gtk.Window):
         subprocess.Popen([ME, 'continue'], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    def ask_passwords(self, people):
+        """a password for each new account, typed here; {name: password} or None (cancel)"""
+        d = Gtk.Dialog(title='New accounts', transient_for=self, modal=True)
+        d.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Make the accounts', Gtk.ResponseType.OK)
+        box = d.get_content_area()
+        box.set_border_width(16)
+        box.set_spacing(8)
+        lab = Gtk.Label(xalign=0, wrap=True, max_width_chars=50)
+        lab.set_text('These people had an account on the other device. Choose a password for '
+                     'each (tell them; they can change it later). Leave it empty to skip one.')
+        box.add(lab)
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6)
+        entries = {}
+        for i, a in enumerate(people):
+            grid.attach(Gtk.Label(label=f"{a['full'] or a['name']} ({a['name']})", xalign=0), 0, i, 1, 1)
+            pair = []
+            for j, hint in enumerate(('password', 'again')):
+                e = Gtk.Entry(visibility=False, placeholder_text=hint, activates_default=True)
+                grid.attach(e, 1 + j, i, 1, 1)
+                pair.append(e)
+            entries[a['name']] = pair
+        box.add(grid)
+        warn = Gtk.Label(xalign=0)
+        box.add(warn)
+        d.set_default_response(Gtk.ResponseType.OK)
+        d.show_all()
+        while True:
+            if d.run() != Gtk.ResponseType.OK:
+                d.destroy()
+                return None
+            out = {n: p[0].get_text() for n, p in entries.items()}
+            bad = [n for n, p in entries.items() if p[0].get_text() != p[1].get_text()]
+            if not bad:
+                d.destroy()
+                return out
+            warn.set_markup(f'<b>The two passwords differ for {", ".join(bad)}</b>')
+
     def get_apply(self):
-        self.gline.set_text('Putting it in place… (the login look asks your password)')
+        passwords = {}
+        people = engine.Receiver().new_accounts()
+        if people:
+            passwords = self.ask_passwords(people)
+            if passwords is None:
+                return
+        self.gline.set_text('Putting it in place… (the login look and accounts ask your password)')
         for c in self.gbtns.get_children():
             c.set_sensitive(False)
 
         def work():
             r = engine.Receiver()
             try:
-                r.apply()
+                r.apply(passwords)
             except PermissionError as e:
                 r.save(status='apps open', error=str(e))
             self.gstate = None              # the buttons again on the next look
