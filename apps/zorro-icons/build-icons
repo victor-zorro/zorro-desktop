@@ -33,7 +33,7 @@ DESKTOP_DIRS = [APPS, Path('/usr/local/share/applications'), Path('/usr/share/ap
 ICON_DIRS = [DATA / 'icons/hicolor', Path('/usr/local/share/icons/hicolor'),
              Path('/usr/share/icons/hicolor'), Path('/var/lib/flatpak/exports/share/icons/hicolor')]
 PIXMAPS = [Path('/usr/share/pixmaps')]
-BRANDS = {'zorro-google': 'gmail', 'zorro-whatsapp': 'whatsapp', 'zorro-instagram': 'instagram',
+BRANDS = {'zorro-google': 'google', 'zorro-whatsapp': 'whatsapp', 'zorro-instagram': 'instagram',
           'zorro-linkedin': 'linkedin', 'zorro-penpot': 'penpot'}   # Firefox profile apps
 OURS = {'preferences-desktop', 'folder-remote', 'applets-screenshooter', 'accessories-screenshot'}
 SIZES = (256, 32)                     # PNG sizes for the official icons
