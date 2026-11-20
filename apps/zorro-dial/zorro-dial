@@ -17,6 +17,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import signal
 import sys
 import threading
@@ -380,7 +381,10 @@ class Dial(Gtk.Window):
         self.layout_apps()
         self.show_all()
         GLib.idle_add(self.grab)
-        self.tick_id = GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True)
+        # the clock once a second; the icons' drift comes with the particles' redraws (20 a
+        # second), or with a timer of its own when there are no particles
+        self.tick_id = (GLib.timeout_add(66, self.float_tick) if not getattr(self, 'snow', None) else
+                        GLib.timeout_add_seconds(1, lambda: self.area.queue_draw() or True))
         # the parts' data (notes, messages, system state…) is read once the dial is on screen,
         # so it does not hold up the first frame; hovering a part reads it at once
         GLib.timeout_add(150, lambda: [self.start_fetch(p) for p in self.parts.values()] and False)
@@ -650,13 +654,14 @@ class Dial(Gtk.Window):
             room = min(min(max(cx, W - cx), max(cy, H - cy)) - 60 * u, fit)
             groups = getattr(self, 'groups', [])
             span, r_in, f = (a1 - a0) / max(1, len(groups)), rings[0][0], 1.0
+            counts = [len(g) for g in groups]
             for _ in range(10):
-                need = max((self.cloud_rows(len(g), span, r_in, f)[1] for g in groups), default=r_in)
-                if need <= room or f < 0.62:
+                lay = self.cloud_layout(counts, span, r_in, f, room)
+                if not lay[2] or f < 0.62:
                     break
                 f *= 0.93
-            self.cloud_f = f
-            rings = [(r_in, max(min(need, room), rings[-1][1]))]
+            self.cloud = lay[0]
+            rings = [(r_in, max(min(lay[1], room), rings[-1][1]))]
         return cx, cy, hub, a0, a1, rings
 
     def reach(self, cx, cy, a0, a1):
@@ -689,20 +694,68 @@ class Dial(Gtk.Window):
         self._app_rings = (key, len(rings))
         return len(rings)
 
-    def cloud_rows(self, n, span, r_in, f, limit=None):
-        """rows of the apps' cloud in one slice: [(radius, icon size, places)], and the outer
-        radius they need. Each row a bit bigger than the one inside it, with air around each icon."""
+    def float_tick(self):
+        """15 times a second while the apps float (just the fan); the whole once a second"""
+        self._ticks = getattr(self, '_ticks', 0) + 1
+        floating = self.mode == 'apps' and not self.filter and self.expanded is None and not self.menu
+        if self._ticks % 15 == 0:
+            self.area.queue_draw()                  # the clock: once a second, all of it
+        elif floating:                              # only the fan's box: far cheaper
+            cx, cy, _hub, _a0, _a1, rings = self.fan()
+            r = int(rings[-1][1] + 10 * self.u)
+            self.area.queue_draw_area(int(cx) - r, int(cy) - r, 2 * r, 2 * r)
+        return True
+
+    def cloud_layout(self, counts, span, r_in, f, limit):
+        """where each app floats in its slice: per slice [(radius, angle into the slice, size)],
+        the outer radius used, and whether some did not fit. Free spots, not rows: each next app
+        (less used) takes a random free spot as close to the clock as there is room, never
+        nearer than CLOUD_GAP to another, and the further out, the bigger. Seeded per slice, so
+        the cloud looks the same every time the apps are the same."""
         base = CLOUD_ICON * self.icon_scale() * self.iu * f
-        rows, left, r = [], n, None
-        while left > 0:
-            size = base * min(CLOUD_MAX, 1 + CLOUD_GROW * len(rows))
-            r = r_in + size * 0.85 if r is None else r + (rows[-1][1] + size) / 2 * CLOUD_ROW
-            if limit is not None and r + size * 0.6 > limit and rows:
-                break
-            cnt = max(1, int(r * math.radians(span) / (size * CLOUD_GAP)))
-            rows.append((r, size, cnt))
-            left -= cnt
-        return rows, (rows[-1][0] + rows[-1][1] * 0.7 if rows else r_in)
+        key = (tuple(counts), round(span, 2), round(r_in, 1), round(base, 2), round(limit, 1))
+        cache = self.__dict__.setdefault('_clouds', {})
+        if key in cache:
+            return cache[key]
+
+        def size_at(r):
+            return base * min(CLOUD_MAX, 1 + CLOUD_GROW * (r - r_in) / (base * 1.3))
+        out, need, short = [], r_in, False
+        for i, n in enumerate(counts):
+            rng = random.Random(7919 * (i + 1) + n)
+            pts = []
+            for _k in range(n):
+                best, reach = None, (max(q[0] for q in pts) if pts else r_in) + base * 2.5
+                for _try in range(4):               # no room yet: look a bit further out
+                    for _t in range(90):
+                        r = rng.uniform(r_in, min(reach, limit))
+                        sz = size_at(r)
+                        m = sz * 0.62
+                        if r - m < r_in or r + m > limit:
+                            continue
+                        a = rng.uniform(0, span)
+                        if r * math.sin(math.radians(min(a, span - a))) < m:
+                            continue                # too close to the slice's edge
+                        x, y = r * math.cos(math.radians(a)), r * math.sin(math.radians(a))
+                        if any((x - qx) ** 2 + (y - qy) ** 2 < ((sz + qs) / 2 * CLOUD_GAP) ** 2
+                               for _qr, _qa, qs, qx, qy in pts):
+                            continue
+                        score = r + rng.random() * base * 0.9    # close to the clock, loosely
+                        if best is None or score < best[0]:
+                            best = (score, (r, a, sz, x, y))
+                    if best:
+                        break
+                    reach += base * 2
+                if not best:
+                    short = True
+                    break
+                pts.append(best[1])
+                need = max(need, best[1][0] + best[1][2] * 0.7)
+            out.append([(r, a, sz) for r, a, sz, _x, _y in pts])
+        if len(cache) > 64:
+            cache.clear()
+        cache[key] = (out, need, short)
+        return cache[key]
 
     def dial_scale(self):
         """Zorro app → Desktop → Dialer → Size: the rings' width"""
@@ -1267,23 +1320,21 @@ class Dial(Gtk.Window):
             # right-click there to rename: the name's box, at least as wide as before
             self.labels.append((lx, ly, i, max(70 * self.u, w / 2 + 8 * self.u), 16 * self.u))
             group = list(self.groups[i])
-            rows, _ = self.cloud_rows(len(group), span, rings[0][0], getattr(self, 'cloud_f', 1.0),
-                                      limit=rings[-1][1])
-            cap = sum(c for _r, _s, c in rows)
-            if len(group) > cap:                 # never drop apps silently: "+N" shows them all
-                extra = len(group) - cap + 1
-                group = group[:cap - 1] + [{'id': f'__more__{i}', 'name': f'{extra} more',
-                                            'icon': '', 'more': i, 'extra': extra}]
-            pos = 0
-            for k, (r, size, cnt) in enumerate(rows):
-                row, group = group[:cnt], group[cnt:]
-                if not row:
-                    break
-                # full rows sit half a place apart from the row inside them: a cloud, not lines
-                self.place(cr, cx, cy, row, r, start, span, size, where=(i, pos),
-                           full=cnt if len(row) == cnt and cnt > 1 else None,
-                           off=0.18 if k % 2 else -0.18)
-                pos += len(row)
+            cloud = getattr(self, 'cloud', None) or []
+            spots = cloud[i] if i < len(cloud) else []
+            if len(group) > len(spots):          # never drop apps silently: "+N" shows them all
+                extra = len(group) - len(spots) + 1
+                group = group[:max(0, len(spots) - 1)] + [{'id': f'__more__{i}', 'name': f'{extra} more',
+                                                           'icon': '', 'more': i, 'extra': extra}]
+            now = time.monotonic()
+            amp, period = CLOUD_FLOAT
+            for j, (a, (r, ang, size)) in enumerate(zip(group, spots)):
+                am = math.radians(start + ang)
+                ph = int(hashlib.md5(str(a.get('id')).encode()).hexdigest()[:6], 16) / 0xffffff * 2 * math.pi
+                w = 2 * math.pi / (period * (0.8 + 0.4 * ph / (2 * math.pi)))
+                dx = math.cos(now * w + ph) * size * amp           # a slow drift of its own
+                dy = math.sin(now * w * 0.7 + ph * 1.7) * size * amp
+                self.draw_app(cr, cx + math.cos(am) * r + dx, cy + math.sin(am) * r + dy, size, a, (i, j))
         self.add_label = None
         if n < 6:                           # '+': a new slice (up to six)
             am = math.radians(a1 - 3)
@@ -1344,32 +1395,36 @@ class Dial(Gtk.Window):
         for j, a in enumerate(row):
             am = math.radians(start + span * ((j + 0.5 + off) / cnt if full else (j + 1) / (len(row) + 1)))
             x, y = cx + math.cos(am) * rm, cy + math.sin(am) * rm
-            self.slots.append((x, y, size * 0.75, a) + ((where[0], where[1] + j) if where else (None, None)))
-            if self.drag and self.drag[0] is a:              # its place, while it is dragged
-                cr.new_path()
-                cr.arc(x, y, size * 0.6, 0, 2 * math.pi)
-                cr.set_source_rgba(1, 1, 1, 0.12)
-                cr.set_line_width(1)
-                cr.stroke()
-                continue
-            if same(self.hover, a):
-                cr.new_path()
-                cr.arc(x, y, size * 0.9, 0, 2 * math.pi)
-                cr.set_source_rgba(*CYAN, 0.16)
-                cr.fill()
-                self.chroma_circle(cr, x, y, size * 0.9)
-            if 'more' in a:
-                cr.new_path()
-                cr.arc(x, y, size * 0.55, 0, 2 * math.pi)
-                cr.set_source_rgba(1, 1, 1, 0.08)
-                cr.fill()
-                self.chroma_circle(cr, x, y, size * 0.55, alpha=0.6, split=1)
-                self.text(cr, f'+{a["extra"]}', x, y, max(8, size / 4), split=1)
-                continue
-            pb = self.icon(a, size)
-            if pb:
-                Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
-                cr.paint()
+            self.draw_app(cr, x, y, size, a, (where[0], where[1] + j) if where else None)
+
+    def draw_app(self, cr, x, y, size, a, where=None):
+        """one app (or '+N') at (x, y): its icon, its hover ring; remembered for clicks"""
+        self.slots.append((x, y, size * 0.75, a) + (tuple(where) if where else (None, None)))
+        if self.drag and self.drag[0] is a:              # its place, while it is dragged
+            cr.new_path()
+            cr.arc(x, y, size * 0.6, 0, 2 * math.pi)
+            cr.set_source_rgba(1, 1, 1, 0.12)
+            cr.set_line_width(1)
+            cr.stroke()
+            return
+        if same(self.hover, a):
+            cr.new_path()
+            cr.arc(x, y, size * 0.9, 0, 2 * math.pi)
+            cr.set_source_rgba(*CYAN, 0.16)
+            cr.fill()
+            self.chroma_circle(cr, x, y, size * 0.9)
+        if 'more' in a:
+            cr.new_path()
+            cr.arc(x, y, size * 0.55, 0, 2 * math.pi)
+            cr.set_source_rgba(1, 1, 1, 0.08)
+            cr.fill()
+            self.chroma_circle(cr, x, y, size * 0.55, alpha=0.6, split=1)
+            self.text(cr, f'+{a["extra"]}', x, y, max(8, size / 4), split=1)
+            return
+        pb = self.icon(a, size)
+        if pb:
+            Gdk.cairo_set_source_pixbuf(cr, pb, x - pb.get_width() / 2, y - pb.get_height() / 2)
+            cr.paint()
 
     # -- input
     def hit(self, x, y, slot=False):
@@ -1797,7 +1852,8 @@ class Dial(Gtk.Window):
 RING_W = (84, 84, 90)                   # the rings' widths, inner to outer (extra rings: the last)
 RING_ICON = (46, 52, 58)                # icon size per ring (search, lists): bigger further out
 CLOUD_ICON, CLOUD_GROW, CLOUD_MAX = 46, 0.12, 1.5   # the apps' cloud: first row, growth per row, cap
-CLOUD_GAP, CLOUD_ROW = 1.8, 1.3         # centre to centre, in icon sizes: along a row, row to row
+CLOUD_GAP = 1.75                        # least centre to centre distance, in icon sizes
+CLOUD_FLOAT = (0.07, 6.0)               # the icons drift: how far (icon sizes), one sway in seconds
 RESIDENT = False                        # True in 'zorro-dial --daemon'
 FETCHING = set()                        # parts being read now (any opening)
 FETCH_LOCK = threading.Lock()
