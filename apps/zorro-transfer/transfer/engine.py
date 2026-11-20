@@ -207,8 +207,8 @@ class Sender:
                 s.update(groups=req.get('groups', []), total=sum(f['size'] for f in fl))
                 net.send_json(t, {'files': fl})
             elif op == 'get':
-                f = allowed.get(req.get('path'))
-                path = items.HOME / f['path'] if f else None
+                f = allowed.get(req.get('path'))           # only what the list holds
+                path = items.source(f['path']) if f else None
                 if not f or not items.safe_rel(f['path']) or not path.is_file():
                     net.send_json(t, {'ok': False})
                     continue
@@ -435,7 +435,7 @@ class Receiver:
         out = []
         stage = STAGE / self.st.get('session', '-')
         for f in self.st.get('files') or []:
-            src, dst = stage / f['path'], items.HOME / f['path']
+            src, dst = stage / f['path'], items.source(f['path'])
             if src.exists() and dst.exists() and not dst.is_symlink() and not same_file(src, dst):
                 out.append(f['path'])
         return out
@@ -449,6 +449,8 @@ class Receiver:
                 continue
             src, dst = stage / f['path'], items.HOME / f['path']
             if not src.exists():
+                continue
+            if f['path'].startswith('system/'):     # installed by after() below
                 continue
             if dst.is_symlink():            # set up by this device's own install: leave it
                 kept += 1
@@ -464,9 +466,34 @@ class Receiver:
             except OSError:
                 shutil.move(str(src), str(dst))
             moved += 1
+        notes = self.after(stage)
         shutil.rmtree(stage, ignore_errors=True)
-        self.save(status='applied', moved=moved, kept=kept)
+        self.save(status='applied', moved=moved, kept=kept, notes=notes)
         return moved, kept
+
+    def after(self, stage):
+        """rebuild what Settings makes from the choices; system files with a password"""
+        notes = []
+        if 'desktop' not in set(self.st.get('groups') or []):
+            return notes
+        settings = Path.home() / '.local/bin/zorro-settings'
+        if settings.exists():               # theme, compositor, terminal, GTK colours, text size
+            r = subprocess.run([str(settings), '--apply-windows'], capture_output=True, timeout=120)
+            notes.append('settings applied' if r.returncode == 0 else 'settings: open Zorro Settings once')
+        icons = Path(os.path.realpath(__file__)).parents[2] / 'zorro-icons' / 'build-icons'
+        if icons.exists():
+            subprocess.run([str(icons)], capture_output=True, timeout=300)
+            notes.append('icons rebuilt')
+        look = stage / 'system/etc/zorro-dm/look.json'
+        if look.exists():
+            if Path(items.LOOK_HELPER).exists():
+                r = subprocess.run(['pkexec', items.LOOK_HELPER, 'greeter-look', look.read_text()],
+                                   capture_output=True, timeout=120)
+                notes.append('login look saved' if r.returncode == 0 else
+                             'login look not saved (password cancelled)')
+            else:
+                notes.append('login look: set up the login screen first (apps/zorro-dm)')
+        return notes
 
 
 def same_file(a, b):

@@ -337,8 +337,9 @@ class Win(Gtk.Window):
                 f'{n} of these files replace different ones on this device; those are kept as '
                 f'.before-transfer copies.' if n else 'Nothing on this device gets replaced.'))
         elif status == 'applied':
-            self.gline.set_text(f"Done: {st.get('moved', 0)} files put in place. Log out and in once "
-                                f"to see all settings.")
+            notes = '; '.join(st.get('notes') or [])
+            self.gline.set_text(f"Done: {st.get('moved', 0)} files put in place"
+                                + (f" ({notes})" if notes else '') + ". Log out and in once to see all settings.")
         elif status == 'failed':
             self.gline.set_text(f"It did not work: {st.get('error', '')}")
         if status != self.gstate:               # the buttons that fit
@@ -362,6 +363,10 @@ class Win(Gtk.Window):
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def get_apply(self):
+        self.gline.set_text('Putting it in place… (the login look asks your password)')
+        for c in self.gbtns.get_children():
+            c.set_sensitive(False)
+
         def work():
             engine.Receiver().apply()
         threading.Thread(target=work, daemon=True).start()

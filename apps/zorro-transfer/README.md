@@ -20,8 +20,16 @@ Interrupted (network gone, laptop closed)? It retries for half an hour, then sto
 Transfer on both devices (Send again on the sender) and it goes on where it stopped, without
 a new code. A cable is faster than Wi-Fi, but Wi-Fi and NetBird work too.
 
-What can go along (`transfer/items.py`): the installers in `~/Installers` and the desktop
-settings. Logins, app data, personal files and user accounts come next.
+What can go along (`transfer/items.py`):
+- **Installers**: `~/Installers` (Unreal, DaVinci…).
+- **Desktop and launcher**: the choices of the Dialer, Zorro Settings, info circle, wallpaper,
+  music, languages, default apps (mimeapps.list), autostart, window places, file manager and
+  GTK app preferences (dconf), and the login look (/etc/zorro-dm/look.json). Keybinds, kitty,
+  rofi and Openbox come from the repo itself. After "Put in place" Transfer rebuilds what
+  Settings makes from the choices (`zorro-settings --apply-windows`, `build-icons`) and saves
+  the login look with the login-screen helper (asks your password).
+
+Logins, app data, personal files and user accounts come next.
 
     zorro-transfer                 the window
     zorro-transfer send            offer this device (the window runs this)
