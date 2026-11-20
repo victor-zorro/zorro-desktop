@@ -193,7 +193,10 @@ class LookPages:
                 self.look_view.evaluate_javascript(
                     f'window.FX && FX.setLook({json.dumps({key: value})})', -1,
                     None, None, None, None, None)
-            self.look_msg.set_text('Not saved yet')
+            self.look_msg.set_text('Saving soon…')
+            # saved by itself once you stop changing things (the password is asked once and
+            # then remembered for a few minutes), like every other setting in the app
+            ui.later('greeter-look', self.look_save, 1500)
 
         scale = lambda key, lo, hi, step, fmt=None: ui.scale(lo, hi, step, L[key],          # noqa: E731
                                                              lambda v: setv(key, v), fmt)
@@ -262,9 +265,6 @@ class LookPages:
         box.add(note('Top left on the login and lock screen.'))
 
         bottom = Gtk.Box(spacing=8)
-        save = Gtk.Button(label='Save for login and lock screen')
-        save.get_style_context().add_class('suggested-action')
-        save.connect('clicked', lambda b: self.look_save())
         test = Gtk.Button(label='Full-screen test',
                           tooltip_text='The real login screen in a window; password: test')
         test.connect('clicked', lambda b: self.look_test())
@@ -272,7 +272,7 @@ class LookPages:
         reset.connect('clicked', lambda b: self.look_reset())
         self.look_msg = note()
         self.look_msg.set_hexpand(True)
-        for w in (save, test, reset, self.look_msg):
+        for w in (test, reset, self.look_msg):
             bottom.add(w)
         box.footer(bottom)
         return box
@@ -285,11 +285,13 @@ class LookPages:
                 r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(self.look)],
                                    capture_output=True, text=True, timeout=60)
                 msg = ('Saved: shows at the next login / lock' if r.returncode == 0 else
+                       'Not saved (password cancelled): change something to try again' if r.returncode in (126, 127) else
                        (r.stderr.strip().splitlines() or ['failed'])[-1])
             except (OSError, subprocess.TimeoutExpired) as e:
                 msg = f'Could not save: {e}'
-            idle(self.look_msg.set_text, msg)
-        threading.Thread(target=work, daemon=True).start()
+            if not getattr(self, 'dead', False):
+                idle(self.look_msg.set_text, msg)
+        threading.Thread(target=work).start()       # not a daemon: a save at closing still finishes
 
     def look_test(self):
         path = RUNTIME / 'zorro-look-test.json'     # private, one file, reused
@@ -301,5 +303,6 @@ class LookPages:
         app = self.get_application()
         self.destroy()
         win = type(self)(app, select='look:0')
-        win.look_msg.set_text('Defaults shown: not saved yet')
+        win.look_msg.set_text('Back to defaults: saving…')
         win.present()
+        win.look_save()
