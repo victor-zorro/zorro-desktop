@@ -46,6 +46,24 @@ has laptop && install_list laptop
 if has laptop && [[ -f packages/laptop-$DISTRO.txt ]]; then install_list "laptop-$DISTRO"; fi
 has laptop && sudo usermod -aG video "$USER"   # brightnessctl without sudo
 
+# --- The cable: NetworkManager, not ifupdown ----------------------------
+# The Debian installer gives the cable it installed over to ifupdown (/etc/network/interfaces).
+# NetworkManager then leaves it alone and Wi-Fi wins, even with the cable in. Hand it over
+# (same as the Zorro app's Network → Ethernet → "Use the cable"). Over SSH only the file is
+# changed and it takes effect after the reboot, so this session's connection stays up.
+if ! has vm && [[ -f /etc/network/interfaces ]] && command -v nmcli >/dev/null; then
+  cables=$(awk '$1 ~ /^(allow-hotplug|auto|iface)$/ && $2 ~ /^(en|eth)/ {print $2}' /etc/network/interfaces | sort -u)
+  if [[ -n $cables ]]; then
+    log "Cable: NetworkManager manages it (cable first, Wi-Fi as backup)"
+    [[ -f /etc/network/interfaces.before-zorro ]] || sudo cp /etc/network/interfaces /etc/network/interfaces.before-zorro
+    for c in $cables; do
+      [[ -z ${SSH_CONNECTION:-} ]] && { sudo ifdown --force "$c" >/dev/null 2>&1 || true; }
+      sudo sed -i -E "/^[[:space:]]*[^#].*(^|[[:space:]])$c([[:space:]]|$)/s/^/# zorro: NetworkManager manages this now: /" /etc/network/interfaces
+    done
+    [[ -z ${SSH_CONNECTION:-} ]] && sudo systemctl restart NetworkManager || echo "   (after the reboot)"
+  fi
+fi
+
 # --- Apt repositories ---------------------------------------------------
 # A repo is added once; a rerun skips the key downloads and the second apt update.
 log "Adding apt repositories"
@@ -272,13 +290,10 @@ echo " - Google Drive: open the Drive app (rofi: Drive), add an account, pick fo
 has nvidia && echo " - Install DaVinci Resolve manually (Blackmagic download), then reboot for the driver"
 if has laptop; then
   if [[ $DISTRO == debian ]]; then
-    # the Debian installer hands the cable it installed over to ifupdown: NetworkManager
-    # then leaves it alone and Wi-Fi wins, even with the cable plugged in
-    if grep -qE '^\s*(allow-hotplug|auto|iface)\s+(en|eth)' /etc/network/interfaces 2>/dev/null; then
-      echo " - Cable and Wi-Fi (at the laptop, not over SSH): /etc/network/interfaces still has the"
-      echo "   cable, so NetworkManager ignores it and everything goes over Wi-Fi. Keep only the 'lo'"
-      echo "   lines there: sudo ifdown <cable>; comment out its lines;"
-      echo "   sudo systemctl restart NetworkManager"
+    # Wi-Fi set up by the installer stays with ifupdown (its password lives there); move it by hand
+    if grep -qE '^[[:space:]]*(allow-hotplug|auto|iface)[[:space:]]+wl' /etc/network/interfaces 2>/dev/null; then
+      echo " - Wi-Fi (at the laptop, not over SSH): in /etc/network/interfaces comment out the"
+      echo "   wl… lines, then: sudo systemctl restart NetworkManager && nmtui"
     fi
   else
     echo " - Wi-Fi (at the laptop, not over SSH): switch netplan renderer to NetworkManager, then nmtui"

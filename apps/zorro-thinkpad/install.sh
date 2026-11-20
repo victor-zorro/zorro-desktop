@@ -23,6 +23,8 @@ install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
     /usr/local/libexec/zorro-look-helper           # same code, only the login look
 install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
     /usr/local/libexec/zorro-lang-helper           # same code, only spell-check dictionaries
+install -Dm755 -o root -g root "$here/zorro-thinkpad-helper" \
+    /usr/local/libexec/zorro-net-helper            # same code, only: the cable to NetworkManager
 # LTE modem tool for the Zorro app's Mobile tab: root-owned copy, run through polkit
 install -d -m755 -o root -g root /usr/local/lib/zorro-lte /usr/local/lib/zorro-lte/xmm7360
 install -m755 -o root -g root "$here/zorro-lte" /usr/local/lib/zorro-lte/zorro-lte

@@ -4,8 +4,13 @@ import json
 import re
 import threading
 
-from .base import run, spawn
-from .ui import Pages, device_list, device_row, heading, idle, in_bg, note
+import os
+import subprocess
+
+from .base import load_conf, run, spawn, update_conf
+from .ui import Pages, device_list, device_row, heading, idle, in_bg, note, switch
+NET_HELPER = '/usr/local/libexec/zorro-net-helper'   # asks a password: the cable to NetworkManager
+CABLE_LAST = 700                    # cable after Wi-Fi (600) when "cable first" is off
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('NM', '1.0')
@@ -228,8 +233,52 @@ class NetworkPages:
         box.add(heading('Ethernet', 'Ethernet'))
         self.eth_list = device_list()
         box.add(self.eth_list)
-        box.add(note('The cable is used first while it is plugged in (route metric 100; Wi-Fi '
-                     '600, mobile data 1500).'))
+        first = Gtk.Box(spacing=12, margin_top=10)
+        first.add(Gtk.Label(label='Use the cable first while it is plugged in', xalign=0))
+        first.add(switch(load_conf().get('cable_first', True), self.eth_first))
+        box.add(first)
+        box.add(note('On: the cable carries everything and Wi-Fi waits as a backup (route '
+                     'metric 100; Wi-Fi 600, mobile data 1500). Off: Wi-Fi first, the cable as backup.'))
+        self.eth_msg = note()
+        box.add(self.eth_msg)
+
+    def eth_first(self, on):
+        """cable first (NetworkManager's default metric) or after Wi-Fi, on every wired connection"""
+        update_conf(None, cable_first=bool(on))
+
+        def work():
+            out = []
+            for ln in run('nmcli', '-t', '-f', 'UUID,TYPE', 'connection', 'show').splitlines():
+                uuid, _, kind = ln.partition(':')
+                if kind != '802-3-ethernet':
+                    continue
+                m = '-1' if on else str(CABLE_LAST)
+                r = subprocess.run(['nmcli', 'connection', 'modify', uuid, 'ipv4.route-metric', m,
+                                    'ipv6.route-metric', m], capture_output=True, text=True)
+                out.append(r.returncode == 0)
+            c = self.net_client()
+            for dev in (c.get_devices() if c else []):
+                if isinstance(dev, NM.DeviceEthernet) and dev.get_state() == NM.DeviceState.ACTIVATED:
+                    run('nmcli', 'device', 'reapply', dev.get_iface())
+            msg = ('Cable first' if on else 'Wi-Fi first, the cable as backup') if out and all(out) else \
+                'No wired connection to change yet' if not out else 'Could not change it (no permission?)'
+            idle(lambda: (self.eth_msg.set_text(msg), self.eth_refresh()) and False)
+        in_bg(work)
+
+    def eth_fix(self, iface):
+        """the Debian installer gave this port to ifupdown: hand it to NetworkManager"""
+        if not os.access(NET_HELPER, os.X_OK):
+            self.eth_msg.set_text('Needs the app\'s helper once, in a terminal:\n'
+                                  '  sudo ~/zorro-desktop/apps/zorro-thinkpad/install.sh')
+            return
+        self.eth_msg.set_text(f'{iface}: handing it to NetworkManager…')
+
+        def work():
+            r = subprocess.run(['pkexec', NET_HELPER, 'cable', iface], capture_output=True, text=True)
+            msg = (f'{iface}: NetworkManager manages it now' if r.returncode == 0 else
+                   'Cancelled' if r.returncode in (126, 127) else (r.stderr.strip() or 'failed'))
+            idle(lambda: (self.eth_msg.set_text(msg), GLib.timeout_add(3000, lambda: self.eth_refresh() and False)) and False)
+        in_bg(work)
 
     def eth_refresh(self):
         c = self.net_client()
@@ -240,11 +289,9 @@ class NetworkPages:
             iface, st = dev.get_iface(), dev.get_state()
             drv = dev.get_driver() or ''
             if not dev.get_managed():
-                rows.append((iface, f'{drv} · not managed by NetworkManager, so it is never '
-                             'preferred over Wi-Fi. Fix (at the laptop):\n'
-                             f'sudo ifdown {iface}; sudo sed -i -E "/^(allow-hotplug|iface) +{iface}/s/^/# /" '
-                             '/etc/network/interfaces; sudo systemctl restart NetworkManager',
-                             [], 'warn'))
+                rows.append((iface, f'{drv} · set up outside NetworkManager (by the Debian installer), '
+                             'so Wi-Fi is used even with the cable in',
+                             [('Use the cable', lambda i=iface: self.eth_fix(i), True)], 'warn'))
                 continue
             if st == NM.DeviceState.UNAVAILABLE or not dev.get_carrier():
                 rows.append((iface, f'{drv} · no cable', [], 'off'))
