@@ -92,7 +92,7 @@ class Win(Gtk.Window):
         snd, rcv = engine.read_state('sender.json'), engine.read_state('receiver.json')
         if alive(snd.get('pid')) and snd.get('status') != 'stopped':
             self.send_page(start=False)
-        elif rcv.get('status') in ('starting', 'receiving', 'reconnecting', 'interrupted', 'received'):
+        elif rcv.get('status') in ('starting', 'receiving', 'reconnecting', 'interrupted', 'received', 'apps open'):
             self.get_progress_page()
         else:
             self.start_page()
@@ -275,9 +275,19 @@ class Win(Gtk.Window):
         st = engine.read_state('receiver.json')
         self.put(label(f"Connected to {st.get('sender', '?')}", big=True))
         self.put(label(f"{ROUTE.get(st.get('route'), '').capitalize()}. Choose what comes along:", dim=True))
+        if st.get('sender_running'):
+            self.put(label(f"On {st.get('sender', 'the other device')} these are open: "
+                           f"{', '.join(st['sender_running'])}. Close them there first for a clean copy "
+                           f"of their logins and data.", dim=True))
         self.picks = {}
+        files_head = False
         for g in offer:
-            cb = Gtk.CheckButton(active=g['bytes'] > 0)
+            if g['id'].startswith('files:') and not files_head:
+                files_head = True
+                self.put(label('<b>Personal files</b>  <span alpha="65%">(folders up to 5 GB are '
+                               'ticked; tick the big ones if you want them too)</span>', markup=True))
+            big = g['id'].startswith('files:') and g['bytes'] > 5e9
+            cb = Gtk.CheckButton(active=g['bytes'] > 0 and not big)
             cb.set_sensitive(g['bytes'] > 0)
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             box.add(label(f"<b>{GLib.markup_escape_text(g['title'])}</b>  <span alpha='65%'>"
@@ -331,6 +341,8 @@ class Win(Gtk.Window):
         elif status == 'interrupted':
             self.gline.set_text(f"Stopped: {st.get('error', '')}. It goes on where it stopped once the "
                                 f"other device sends again (open Transfer there: Send this setup).")
+        elif status == 'apps open':
+            self.gline.set_text(f"Close these first, then press Put in place again: {st.get('error', '')}")
         elif status == 'received':
             n = len(engine.Receiver().conflicts())
             self.gline.set_text('Everything is here. ' + (
@@ -350,7 +362,7 @@ class Win(Gtk.Window):
                 self.gbtns.add(btn('Go on in the background', self.destroy))
             elif status == 'interrupted':
                 self.gbtns.add(btn('Try again', self.get_continue, primary=True))
-            elif status == 'received':
+            elif status in ('received', 'apps open'):
                 self.gbtns.add(btn('Put in place', self.get_apply, primary=True))
             elif status in ('applied', 'failed'):
                 self.gbtns.add(btn('Close', self.destroy))
@@ -368,7 +380,12 @@ class Win(Gtk.Window):
             c.set_sensitive(False)
 
         def work():
-            engine.Receiver().apply()
+            r = engine.Receiver()
+            try:
+                r.apply()
+            except PermissionError as e:
+                r.save(status='apps open', error=str(e))
+            self.gstate = None              # the buttons again on the next look
         threading.Thread(target=work, daemon=True).start()
 
 

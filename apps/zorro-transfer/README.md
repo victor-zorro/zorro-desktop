@@ -28,8 +28,23 @@ What can go along (`transfer/items.py`):
   rofi and Openbox come from the repo itself. After "Put in place" Transfer rebuilds what
   Settings makes from the choices (`zorro-settings --apply-windows`, `build-icons`) and saves
   the login look with the login-screen helper (asks your password).
+- **Logins and keys**: Firefox and the web-app profiles (logins, saved passwords), SSH keys,
+  the keyring (it opens with the old device's password), Wi-Fi networks (read with nmcli,
+  added on the new device; the password file is deleted when sending stops), Drive accounts
+  (rclone), GitHub login.
+- **Apps' settings and data**: Obsidian, Claude, LocalSend, Blender, Godot, darktable,
+  Scribus, MQTTX, mpv. Not Signal: a copied Signal stops working; link the new device to your
+  phone instead.
+- **Personal files**: one tick box per folder in your home (folders up to 5 GB are ticked);
+  online drives (rclone mounts) are never walked. Not the repo, `UnrealEngine` or
+  `Installers` (its own group).
 
-Logins, app data, personal files and user accounts come next.
+Caches are left out (they rebuild themselves). Small files travel in batches, so thousands of
+notes don't each wait for the network. "Put in place" waits until the apps whose files it
+would replace are closed (Firefox, Obsidian…); the sender shows which of them are open on the
+sending device (close them there for a clean copy).
+
+User accounts come next.
 
     zorro-transfer                 the window
     zorro-transfer send            offer this device (the window runs this)

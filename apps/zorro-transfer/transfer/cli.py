@@ -49,7 +49,11 @@ def main():
         groups = a[a.index('--groups') + 1].split(',') if '--groups' in a else None
         return 0 if r.fetch(groups) else 1
     if a[0] == 'apply':
-        moved, kept = engine.Receiver().apply()
+        try:
+            moved, kept = engine.Receiver().apply()
+        except PermissionError as e:
+            print(f'!! close these first: {e}', file=sys.stderr)
+            return 1
         print(f'{moved} files put in place, {kept} left (set up by this device)')
         return 0
     if a[0] == 'status':

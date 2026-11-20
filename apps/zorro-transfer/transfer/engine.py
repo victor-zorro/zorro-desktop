@@ -26,6 +26,7 @@ from . import items, net
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'zorro-transfer'
 STAGE = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'zorro-transfer'
 CHUNK = 1 << 20
+SMALL = 512 << 10               # files up to this size come in batches
 RETRY_FOR = 30 * 60             # a lost connection: keep trying this long (seconds)
 
 
@@ -118,6 +119,7 @@ class Sender:
             if Path(STATE / 'sender.stop').exists():
                 (STATE / 'sender.stop').unlink(missing_ok=True)
                 break
+        (items.GEN / 'wifi.json').unlink(missing_ok=True)     # the Wi-Fi passwords: not left lying
         self.save('stopped')
 
     def discovery(self):
@@ -194,15 +196,14 @@ class Sender:
             op = req.get('op')
             if op == 'offer':                   # the groups, with their sizes
                 offer = []
-                for gid, (title, about, _paths) in items.GROUPS.items():
+                for gid, (title, about, _paths) in items.all_groups().items():
                     fl = items.files(gid)
                     offer.append({'id': gid, 'title': title, 'about': about,
                                   'files': len(fl), 'bytes': sum(f[1] for f in fl)})
-                net.send_json(t, {'groups': offer})
+                net.send_json(t, {'groups': offer, 'running': items.running(list(items.RUNNING))})
             elif op == 'manifest':
                 fl = [{'group': g, 'path': p, 'size': sz, 'mtime': mt}
-                      for g in req.get('groups', []) if g in items.GROUPS
-                      for p, sz, mt in items.files(g)]
+                      for g in req.get('groups', []) for p, sz, mt in items.files(g)]
                 allowed = {f['path']: f for f in fl}
                 s.update(groups=req.get('groups', []), total=sum(f['size'] for f in fl))
                 net.send_json(t, {'files': fl})
@@ -237,6 +238,24 @@ class Sender:
                             s.update(done=cur, current=f['path'], updated=now)
                             self.save('sending')
                             last = now
+            elif op == 'batch':                 # many small files in one go (no wait per file)
+                sizes, paths = [], []
+                for rel in req.get('paths', [])[:1000]:
+                    f = allowed.get(rel)
+                    path = items.source(rel) if f and items.safe_rel(rel) else None
+                    ok = path is not None and path.is_file()
+                    sizes.append(path.stat().st_size if ok else -1)
+                    paths.append(path if ok else None)
+                net.send_json(t, {'sizes': sizes})
+                for path, size in zip(paths, sizes):
+                    if path is None:
+                        continue
+                    with open(path, 'rb') as fh:
+                        data = fh.read(size)
+                    t.sendall(data + b'\0' * (size - len(data)))     # it shrank meanwhile: fill
+                s.update(done=int(req.get('done', 0)) + sum(x for x in sizes if x > 0),
+                         current=req.get('paths', [''])[-1], updated=time.time())
+                self.save('sending')
             elif op == 'progress':              # the receiver's numbers: both show the same
                 s.update(done=req.get('done', 0), total=req.get('total', s.get('total', 0)),
                          current=req.get('current', ''), speed=req.get('speed', 0),
@@ -343,10 +362,10 @@ class Receiver:
         self.st = {'host': host, 'status': 'pairing', 'route': route_kind(host)}
         t = self.open(code)
         net.send_json(t, {'op': 'offer'})
-        groups = net.recv_json(t)['groups']
-        self.save(status='paired', offer=groups)
+        r = net.recv_json(t)
+        self.save(status='paired', offer=r['groups'], sender_running=r.get('running', []))
         t.close()
-        return groups
+        return r['groups']
 
     def fetch(self, groups=None):
         """get the chosen groups (or continue the saved transfer), retrying a lost connection"""
@@ -382,9 +401,51 @@ class Receiver:
         done = 0
         t0, last = time.time(), 0
         speed_mark = (time.time(), 0)
+        batch = []
+
+        def flush():
+            """fetch the waiting small files in one request"""
+            nonlocal done, last, speed_mark
+            if not batch:
+                return
+            net.send_json(t, {'op': 'batch', 'paths': [f['path'] for f in batch], 'done': done})
+            sizes = net.recv_json(t)['sizes']
+            for f, size in zip(batch, sizes):
+                if size < 0:                # gone on the sender
+                    continue
+                data = net.recv_exact(t, size)
+                final = stage / f['path']
+                final.parent.mkdir(parents=True, exist_ok=True)
+                tmp = final.with_name(final.name + '.part')
+                tmp.write_bytes(data)
+                os.utime(tmp, (f['mtime'], f['mtime']))
+                tmp.replace(final)
+                done += f['size']
+            batch.clear()
+            now = time.time()
+            if now - last > 0.5:
+                dt = now - speed_mark[0]
+                speed = (done - speed_mark[1]) / dt if dt > 0 else 0
+                if dt > 3:
+                    speed_mark = (now, done)
+                self.save(done=done, current=f['path'], speed=speed)
+                net.send_json(t, {'op': 'progress', 'done': done, 'total': total,
+                                  'current': f['path'], 'speed': speed})
+                last = now
+
         for f in files:
             if not items.safe_rel(f['path']):
                 continue
+            final = stage / f['path']
+            if final.exists() and final.stat().st_size == f['size']:
+                done += f['size']
+                continue
+            if f['size'] <= SMALL and not (stage / (f['path'] + '.meta')).exists():
+                batch.append(f)
+                if len(batch) >= 500 or sum(x['size'] for x in batch) >= 16 * CHUNK:
+                    flush()
+                continue
+            flush()
             part = stage / (f['path'] + '.part')
             final = stage / f['path']
             meta = stage / (f['path'] + '.meta')
@@ -426,6 +487,7 @@ class Receiver:
             part.replace(final)
             meta.unlink(missing_ok=True)
             done += f['size']
+        flush()
         self.save(done=total, current='', speed=0, took=time.time() - t0)
         net.send_json(t, {'op': 'finished'})
         net.recv_json(t)
@@ -441,7 +503,11 @@ class Receiver:
         return out
 
     def apply(self):
-        """move what was received into place; what it replaces stays as NAME.before-transfer"""
+        """move what was received into place; what it replaces stays as NAME.before-transfer.
+        Apps whose files would change must be closed first: PermissionError with their names."""
+        busy = items.running(self.st.get('groups') or [])
+        if busy:
+            raise PermissionError(', '.join(busy))
         stage = STAGE / self.st['session']
         moved = kept = 0
         for f in self.st.get('files') or []:
@@ -450,7 +516,7 @@ class Receiver:
             src, dst = stage / f['path'], items.HOME / f['path']
             if not src.exists():
                 continue
-            if f['path'].startswith('system/'):     # installed by after() below
+            if f['path'].startswith(('system/', 'generated/')):     # after() below
                 continue
             if dst.is_symlink():            # set up by this device's own install: leave it
                 kept += 1
@@ -474,6 +540,10 @@ class Receiver:
     def after(self, stage):
         """rebuild what Settings makes from the choices; system files with a password"""
         notes = []
+        wifi = stage / 'generated/wifi.json'
+        if wifi.exists():
+            n = items.wifi_import(wifi)
+            notes.append(f'{n} Wi-Fi network{"s" if n != 1 else ""} added' if n else 'Wi-Fi networks were known already')
         if 'desktop' not in set(self.st.get('groups') or []):
             return notes
         settings = Path.home() / '.local/bin/zorro-settings'
