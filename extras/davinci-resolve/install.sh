@@ -9,9 +9,10 @@ set -euo pipefail
 user=${SUDO_USER:?run with sudo from your own account, not as root}
 home=$(getent passwd "$user" | cut -d: -f6)
 # Studio (paid) when its zip is there, else the free version
-zip=${1:-$(ls -t "$home"/Downloads/DaVinci_Resolve_Studio_*_Linux.zip 2>/dev/null | head -n1 || true)}
-zip=${zip:-$(ls -t "$home"/Downloads/DaVinci_Resolve_*_Linux.zip 2>/dev/null | head -n1 || true)}
-[[ -f ${zip:-} ]] || { echo "no DaVinci_Resolve_*_Linux.zip in $home/Downloads"; exit 1; }
+# kept in ~/Installers (it moves there after an install, and Transfer brings it along), else Downloads
+zip=${1:-$(ls -t "$home"/Installers/DaVinci_Resolve_Studio_*_Linux.zip "$home"/Downloads/DaVinci_Resolve_Studio_*_Linux.zip 2>/dev/null | head -n1 || true)}
+zip=${zip:-$(ls -t "$home"/Installers/DaVinci_Resolve_*_Linux.zip "$home"/Downloads/DaVinci_Resolve_*_Linux.zip 2>/dev/null | head -n1 || true)}
+[[ -f ${zip:-} ]] || { echo "no DaVinci_Resolve_*_Linux.zip in $home/Installers or $home/Downloads"; exit 1; }
 echo "==> $zip"
 
 # what Resolve needs from Debian (the .run checks for Rocky/CentOS names, so we skip that check)
@@ -49,3 +50,8 @@ case $zip in
   *Studio*) echo "Studio: enter your licence key at the first start (needs internet once)." ;;
   *) echo "Phone / camera video (H.264, H.265): convert first with  zresolve-convert FILE..." ;;
 esac
+# the zip is kept in ~/Installers (Transfer takes it along to a new device)
+if [[ $(dirname "$(realpath "$zip")") != "$home/Installers" ]]; then
+  sudo -u "$user" mkdir -p "$home/Installers"
+  sudo -u "$user" mv -n "$zip" "$home/Installers/" && echo "Kept in $home/Installers: $(basename "$zip")"
+fi

@@ -25,7 +25,8 @@ def apps():
         a['is_installed'] = os.path.exists(os.path.expanduser(a.get('installed', '/nonexistent')))
         a['script'] = str(EXTRAS / a['id'] / 'install.sh')
         if a.get('how') == 'manual' and a.get('file'):
-            found = sorted(glob.glob(os.path.expanduser('~/Downloads/' + a['file'])), key=os.path.getmtime)
+            found = sorted((f for d in ('~/Installers/', '~/Downloads/')
+                            for f in glob.glob(os.path.expanduser(d + a['file']))), key=os.path.getmtime)
             a['found'] = found[-1] if found else None
         out.append(a)
     return out

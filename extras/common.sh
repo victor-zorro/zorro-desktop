@@ -18,6 +18,10 @@ Icon=$4
 Categories=Development;Game;
 DESK
 }
+keep_installer() {        # keep_installer FILE: the download moves to ~/Installers (Transfer takes it along)
+  [[ -f $1 && $(dirname "$(realpath "$1")") != "$HOME/Installers" ]] || return 0
+  mkdir -p ~/Installers && mv -n "$1" ~/Installers/ && echo "==> kept in ~/Installers: $(basename "$1")"
+}
 apt_app() {               # apt_app "Name" package…: from Debian/Ubuntu, without the extras
   echo "==> $1 from the package list (asks your password)"
   as_root apt-get install -y --no-install-recommends "${@:2}"

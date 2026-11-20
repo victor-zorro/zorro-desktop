@@ -5,8 +5,8 @@
 # The editor writes into its own folder, so it lives in your home folder, not /opt.
 set -euo pipefail
 . "$(dirname "$(realpath "$0")")/../common.sh"
-zip=${1:-$(ls -t ~/Downloads/Linux_Unreal_Engine_*.zip 2>/dev/null | head -n1 || true)}
-[[ -f ${zip:-} ]] || { echo "!! no Linux_Unreal_Engine_*.zip in ~/Downloads (download it from https://www.unrealengine.com/en-US/linux)"; exit 1; }
+zip=${1:-$(ls -t ~/Installers/Linux_Unreal_Engine_*.zip ~/Downloads/Linux_Unreal_Engine_*.zip 2>/dev/null | head -n1 || true)}
+[[ -f ${zip:-} ]] || { echo "!! no Linux_Unreal_Engine_*.zip in ~/Installers or ~/Downloads (download it from https://www.unrealengine.com/en-US/linux)"; exit 1; }
 dest=~/UnrealEngine
 need=$(( $(unzip -Zt "$zip" | awk '{print $3}') / 1024 + 1048576 ))      # unpacked size + 1 GB, in kB
 free=$(df -Pk "$HOME" | awk 'NR==2{print $4}')
@@ -35,4 +35,5 @@ desktop_entry unreal-engine "Unreal Engine" "$ed %f" "$icon" "Game engine"
 build="$(dirname "$(realpath "$0")")/../../apps/zorro-icons/build-icons"
 [[ -x $build ]] && "$build" >/dev/null 2>&1 || true
 rm -rf "$dest.old"
-echo "==> Unreal Engine installed (Dialer: Unreal Engine). The zip in Downloads can go."
+keep_installer "$zip"
+echo "==> Unreal Engine installed (Dialer: Unreal Engine). The zip is kept in ~/Installers."

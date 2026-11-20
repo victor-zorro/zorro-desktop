@@ -75,7 +75,7 @@ class AppsPages:
         return False
 
     def apps_pick_file(self, a):
-        """a manual app: its download (found in Downloads, or chosen here); None: cancelled"""
+        """a manual app: its download (found in Installers or Downloads, or chosen here); None: cancelled"""
         if a.get('found'):
             return a['found']
         dlg = Gtk.FileChooserDialog(title=f"The {a['name']} download", transient_for=self,
