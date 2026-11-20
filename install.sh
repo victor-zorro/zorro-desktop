@@ -272,8 +272,14 @@ echo " - Google Drive: open the Drive app (rofi: Drive), add an account, pick fo
 has nvidia && echo " - Install DaVinci Resolve manually (Blackmagic download), then reboot for the driver"
 if has laptop; then
   if [[ $DISTRO == debian ]]; then
-    echo " - Wi-Fi (at the laptop, not over SSH): in /etc/network/interfaces keep only the"
-    echo "   'lo' lines, then: sudo systemctl restart NetworkManager && nmtui"
+    # the Debian installer hands the cable it installed over to ifupdown: NetworkManager
+    # then leaves it alone and Wi-Fi wins, even with the cable plugged in
+    if grep -qE '^\s*(allow-hotplug|auto|iface)\s+(en|eth)' /etc/network/interfaces 2>/dev/null; then
+      echo " - Cable and Wi-Fi (at the laptop, not over SSH): /etc/network/interfaces still has the"
+      echo "   cable, so NetworkManager ignores it and everything goes over Wi-Fi. Keep only the 'lo'"
+      echo "   lines there: sudo ifdown <cable>; comment out its lines;"
+      echo "   sudo systemctl restart NetworkManager"
+    fi
   else
     echo " - Wi-Fi (at the laptop, not over SSH): switch netplan renderer to NetworkManager, then nmtui"
   fi
