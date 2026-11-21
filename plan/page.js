@@ -140,7 +140,7 @@ function paint(id) {
   const q = document.getElementById('q-' + id);
   if (q) q.dataset.answered = (a.pick.length || (a.note || '').trim()) ? '1' : '0';
   const n = QS.filter(x => { const v = answers[x.id]; return v && (v.pick.length || (v.note || '').trim()); }).length;
-  $('#count').textContent = `${n} / ${QS.length} answered`;
+  $('#count').textContent = `${n}/${QS.length}`;
 }
 function status(id, text, cls) {
   const s = document.getElementById('saved-' + id);
@@ -182,21 +182,3 @@ async function load() {
 }
 load();
 setInterval(load, 5000);
-
-// ---- progress of the run (plan/progress.json, written by Claude)
-async function progress() {
-  try {
-    const p = await (await fetch('progress.json', { cache: 'no-store' })).json();
-    $('#progress-at').textContent = 'Updated ' + p.updated + '. Refreshes by itself.';
-    const box = $('#steps'); box.innerHTML = '';
-    p.steps.forEach(st => {
-      const row = document.createElement('div'); row.className = 'step ' + st.state;
-      const s = document.createElement('span'); s.className = 's'; s.textContent = st.state;
-      const n = document.createElement('span'); n.textContent = st.name;
-      const d = document.createElement('span'); d.className = 'n'; d.textContent = st.note || '';
-      row.append(s, n, d); box.appendChild(row);
-    });
-  } catch (e) { /* the next round tries again */ }
-}
-progress();
-setInterval(progress, 10000);

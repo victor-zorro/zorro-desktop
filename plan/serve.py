@@ -25,6 +25,7 @@ ID = re.compile(r'[a-z0-9-]{1,40}')
 LOCK = threading.Lock()
 FILES = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/html'),
          '/style.css': ('style.css', 'text/css'), '/page.js': ('page.js', 'text/javascript'),
+         '/nav.js': ('nav.js', 'text/javascript'),
          '/progress.json': ('progress.json', 'application/json')}
 
 
