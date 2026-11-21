@@ -18,6 +18,13 @@ BRIEFS = {
               'RouterOS. Be concrete and brief: propose, compare, ask one question at a time '
               'when a decision is needed. Plain text, short paragraphs and lists. You cannot '
               'read files or run anything; you only discuss the design.',
+    'discogs': 'You help design a Discogs app (the music database and marketplace for records) '
+               'for the Zorro desktop: a GTK 3 Python app in the Zorro style, using the Discogs '
+               'API. First find out what the user wants it for (their collection, wantlist, '
+               'looking up releases, selling, linking with the music player). Be concrete and '
+               'brief: propose, compare, ask one question at a time when a decision is needed. '
+               'Plain text, short paragraphs and lists. You cannot read files or run anything; '
+               'you only discuss the design.',
 }
 
 

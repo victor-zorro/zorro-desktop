@@ -22,6 +22,7 @@
     <a href="#howto">Instructions</a>
     <span class="label mh">Design</span>
     <a href="#winbox">WinBox replacement</a>
+    <a href="#discogs">Discogs app</a>
     <span class="label mh">The plan</span>
     <a href="#apps">Apps</a>
     <a href="#dialer">Dialer</a>
@@ -293,6 +294,30 @@ sudo ~/zorro-desktop/apps/zorro-transfer/install-system.sh</pre>
         <button class="btn" type="submit">Send</button>
       </form>
       <div class="saved" id="chat-winbox-state"></div>
+    </div>
+  </div>
+</section>
+
+<section id="discogs">
+  <div class="head">
+    <span class="label">design area</span>
+    <h2>A Discogs app</h2>
+    <p class="dim">Work on this whenever you like, also while the build runs. Notes on the left are yours and
+      are saved; the chat on the right thinks along (Claude, through the laptop) and reads your notes.</p>
+  </div>
+  <div class="duo">
+    <div class="card">
+      <span class="label">design notes</span>
+      <div data-notes="discogs-notes"></div>
+    </div>
+    <div class="card">
+      <span class="label">design chat</span>
+      <div class="chat" id="chat-discogs"></div>
+      <form class="ask" id="ask-discogs">
+        <textarea id="ask-discogs-text" placeholder="Ask or propose something… (Enter sends, Shift+Enter a new line)"></textarea>
+        <button class="btn" type="submit">Send</button>
+      </form>
+      <div class="saved" id="chat-discogs-state"></div>
     </div>
   </div>
 </section>

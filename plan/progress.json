@@ -152,6 +152,14 @@
    "pct": 0,
    "eta": 0,
    "model": "design: Opus; build: later"
+  },
+  {
+   "name": "Discogs app",
+   "state": "todo",
+   "note": "design first: use the design area",
+   "pct": 0,
+   "eta": 0,
+   "model": "design: Opus; build: later"
   }
  ],
  "eta_total": 45

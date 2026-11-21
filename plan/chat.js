@@ -1,7 +1,9 @@
 // The design area: notes (saved like the answers) and a chat answered through the laptop.
 document.querySelectorAll('[data-notes]').forEach(host => {
   block(host, host.dataset.notes, [], false);
-  host.querySelector('textarea').placeholder = 'What it must do, what annoys you in WinBox, routers you have, ideas…';
+  host.querySelector('textarea').placeholder = host.dataset.notes === 'discogs-notes'
+    ? 'What you want it for: your collection, wantlist, looking up records, selling, ideas…'
+    : 'What it must do, what annoys you in WinBox, routers you have, ideas…';
   host.querySelector('textarea').classList.add('tall');
 });
 
@@ -50,3 +52,4 @@ function chat(topic) {
   setInterval(load, 2000);
 }
 chat('winbox');
+chat('discogs');
