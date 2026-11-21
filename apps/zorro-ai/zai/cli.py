@@ -48,7 +48,9 @@ def _direct(request):
     try:
         if request.get('op') == 'ask':
             print('zorro-ai: the service does not run, answering in this process', file=sys.stderr)
-            service.handle(request, _show, threading.Event(), engines)
+            codes = []
+            service.handle(request, lambda r: codes.append(_show(r)), threading.Event(), engines)
+            got.append({'type': 'exit', 'code': next((c for c in codes if c is not None), 1)})
         else:
             service.handle(request, got.append, threading.Event(), engines)
     finally:
@@ -84,7 +86,7 @@ def ask(args):
     code = 1
     try:
         for reply in _replies(request):
-            shown = _show(reply)
+            shown = reply['code'] if reply.get('type') == 'exit' else _show(reply)
             code = code if shown is None else shown
     except KeyboardInterrupt:
         return 130

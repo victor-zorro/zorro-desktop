@@ -6,9 +6,10 @@ from .. import config, models
 from ..chat_stream import stream_chat
 from ..install_local import server_binary
 from ..local_server import LlamaServer
-from . import EngineError, chat_messages
+from . import EngineError, chat_messages, context_text, newest_that_fit
 
 QUEUE_DEADLINE = 300    # seconds to wait for another local answer to finish
+ROOM = 9000              # characters of conversation a local model is given (its window is 4096 tokens)
 
 
 class Local:
@@ -74,7 +75,8 @@ class Local:
             on_text(piece)
 
         url = f'http://127.0.0.1:{port}/v1/chat/completions'
-        body = {'model': model_id, 'messages': chat_messages(messages, context)}
+        room = ROOM - len(context_text(context))       # a small model reads only so much
+        body = {'model': model_id, 'messages': chat_messages(newest_that_fit(messages, max(room, 0)), context)}
         stream_chat(url, body, count, stop_event, key=key, timeout=600)
         seconds = time.monotonic() - (said['first'] or time.monotonic())
         words = len(''.join(said['text']).split())

@@ -2,7 +2,7 @@
 import time
 
 from . import config, models, router
-from .engines import EngineError
+from .engines import EngineError, in_turns, without_local_answers
 
 PLACES = config.PLACES
 
@@ -27,8 +27,12 @@ def error(send, code, message):
 
 def status(engines):
     state = {}
+    local_only = config.load().get('local_only')
     for name, engine in engines.items():
-        ok, why = router.check(engine)
+        if local_only and engine.host:      # not even a look at the cloud
+            ok, why = False, 'is off (nothing leaves this laptop)'
+        else:
+            ok, why = router.check(engine)
         state[name] = {'ready': ok, 'why': why, 'model': engine.model()}
     return {'type': 'status', 'engines': state, 'models': models.listing(), 'settings': config.load(),
             'on_battery': models.on_battery()}
@@ -53,6 +57,8 @@ def _checked(request):
         raise ValueError('messages must be a list of {role, content}')
     if not isinstance(context, list) or not all(isinstance(c, dict) for c in context):
         raise ValueError('context must be a list of {path, text}')
+    if not in_turns(messages):
+        raise ValueError('there is no question in messages')
     return place, messages, context
 
 
@@ -80,7 +86,8 @@ def ask(request, send, stop_event, engines):
             send({'type': 'text', 'delta': piece})
 
         try:
-            model = engine.ask(messages, context, on_text, stop_event)
+            mine = without_local_answers(messages) if engine.host else messages
+            model = engine.ask(in_turns(mine), context, on_text, stop_event)
         except EngineError as e:
             if said or i + 1 == len(usable):
                 error(send, 'engine_failed', f'{engine.title}: {e}')

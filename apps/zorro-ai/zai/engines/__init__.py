@@ -39,6 +39,51 @@ def context_text(context):
     return '\n\n'.join(parts) + '\n\n'
 
 
+def in_turns(messages):
+    """the conversation as every engine accepts it: no empty texts, user and assistant in
+    turns, starting and ending with the user (an unanswered question is left out)"""
+    out = []
+    for m in messages:
+        role = 'assistant' if m.get('role') == 'assistant' else 'user'
+        text = str(m.get('content', '')).strip()
+        if not text or (role == 'assistant' and not out):
+            continue
+        if out and out[-1]['role'] == role:
+            out[-1] = {'role': role, 'content': text}
+        else:
+            out.append({'role': role, 'content': text})
+    while out and out[-1]['role'] != 'user':
+        out.pop()
+    return out
+
+
+def without_local_answers(messages):
+    """for a cloud engine: what a model on this laptop answered, and the question it
+    answered, stay on the laptop (the place it was asked in may be set to local only)"""
+    out = []
+    for m in messages:
+        if m.get('role') == 'assistant' and m.get('engine') == 'local':
+            if out and out[-1].get('role') != 'assistant':
+                out.pop()
+            continue
+        out.append(m)
+    return out
+
+
+def newest_that_fit(messages, room):
+    """the newest messages that fit in `room` characters; always the last question"""
+    kept, used = [], 0
+    for m in reversed(messages):
+        used += len(m['content'])
+        if kept and used > room:
+            break
+        kept.append(m)
+    kept.reverse()
+    while kept and kept[0]['role'] != 'user':
+        kept.pop(0)
+    return kept
+
+
 def chat_messages(messages, context):
     """messages for a chat-completions API, the excerpts placed before the last user message"""
     out = [{'role': m.get('role', 'user'), 'content': str(m.get('content', ''))} for m in messages]

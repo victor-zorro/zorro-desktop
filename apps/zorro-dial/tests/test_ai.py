@@ -122,7 +122,8 @@ class ChatTest(Base):
         c.send()
         self.assertTrue(wait_for(lambda: not c.busy))
         asked = [r for r in service.requests if r.get('op') == 'ask'][0]['messages']
-        self.assertEqual(len(asked), 20)
+        self.assertEqual(len(asked), 19)        # the last 20, starting with a question
+        self.assertEqual(asked[0]['role'], 'user')
         self.assertEqual(asked[-1], {'role': 'user', 'content': 'next'})
         self.assertEqual(len(chatfile.load(self.file)), 42)
 

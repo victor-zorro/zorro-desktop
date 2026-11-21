@@ -25,7 +25,8 @@ class Asking:
             self.call.cancel()
 
     def run(self):
-        messages = chat.append(chat.question(self.text))
+        self.question = chat.question(self.text)
+        messages = chat.append(self.question)
         self.on_change()
         context, self.note = excerpts.gather(self.text, config.load(), self.about)
         if not self.cancelled.is_set():
@@ -62,5 +63,5 @@ class Asking:
         a = self.answer
         if not a.text.strip():
             return
-        chat.append(chat.answer(a.text, a.engine, a.sent, a.model, self.notes or None,
-                                partial=not a.done))
+        chat.append_answer(self.question, chat.answer(a.text, a.engine, a.sent, a.model,
+                                                      self.notes or None, partial=not a.done))

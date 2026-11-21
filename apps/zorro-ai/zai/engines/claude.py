@@ -13,7 +13,8 @@ SYSTEM = ('You are the assistant built into a Linux desktop. Answer the question
           'text or simple Markdown, in the language of the question. You have no tools and cannot read '
           'files: use only the conversation and the excerpts given in it.')
 FLAGS = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-         '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence']
+         '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence',
+         '--setting-sources', '']      # none of your own Claude hooks, plugins or memory
 DEADLINE = 600          # seconds one answer may take
 
 

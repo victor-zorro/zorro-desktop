@@ -1,4 +1,7 @@
 """Which engine answers: auto and its fallback order, a forced engine, nothing leaves this laptop."""
+import os
+import shutil
+import tempfile
 import unittest
 
 from fakes import FakeEngine, SandboxCase, exchange
@@ -62,8 +65,8 @@ class Routing(SandboxCase):
         self.serve(fake)
         self.assertEqual(summary(exchange({**ASK, 'place': 'intel'})), ('mistral', []))
         self.assertEqual(summary(exchange({**ASK, 'place': 'intel', 'engine': 'local'})), ('local', []))
-        replies = exchange({**ASK, 'engine': 'local:tiny'})
-        self.assertEqual((replies[0]['engine'], replies[0]['model']), ('local', 'tiny'))
+        replies = exchange({**ASK, 'engine': 'local:qwen2.5-0.5b'})
+        self.assertEqual((replies[0]['engine'], replies[0]['model']), ('local', 'qwen2.5-0.5b'))
 
     def test_forced_engine_does_not_fall_back(self):
         self.serve(engines())
@@ -119,3 +122,64 @@ class Battery(SandboxCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SavedSettings(unittest.TestCase):
+    """a damaged settings file never opens the way to the cloud"""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(dir='/tmp')
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        self.old = {k: os.environ.get(k) for k in ('XDG_CONFIG_HOME',)}
+        os.environ['XDG_CONFIG_HOME'] = self.home
+        self.addCleanup(lambda: [os.environ.pop(k) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in self.old.items()])
+
+    def write(self, text):
+        path = config.paths.config_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def test_an_unknown_key_keeps_the_rest(self):
+        self.write('{"local_only": true, "new_thing": 1, "places": {"dialer": "local", "attic": "claude"}}')
+        cfg = config.load()
+        self.assertTrue(cfg['local_only'])
+        self.assertEqual(cfg['places']['dialer'], 'local')
+
+    def test_a_broken_file_means_nothing_leaves(self):
+        for text in ('{not json', '[]', '{"local_only": "yes"}'):
+            self.write(text)
+            self.assertTrue(config.load()['local_only'], text)
+
+    def test_no_file_is_the_defaults(self):
+        self.assertFalse(config.load()['local_only'])
+
+    def test_a_model_id_must_be_in_the_list(self):
+        self.assertFalse(config.valid_engine('local:../../x'))
+        self.assertTrue(config.valid_engine('local:qwen2.5-0.5b'))
+
+
+class WhatIsSent(unittest.TestCase):
+    def test_turns(self):
+        from zai.engines import in_turns
+        talk = [{'role': 'assistant', 'content': 'stray'}, {'role': 'user', 'content': 'a'},
+                {'role': 'user', 'content': 'b'}, {'role': 'assistant', 'content': ''},
+                {'role': 'assistant', 'content': 'B', 'engine': 'local'}, {'role': 'user', 'content': 'c'}]
+        self.assertEqual(in_turns(talk), [{'role': 'user', 'content': 'b'}, {'role': 'assistant', 'content': 'B'},
+                                          {'role': 'user', 'content': 'c'}])
+
+    def test_local_answers_stay_on_the_laptop(self):
+        from zai.engines import in_turns, without_local_answers
+        talk = [{'role': 'user', 'content': 'private?'}, {'role': 'assistant', 'content': 'secret', 'engine': 'local'},
+                {'role': 'user', 'content': 'open?'}, {'role': 'assistant', 'content': 'fine', 'engine': 'claude'},
+                {'role': 'user', 'content': 'now'}]
+        sent = in_turns(without_local_answers(talk))
+        self.assertEqual([m['content'] for m in sent], ['open?', 'fine', 'now'])
+
+    def test_a_small_model_gets_the_newest(self):
+        from zai.engines import newest_that_fit
+        talk = [{'role': 'user', 'content': 'x' * 50}, {'role': 'assistant', 'content': 'y' * 50},
+                {'role': 'user', 'content': 'z' * 50}]
+        self.assertEqual(len(newest_that_fit(talk, 60)), 1)
+        self.assertEqual(len(newest_that_fit(talk, 500)), 3)
+        self.assertEqual(len(newest_that_fit(talk, 0)), 1)

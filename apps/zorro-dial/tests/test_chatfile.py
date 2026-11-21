@@ -35,7 +35,7 @@ class ChatFileTest(unittest.TestCase):
         self.assertNotIn('note', on_disk[1])
         self.assertRegex(on_disk[0]['at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$')
         self.assertEqual(stat.S_IMODE(os.stat(self.file).st_mode), 0o600)
-        self.assertEqual(os.listdir(self.file.parent), ['chat.json'])      # no temp file left
+        self.assertEqual(sorted(os.listdir(self.file.parent)), ['.chat.lock', 'chat.json'])     # no temp file left
 
     def test_append_sees_what_the_other_app_wrote(self):
         chatfile.append([chatfile.message('user', 'mine')], self.file)
@@ -47,9 +47,10 @@ class ChatFileTest(unittest.TestCase):
     def test_at_most_twenty_go_to_the_engine(self):
         messages = [chatfile.message('user' if i % 2 == 0 else 'assistant', str(i), engine='e') for i in range(31)]
         out = chatfile.for_engine(messages)
-        self.assertEqual(len(out), 20)
+        self.assertEqual(len(out), 19)          # the last 20, starting with a question
         self.assertEqual(out[-1], {'role': 'user', 'content': '30'})
-        self.assertEqual(out[0]['content'], '11')
+        self.assertEqual((out[0]['role'], out[0]['content']), ('user', '12'))
+        self.assertEqual(out[1], {'role': 'assistant', 'content': '13', 'engine': 'e'})
 
     def test_new_chat_empties_it_and_keeps_the_old_one(self):
         chatfile.append([chatfile.message('user', 'old')], self.file)

@@ -18,6 +18,7 @@ class Server:
         self.path = str(path or paths.socket_path())
         self.sock = None
         self.stopping = threading.Event()
+        self.answering = set()          # the stop signals of the answers running now
 
     def bind(self):
         try:
@@ -56,12 +57,15 @@ class Server:
             os.unlink(self.path)
         except OSError:
             pass
+        for stop_event in list(self.answering):       # answers still running end with the service
+            stop_event.set()
         local = self.engines.get('local')
         if local is not None:
             local.shutdown()
 
     def client(self, conn):
         stop_event, finished = threading.Event(), threading.Event()
+        self.answering.add(stop_event)
         write_lock = threading.Lock()
 
         def send(obj):
@@ -86,6 +90,7 @@ class Server:
             except Exception as e:      # noqa: BLE001 - one bad request must not end the service
                 send({'type': 'error', 'code': 'internal', 'message': f'{type(e).__name__}: {e}'})
             finally:
+                self.answering.discard(stop_event)
                 finished.set()
                 hang_up(conn)
 

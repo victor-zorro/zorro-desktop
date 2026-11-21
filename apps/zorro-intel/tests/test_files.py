@@ -24,7 +24,7 @@ class Chat(SandboxCase):
         self.assertEqual(second, {'role': 'assistant', 'content': 'hello', 'at': second['at'], 'engine': 'claude',
                                   'sent': ['/n/a.md'], 'model': 'm1', 'note': 'a note'})
         self.assertEqual(mode(paths.chat_file()), 0o600)
-        self.assertEqual(os.listdir(paths.state_dir()), ['chat.json'])
+        self.assertEqual(sorted(os.listdir(paths.state_dir())), ['.chat.lock', 'chat.json'])
 
     def test_partial(self):
         chat.append(chat.answer('half an ans', 'local', [], partial=True))

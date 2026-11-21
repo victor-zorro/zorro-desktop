@@ -323,5 +323,426 @@
    "state": "fixed"
   }
  ],
- "after": []
+ "after": [
+  {
+   "id": "A1",
+   "area": "AI",
+   "level": "critical",
+   "title": "\"Nothing leaves this laptop\" switches itself off after one bad line in the settings file",
+   "state": "fixed"
+  },
+  {
+   "id": "A2",
+   "area": "AI",
+   "level": "high",
+   "title": "With \"nothing leaves this laptop\" on, the status check still contacts Anthropic and Mistral",
+   "state": "fixed"
+  },
+  {
+   "id": "A3",
+   "area": "AI",
+   "level": "high",
+   "title": "The shared chat can carry answers made on the laptop to a cloud engine from the other app",
+   "state": "fixed"
+  },
+  {
+   "id": "A4",
+   "area": "AI",
+   "level": "medium",
+   "title": "The Dialer can send a conversation in an order local Mistral models refuse",
+   "state": "fixed"
+  },
+  {
+   "id": "A5",
+   "area": "AI",
+   "level": "medium",
+   "title": "Long chats overflow the local model, which then fails until \"New chat\"",
+   "state": "fixed"
+  },
+  {
+   "id": "A6",
+   "area": "AI",
+   "level": "medium",
+   "title": "Chat-file and client code copied between three apps (already drifted apart)",
+   "state": "open"
+  },
+  {
+   "id": "A7",
+   "area": "Intelligence",
+   "level": "medium",
+   "title": "Ask can stay stuck on \"Stop\" after a disk error",
+   "state": "open"
+  },
+  {
+   "id": "A8",
+   "area": "AI",
+   "level": "low",
+   "title": "A local model id is not checked against the list",
+   "state": "fixed"
+  },
+  {
+   "id": "A9",
+   "area": "Dialer",
+   "level": "medium",
+   "title": "The Dialer gives up after 3 minutes on a slow local answer",
+   "state": "open"
+  },
+  {
+   "id": "A10",
+   "area": "AI",
+   "level": "medium",
+   "title": "Dialer and Intelligence write the chat file without a lock (wrong pairs, a lost message)",
+   "state": "fixed"
+  },
+  {
+   "id": "A11",
+   "area": "Dialer",
+   "level": "low",
+   "title": "The Dialer does not show an answer finished in Intelligence until reopened",
+   "state": "open"
+  },
+  {
+   "id": "A12",
+   "area": "AI",
+   "level": "medium",
+   "title": "The claude engine still loads your own Claude hooks, plugins and memory",
+   "state": "fixed"
+  },
+  {
+   "id": "A13",
+   "area": "AI",
+   "level": "low",
+   "title": "zorro-ai ask reports failure when it answered without the service",
+   "state": "fixed"
+  },
+  {
+   "id": "A14",
+   "area": "AI",
+   "level": "low",
+   "title": "Stopping the service by hand leaves a running answer behind",
+   "state": "fixed"
+  },
+  {
+   "id": "A15",
+   "area": "Dialer",
+   "level": "low",
+   "title": "Two quick taps on a greyed device start two connects",
+   "state": "open"
+  },
+  {
+   "id": "B1",
+   "area": "Screens",
+   "level": "critical",
+   "title": "Closing the window during the countdown keeps a bad screen layout (no picture until you log in again)",
+   "state": "open"
+  },
+  {
+   "id": "B2",
+   "area": "Screens",
+   "level": "high",
+   "title": "A connected screen that is off gets switched on by any other change",
+   "state": "open"
+  },
+  {
+   "id": "B3",
+   "area": "Screens",
+   "level": "high",
+   "title": "A second change within the countdown undoes the first",
+   "state": "open"
+  },
+  {
+   "id": "B4",
+   "area": "Screens",
+   "level": "medium",
+   "title": "\"Put back\" fails for a rotated screen and says it worked",
+   "state": "open"
+  },
+  {
+   "id": "B5",
+   "area": "Screens",
+   "level": "medium",
+   "title": "Keep can show with nothing waiting, and then crashes",
+   "state": "open"
+  },
+  {
+   "id": "B6",
+   "area": "Plan page",
+   "level": "high",
+   "title": "Any website open in the laptop's browser can post answers or use the design chat",
+   "state": "open"
+  },
+  {
+   "id": "B7",
+   "area": "Plan page",
+   "level": "high",
+   "title": "\"Home network only\" also means any caf\u00e9 or hotel network",
+   "state": "open"
+  },
+  {
+   "id": "B8",
+   "area": "Plan page",
+   "level": "medium",
+   "title": "A device on the network can fill the disk with answers",
+   "state": "open"
+  },
+  {
+   "id": "B9",
+   "area": "Plan page",
+   "level": "medium",
+   "title": "The design chat can stay on \"writing\u2026\" for ever after an error",
+   "state": "open"
+  },
+  {
+   "id": "B10",
+   "area": "Plan page",
+   "level": "medium",
+   "title": "A slow or broken request can tie up the page server",
+   "state": "open"
+  },
+  {
+   "id": "B11",
+   "area": "USB stick",
+   "level": "medium",
+   "title": "The stick writer opens the file as root before checking it",
+   "state": "open"
+  },
+  {
+   "id": "B12",
+   "area": "USB stick",
+   "level": "low",
+   "title": "A stick with an opened encrypted volume is overwritten while in use",
+   "state": "open"
+  },
+  {
+   "id": "B13",
+   "area": "USB stick",
+   "level": "high",
+   "title": "After swapping sticks, Write erases the new one without asking again",
+   "state": "open"
+  },
+  {
+   "id": "B14",
+   "area": "Install",
+   "level": "medium",
+   "title": "The cable keeps its address only after the next restart, not at once",
+   "state": "open"
+  },
+  {
+   "id": "B15",
+   "area": "Screens",
+   "level": "low",
+   "title": "\"Used when you plug it in\" is promised but not built",
+   "state": "open"
+  },
+  {
+   "id": "B16",
+   "area": "Rules check",
+   "level": "medium",
+   "title": "The rules check skips new files that are not committed yet",
+   "state": "open"
+  },
+  {
+   "id": "B17",
+   "area": "Code",
+   "level": "low",
+   "title": "The same address check is copied in three apps",
+   "state": "open"
+  },
+  {
+   "id": "B18",
+   "area": "Settings",
+   "level": "low",
+   "title": "Ask-once timers: a warning on close, and an old one can end a new question",
+   "state": "open"
+  },
+  {
+   "id": "B19",
+   "area": "ISO",
+   "level": "medium",
+   "title": "A machine installed from the ISO cannot fetch updates (its copy is not a git repo)",
+   "state": "open"
+  },
+  {
+   "id": "B20",
+   "area": "Settings",
+   "level": "low",
+   "title": "Home and DEVS cannot be opened by address",
+   "state": "open"
+  },
+  {
+   "id": "C1",
+   "area": "DEVS",
+   "level": "critical",
+   "title": "Any website open in the browser can create items, write plan answers and start the checks",
+   "state": "open"
+  },
+  {
+   "id": "C2",
+   "area": "DEVS",
+   "level": "high",
+   "title": "A website can pose as the laptop to the browser and read DEVS (no check of the address asked for)",
+   "state": "open"
+  },
+  {
+   "id": "C3",
+   "area": "DEVS",
+   "level": "medium",
+   "title": "The automatic checks can be started over and over, keeping the laptop busy",
+   "state": "open"
+  },
+  {
+   "id": "C4",
+   "area": "Transfer",
+   "level": "high",
+   "title": "A stranger on the network can block pairing for hours",
+   "state": "open"
+  },
+  {
+   "id": "C5",
+   "area": "Transfer",
+   "level": "high",
+   "title": "Before pairing, a device can make the sender use gigabytes of memory",
+   "state": "open"
+  },
+  {
+   "id": "C6",
+   "area": "Transfer",
+   "level": "high",
+   "title": "The send port answers any address, not only the home network",
+   "state": "open"
+  },
+  {
+   "id": "C7",
+   "area": "Transfer",
+   "level": "high",
+   "title": "A paired sender can lie about a file's size and fill the disk or memory",
+   "state": "open"
+  },
+  {
+   "id": "C8",
+   "area": "Transfer",
+   "level": "high",
+   "title": "One file with a very long name stops everything after it",
+   "state": "open"
+  },
+  {
+   "id": "C9",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "With many files the progress window stutters (a big list rewritten twice a second)",
+   "state": "open"
+  },
+  {
+   "id": "C10",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "Your own account silently gets the sender's groups (admin, input)",
+   "state": "open"
+  },
+  {
+   "id": "C11",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "After the admin step, another program could make an admin account for a few minutes",
+   "state": "open"
+  },
+  {
+   "id": "C12",
+   "area": "Network",
+   "level": "high",
+   "title": "\"Home network\" also means caf\u00e9 Wi-Fi and the mobile network",
+   "state": "open"
+  },
+  {
+   "id": "C13",
+   "area": "Network",
+   "level": "medium",
+   "title": "Some internet address ranges pass as \"private\"",
+   "state": "open"
+  },
+  {
+   "id": "C14",
+   "area": "Beacon",
+   "level": "low",
+   "title": "One device can keep three \"wants your setup\" notifications a minute on screen",
+   "state": "open"
+  },
+  {
+   "id": "C15",
+   "area": "Transfer",
+   "level": "low",
+   "title": "A rogue device with your laptop's name can replace it in the list (the code stays safe)",
+   "state": "open"
+  },
+  {
+   "id": "C16",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "A disk read error in the middle of a file retries for 30 minutes",
+   "state": "open"
+  },
+  {
+   "id": "C17",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "A paired receiver can make the sender load 2 GB into memory",
+   "state": "open"
+  },
+  {
+   "id": "C18",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "Deeply nested data from the other side kills the background fetch",
+   "state": "open"
+  },
+  {
+   "id": "C19",
+   "area": "Transfer",
+   "level": "low",
+   "title": "A real file named X.part or X.meta can be damaged while staging",
+   "state": "open"
+  },
+  {
+   "id": "C20",
+   "area": "Transfer",
+   "level": "low",
+   "title": "Old session secrets pile up in the sender's state",
+   "state": "open"
+  },
+  {
+   "id": "C21",
+   "area": "Transfer",
+   "level": "low",
+   "title": "Pairing from the command line during a running fetch deletes its files",
+   "state": "open"
+  },
+  {
+   "id": "C22",
+   "area": "Transfer",
+   "level": "low",
+   "title": "Any Transfer window keeps a closed sender alive",
+   "state": "open"
+  },
+  {
+   "id": "C23",
+   "area": "Transfer",
+   "level": "low",
+   "title": "A paired receiver can crash the Send page's progress",
+   "state": "open"
+  },
+  {
+   "id": "C24",
+   "area": "DEVS",
+   "level": "low",
+   "title": "Slow connections can tie up the DEVS server",
+   "state": "open"
+  },
+  {
+   "id": "C25",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "A paired sender can place start-up programs and login keys (by design; now listed)",
+   "state": "open"
+  }
+ ]
 }

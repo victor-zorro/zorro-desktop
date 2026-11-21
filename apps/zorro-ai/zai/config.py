@@ -19,21 +19,38 @@ def valid_engine(value):
     """auto, an engine name, or local:<model id>"""
     if value == 'auto' or value in ENGINES:
         return True
-    return isinstance(value, str) and value.startswith('local:') and len(value) > len('local:')
+    return isinstance(value, str) and value.startswith('local:') and known_model(value[6:])
+
+
+def known_model(model_id):
+    """only models from the catalogue: an id never becomes a path of its own"""
+    from . import models
+    return any(m.get('id') == model_id for m in models.catalogue())
 
 
 def load():
+    """the saved settings. A setting that is not understood is skipped, the rest still
+    counts; a file that cannot be read at all means: nothing leaves this laptop"""
     cfg = json.loads(json.dumps(DEFAULTS))
     try:
         saved = json.loads(paths.config_file().read_text())
+    except FileNotFoundError:
+        return cfg
     except (OSError, ValueError):
-        return cfg
+        saved = None
     if not isinstance(saved, dict):
+        cfg['local_only'] = True
         return cfg
-    try:
-        return merged(cfg, saved)
-    except BadSetting:
-        return cfg
+    for key, value in saved.items():
+        parts = [{key: {place: engine}} for place, engine in value.items()] \
+            if key == 'places' and isinstance(value, dict) else [{key: value}]
+        for part in parts:
+            try:
+                cfg = merged(cfg, part)
+            except BadSetting:
+                if key == 'local_only':
+                    cfg['local_only'] = True
+    return cfg
 
 
 def merged(cfg, changes):
@@ -49,8 +66,8 @@ def merged(cfg, changes):
                 raise BadSetting('local_only must be true or false')
             out[key] = value
         elif key in ('local_model', 'local_model_battery'):
-            if value is not None and not (isinstance(value, str) and value):
-                raise BadSetting(f'{key} must be a model id or null')
+            if value is not None and not (isinstance(value, str) and known_model(value)):
+                raise BadSetting(f'{key} must be a model from the list, or null')
             out[key] = value
         else:
             raise BadSetting(f'unknown setting: {key}')
