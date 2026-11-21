@@ -19,6 +19,9 @@ Lock socket: client sends 'lock', gets 'locked' (screen is safe) and 'unlocked'.
 Face:   with zorro-face (IR camera) set up and a face learned, the greeter shows a face
         icon; pressing it checks the face (the password keeps working meanwhile).
         /etc/zorro-face.json: "lock" and "login" (both on) say where the icon shows.
+        After a boot or a hibernate the password is needed once first (like a phone):
+        a right password leaves /run/zorro-dm/password-ok/USER, which a reboot clears
+        and the system-sleep hook (zorro-dm.sleep) removes before hibernating.
 """
 import configparser
 import fcntl
@@ -63,6 +66,7 @@ VT_ACTIVATE, VT_WAITACTIVE, VT_LOCKSWITCH, VT_UNLOCKSWITCH = 0x5606, 0x5607, 0x5
 FACE = '/usr/local/bin/zorro-face'
 FACE_CONF = '/etc/zorro-face.json'
 FACE_DATA = '/var/lib/zorro-face'
+PW_OK = f'{RUN}/password-ok'          # users who typed their password since boot / hibernate
 FACE_TRIES = 3                          # face checks per login / unlock round, then password only
 
 
@@ -295,8 +299,22 @@ class FaceCheck:
         except (OSError, ValueError):
             c = {}
         on = c.get('lock', True) if mode == 'lock' else c.get('login', True)
-        return bool(on and user and os.access(FACE, os.X_OK)
+        return bool(on and user and FaceCheck.password_typed(user) and os.access(FACE, os.X_OK)
                     and os.path.exists(f'{FACE_DATA}/{user}.npy'))
+
+    @staticmethod
+    def password_typed(user):
+        """the password was typed once since the last boot / hibernate"""
+        return '/' not in user and os.path.exists(f'{PW_OK}/{user}')
+
+    @staticmethod
+    def remember_password(user):
+        if user and '/' not in user:
+            try:
+                os.makedirs(PW_OK, mode=0o700, exist_ok=True)
+                open(f'{PW_OK}/{user}', 'w').close()
+            except OSError as e:
+                log('could not note the password login:', e)
 
     WHY = {1: 'face not recognised', 2: 'no face learned for this user',
            3: 'camera not found', 4: 'camera light not working'}
@@ -449,11 +467,15 @@ class DM:
             self.send(type='face', state='available' if on else 'none')
 
         def look():
-            nonlocal face, face_at, face_tries
+            nonlocal face, face_at, face_tries, face_user
             if face and not face.done:
                 return                  # still looking: its answer comes
             if face_tries >= FACE_TRIES:
                 self.send(type='face', state='none', why='type your password')
+                return
+            if face_user and not FaceCheck.password_typed(face_user):
+                face_user = None            # hibernated meanwhile: the password first
+                self.send(type='face', state='none', why='after a restart: type your password once')
                 return
             if not face_user or time.monotonic() - face_at < 1:
                 self.send(type='face', state='fail',             # the page waits for an answer
@@ -487,6 +509,8 @@ class DM:
                 result = None if mode == 'login' else False
                 break
             if kind == 'auth_done':
+                if m.ok:
+                    FaceCheck.remember_password(m.user)
                 if m is login:
                     self.send(type='complete', ok=m.ok)
                 continue

@@ -1,0 +1,9 @@
+#!/bin/sh
+# zorro-dm: after a hibernate the password is needed once again (no face unlock
+# until then), like after a boot. A short sleep (suspend) keeps face unlock.
+# suspend-then-hibernate tells which one it is doing in SYSTEMD_SLEEP_ACTION.
+[ "$1" = pre ] || exit 0
+case "${SYSTEMD_SLEEP_ACTION:-$2}" in
+  hibernate|hybrid-sleep) rm -rf /run/zorro-dm/password-ok ;;
+esac
+exit 0

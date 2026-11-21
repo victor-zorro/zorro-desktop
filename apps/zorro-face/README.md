@@ -37,3 +37,8 @@ Learn your face in the Zorro app → Look → Face unlock (asks your password).
 The login and lock screen show a small face icon under the password field (only when a
 face is learned); pressing it runs `zorro-face verify USER` in zorro-dm. Nothing scans by
 itself, and the password keeps working while it looks.
+
+After a boot or a hibernate the password is needed once first, like on a phone: until
+then the face icon stays away. A normal sleep (lid closed, suspend) keeps face unlock.
+zorro-dm notes a right password in `/run/zorro-dm/password-ok/USER` (gone at reboot);
+its system-sleep hook (`apps/zorro-dm/zorro-dm.sleep`) removes it before a hibernate.

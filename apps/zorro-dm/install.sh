@@ -14,6 +14,8 @@ install -Dm755 zorro-greeter /usr/local/bin/zorro-greeter
 install -Dm755 zorro-lock /usr/local/bin/zorro-lock
 for f in pam/*; do install -Dm644 "$f" "/etc/pam.d/$(basename "$f")"; done
 install -Dm644 zorro-dm.service /etc/systemd/system/zorro-dm.service
+# hibernate: the password once again before face unlock
+install -Dm755 zorro-dm.sleep /usr/lib/systemd/system-sleep/zorro-dm
 rm -rf /usr/share/zorro-dm/theme
 mkdir -p /usr/share/zorro-dm
 cp -r theme /usr/share/zorro-dm/theme
