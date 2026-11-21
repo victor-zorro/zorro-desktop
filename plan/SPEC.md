@@ -80,6 +80,20 @@ Config `~/.config/zorro-ai/config.json`:
 
 The Mistral key lives in `~/.config/zorro-ai/mistral.key` (0600), never in the repo.
 
+## The chat, shared by the Dialer and Intelligence
+
+One conversation, two views. It lives in `~/.local/state/zorro-intel/chat.json`
+(0600, atomic writes): `{"messages": [{"role": "user"|"assistant", "content": "…",
+"at": "2026-11-21T12:00:00", "engine": "claude", "sent": ["/path"]}]}`. Both apps
+re-read it when it changes and append to it; "New chat" empties it (the old one moves
+to `chats/<time>.json` next to it). At most the last 20 messages go to the engine.
+
+## Settings the Dialer reads
+
+`~/.config/zorro-thinkpad/config.json`: `music_outputs` = the Bluetooth addresses
+ticked in System → Bluetooth (`["AA:BB:…"]`) for the Music part's output picker.
+`~/.config/zorro-dial/config.json`: `ai_view` = `history` | `last`.
+
 ## DEVS: the data
 
 Items are files: `~/.local/share/zorro-devs/items/<id>.json`, the folder is a git
