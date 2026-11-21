@@ -1,9 +1,10 @@
 """zorro-ai: the one AI service every Zorro app asks.
 
   zorro-ai serve                  the service (zorro-ai.service), on $XDG_RUNTIME_DIR/zorro-ai.sock
-  zorro-ai ask [--place P] [--engine E] TEXT...
+  zorro-ai ask [--place P] [--engine E] [--model M] TEXT...
                                   ask a question; the answer streams to the terminal
                                   P: dialer | intel | devs   E: claude | mistral | local | local:MODEL_ID
+                                  M: haiku | sonnet | opus | default (Claude's model; the place's own if left out)
   zorro-ai status                 JSON: engines (ready, why), local models, settings
   zorro-ai models                 the local models: size, downloaded or not, measured speed
   zorro-ai pull MODEL_ID          download a local model (continues a download that was cut off)
@@ -19,7 +20,7 @@ import signal
 import sys
 import threading
 
-from . import client, install_local, models, service
+from . import client, config, install_local, models, service
 from .download import DownloadError, fetch, progress_line
 from .engines import all_engines
 from .server import Server
@@ -81,7 +82,7 @@ def _show(reply):
 
 
 def ask(args):
-    request = {'op': 'ask', 'place': args.place, 'engine': args.engine, 'context': [],
+    request = {'op': 'ask', 'place': args.place, 'engine': args.engine, 'model': args.model, 'context': [],
                'messages': [{'role': 'user', 'content': ' '.join(args.text)}]}
     code = 1
     try:
@@ -136,6 +137,7 @@ def parser():
     a = sub.add_parser('ask')
     a.add_argument('--place', default='dialer', choices=service.PLACES)
     a.add_argument('--engine', default=None)
+    a.add_argument('--model', default=None, choices=config.CLAUDE_MODELS)
     a.add_argument('text', nargs='+')
     sub.add_parser('status')
     sub.add_parser('models')

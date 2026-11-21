@@ -5,6 +5,10 @@ ENGINES = {'claude': 'Claude', 'mistral': 'Mistral cloud', 'local': 'On this lap
 CHOICES = {'auto': 'Automatic', **ENGINES}
 PLACES = {'dialer': 'Dialer', 'intel': 'Intelligence', 'devs': 'DEVS'}
 
+CLAUDE_MODELS = {'haiku': 'Haiku (fast, light)', 'sonnet': 'Sonnet (balanced)',
+                 'opus': 'Opus (most capable)', 'default': 'Program default'}
+SUGGESTED_CLAUDE = {'dialer': 'haiku', 'intel': 'sonnet', 'devs': 'sonnet'}   # used when the service sends none
+
 REASONS = (('not installed', 'the claude program is not installed'),
            ('no key', 'no key yet: see Mistral key'),
            ('llama-server', 'the local engine is not installed: see Local models'),
@@ -17,6 +21,23 @@ def choice(value):
     if isinstance(value, str) and value.startswith('local:'):
         return 'local'
     return value if value in CHOICES else 'auto'
+
+
+def claude_options(place, suggested=None):
+    """{id: label} for the Claude model combo of one place; the suggested one says so"""
+    suggested = (suggested or SUGGESTED_CLAUDE).get(place)
+    return {key: f'{label} (suggested)' if key == suggested else label for key, label in CLAUDE_MODELS.items()}
+
+
+def claude_choice(settings, place, suggested=None):
+    """the Claude model id to show for a place: the setting, else the suggestion"""
+    value = ((settings or {}).get('claude_models') or {}).get(place)
+    return value if value in CLAUDE_MODELS else (suggested or SUGGESTED_CLAUDE).get(place, 'default')
+
+
+def claude_change(place, value):
+    """the settings request for one place's Claude model"""
+    return {'claude_models': {place: value}}
 
 
 def why(text):

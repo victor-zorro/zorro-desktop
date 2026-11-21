@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import threading
 
+from .. import config
 from . import EngineError, context_text, on_stop
 
 SYSTEM = ('You are the assistant built into a Linux desktop. Answer the question directly, in plain '
@@ -50,11 +51,16 @@ def end_group(proc):
 class Claude:
     name, title, host = 'claude', 'Claude', 'api.anthropic.com'
 
-    def __init__(self, program='claude'):
+    def __init__(self, program='claude', choice=None):
         self.program = program
+        self.choice = choice if choice in config.CLAUDE_MODELS else 'default'
+
+    def use(self, choice):
+        """the same engine, held to one model choice (haiku, sonnet, opus or default)"""
+        return Claude(self.program, choice)
 
     def model(self):
-        return 'claude'
+        return 'claude' if self.choice == 'default' else f'claude {self.choice}'
 
     def ready(self):
         if not shutil.which(self.program):
@@ -63,9 +69,10 @@ class Claude:
 
     def ask(self, messages, context, on_text, stop_event):
         system, prompt = prompt_text(messages, context)
+        wanted = [] if self.choice == 'default' else ['--model', self.choice]
         with tempfile.TemporaryDirectory(prefix='zorro-ai-') as empty, tempfile.TemporaryFile('w+') as errors:
             try:
-                proc = subprocess.Popen([self.program, *FLAGS, '--system-prompt', system], cwd=empty,
+                proc = subprocess.Popen([self.program, *FLAGS, *wanted, '--system-prompt', system], cwd=empty,
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=errors, text=True, start_new_session=True)
             except OSError as e:

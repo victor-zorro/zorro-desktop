@@ -26,6 +26,7 @@ MODELS = [
      'good_for': 'the best answers that fit this laptop; slowest', 'speed': 'not measured yet'},
 ]
 SETTINGS = {'places': {'dialer': 'auto', 'intel': 'auto', 'devs': 'claude'},
+            'claude_models': {'dialer': 'haiku', 'intel': 'sonnet', 'devs': 'sonnet'},
             'local_only': False, 'local_model': None, 'local_model_battery': None}
 ENGINES = {'claude': {'ready': True, 'why': '', 'model': 'claude-test'},
            'mistral': {'ready': False, 'why': 'has no key yet (put your Mistral API key in ...)', 'model': 'mistral-test'},
@@ -95,7 +96,8 @@ class FakeAI(SocketService):
             self.ask(request, send)
         elif op == 'status':
             send({'type': 'status', 'engines': self.engines, 'models': self.models,
-                  'settings': self.settings, 'on_battery': False})
+                  'settings': self.settings, 'claude_suggested': dict(SETTINGS['claude_models']),
+                  'on_battery': False})
         elif op == 'models':
             send({'type': 'models', 'models': self.models})
         elif op == 'settings':
@@ -108,8 +110,8 @@ class FakeAI(SocketService):
             if key not in self.settings:
                 send({'type': 'error', 'code': 'bad_setting', 'message': f'unknown setting: {key}'})
                 return
-            if key == 'places':
-                self.settings['places'].update(value)
+            if key in ('places', 'claude_models'):
+                self.settings[key].update(value)
             else:
                 self.settings[key] = value
         send({'type': 'settings', 'settings': self.settings})

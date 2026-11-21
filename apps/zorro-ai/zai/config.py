@@ -7,7 +7,11 @@ from . import paths
 
 PLACES = ('dialer', 'intel', 'devs')
 ENGINES = ('claude', 'mistral', 'local')
+CLAUDE_MODELS = ('haiku', 'sonnet', 'opus', 'default')     # default = what the claude program uses itself
+SUGGESTED_CLAUDE = {'dialer': 'haiku', 'intel': 'sonnet', 'devs': 'sonnet'}
+PER_PLACE = ('places', 'claude_models')
 DEFAULTS = {'places': {'dialer': 'auto', 'intel': 'auto', 'devs': 'claude'},
+            'claude_models': dict(SUGGESTED_CLAUDE),
             'local_only': False, 'local_model': None, 'local_model_battery': None}
 
 
@@ -42,8 +46,8 @@ def load():
         cfg['local_only'] = True
         return cfg
     for key, value in saved.items():
-        parts = [{key: {place: engine}} for place, engine in value.items()] \
-            if key == 'places' and isinstance(value, dict) else [{key: value}]
+        parts = [{key: {place: one}} for place, one in value.items()] \
+            if key in PER_PLACE and isinstance(value, dict) else [{key: value}]
         for part in parts:
             try:
                 cfg = merged(cfg, part)
@@ -61,6 +65,8 @@ def merged(cfg, changes):
     for key, value in changes.items():
         if key == 'places':
             _merge_places(out['places'], value)
+        elif key == 'claude_models':
+            _merge_claude_models(out['claude_models'], value)
         elif key == 'local_only':
             if not isinstance(value, bool):
                 raise BadSetting('local_only must be true or false')
@@ -83,6 +89,17 @@ def _merge_places(places, value):
         if not valid_engine(engine):
             raise BadSetting(f'unknown engine for {place}: {engine}')
         places[place] = engine
+
+
+def _merge_claude_models(chosen, value):
+    if not isinstance(value, dict):
+        raise BadSetting('claude_models must be an object')
+    for place, model in value.items():
+        if place not in PLACES:
+            raise BadSetting(f'unknown place: {place}')
+        if model not in CLAUDE_MODELS:
+            raise BadSetting(f'unknown Claude model for {place}: {model}')
+        chosen[place] = model
 
 
 def save(cfg):

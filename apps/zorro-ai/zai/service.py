@@ -35,7 +35,7 @@ def status(engines):
             ok, why = router.check(engine)
         state[name] = {'ready': ok, 'why': why, 'model': engine.model()}
     return {'type': 'status', 'engines': state, 'models': models.listing(), 'settings': config.load(),
-            'on_battery': models.on_battery()}
+            'claude_suggested': config.SUGGESTED_CLAUDE, 'on_battery': models.on_battery()}
 
 
 def settings(request, send):
@@ -59,6 +59,8 @@ def _checked(request):
         raise ValueError('context must be a list of {path, text}')
     if not in_turns(messages):
         raise ValueError('there is no question in messages')
+    if request.get('model') not in (None, *config.CLAUDE_MODELS):
+        raise ValueError(f'unknown Claude model: {request.get("model")}')
     return place, messages, context
 
 
@@ -69,7 +71,8 @@ def ask(request, send, stop_event, engines):
         error(send, 'bad_request', str(e))
         return
     try:
-        usable, note = router.plan(config.load(), place, request.get('engine'), engines)
+        usable, note = router.plan(config.load(), place, request.get('engine'), engines,
+                                  request.get('model'))
     except router.NoEngine as e:
         error(send, 'no_engine', str(e))
         return

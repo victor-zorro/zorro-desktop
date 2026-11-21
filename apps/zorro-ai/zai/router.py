@@ -26,7 +26,7 @@ def _wanted(cfg, place, forced):
     return choice, None
 
 
-def plan(cfg, place, forced, engines):
+def plan(cfg, place, forced, engines, claude_model=None):
     """(engines to try in order, a note or None). NoEngine when none can answer."""
     choice, model_id = _wanted(cfg, place, forced)
     skipped = []
@@ -39,6 +39,8 @@ def plan(cfg, place, forced, engines):
         engine = engines[name]
         if name == 'local' and model_id:
             engine = engine.use(model_id)
+        if name == 'claude':
+            engine = engine.use(claude_model or cfg['claude_models'].get(place))
         ok, why = check(engine)
         if ok:
             usable.append(engine)

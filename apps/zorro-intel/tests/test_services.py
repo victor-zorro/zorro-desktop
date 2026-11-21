@@ -74,6 +74,8 @@ class AIClient(SandboxCase):
         reply = ai.change({'places': {'intel': 'local'}, 'local_only': True})
         self.assertEqual(reply['settings']['places']['intel'], 'local')
         self.assertTrue(fake.settings['local_only'])
+        reply = ai.change(wording.claude_change('devs', 'opus'))
+        self.assertEqual(reply['settings']['claude_models'], {'dialer': 'haiku', 'intel': 'sonnet', 'devs': 'opus'})
         self.assertEqual(ai.change({'colour': 'blue'})['type'], 'error')
 
 
@@ -244,6 +246,18 @@ class Helpers(SandboxCase):
         self.assertEqual(wording.plain_error('Local has no model yet (run: zorro-ai models, then zorro-ai pull ID); Claude is off'),
                          'Local has no model yet; Claude is off')
         self.assertEqual(wording.plain_error('plain'), 'plain')
+
+    def test_claude_model_choices(self):
+        options = wording.claude_options('dialer')
+        self.assertEqual(list(options), ['haiku', 'sonnet', 'opus', 'default'])
+        self.assertEqual([k for k, v in options.items() if 'suggested' in v], ['haiku'])
+        self.assertEqual([k for k, v in wording.claude_options('intel').items() if 'suggested' in v], ['sonnet'])
+        self.assertEqual([k for k, v in wording.claude_options('intel', {'intel': 'opus'}).items()
+                          if 'suggested' in v], ['opus'])
+        self.assertEqual(wording.claude_choice({'claude_models': {'intel': 'opus'}}, 'intel'), 'opus')
+        self.assertEqual(wording.claude_choice({'claude_models': {'intel': 'gpt'}}, 'intel'), 'sonnet')
+        self.assertEqual(wording.claude_choice({}, 'dialer'), 'haiku')
+        self.assertEqual(wording.claude_change('dialer', 'default'), {'claude_models': {'dialer': 'default'}})
 
 
 def ai_status():

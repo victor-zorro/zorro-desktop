@@ -10,6 +10,9 @@ engine that answered. zorro-ai never reads files itself.
   - `mistral`: Mistral's cloud. Put your API key in `~/.config/zorro-ai/mistral.key` (0600).
   - `local`: llama.cpp's `llama-server` on the laptop with a GGUF model. Started when a
     question comes, stopped after 5 idle minutes so the RAM is free again.
+- **Claude model per place:** `claude_models` in the settings: the Dialer asks `haiku`, Intelligence
+  and DEVS `sonnet` (the suggestions, used until you choose). Also `opus`, or `default` = what the
+  `claude` program picks itself. Passed as `--model` for that one answer; `start` says which.
 - **auto:** Claude; when it cannot be reached, Mistral; offline, local. A `note` line says
   when another engine answers. "Reachable" is one TCP connect of at most 2 s, remembered
   for 30 s.
@@ -27,6 +30,7 @@ engine that answered. zorro-ai never reads files itself.
 apps/zorro-ai/install.sh
 zorro-ai ask why is the sky blue
 zorro-ai ask --place intel --engine local:qwen2.5-0.5b summarise this in one line: ...
+zorro-ai ask --place dialer --model opus a harder question   # force a Claude model once
 zorro-ai status
 zorro-ai models
 zorro-ai install-local

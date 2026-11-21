@@ -11,7 +11,10 @@ conversation.
 - **Search:** search by meaning, no AI. Enter or a click opens the file; "Ask about this"
   takes one file to Ask as the only thing sent.
 - **Engines:** per place (Dialer, Intelligence, DEVS) Automatic, Claude, Mistral cloud or
-  On this laptop; the switch "Nothing leaves this laptop"; whether each engine is ready.
+  On this laptop; next to it the Claude model for that place (Haiku, Sonnet, Opus or the
+  program's own default; the Dialer starts on Haiku, the others on Sonnet, marked "suggested").
+  Lighter models answer faster and use less of your plan. The switch "Nothing leaves this
+  laptop"; whether each engine is ready.
 - **Local models:** download models (`zorro-ai pull`), install the local engine
   (`zorro-ai install-local`), choose the model on the charger and on battery. Closing the
   window stops a download; it continues where it stopped next time.

@@ -30,7 +30,7 @@ class Protocol(SandboxCase):
         self.serve(engines)
         replies = exchange(ASK)
         self.assertEqual([r['type'] for r in replies], ['start', 'text', 'text', 'done'])
-        self.assertEqual(replies[0], {'type': 'start', 'engine': 'claude', 'model': 'claude-model',
+        self.assertEqual(replies[0], {'type': 'start', 'engine': 'claude', 'model': 'haiku',
                                       'sent': ['/notes/a.md']})
         self.assertEqual(''.join(r['delta'] for r in replies if r['type'] == 'text'), 'Hello world')
         self.assertEqual(replies[-1]['engine'], 'claude')
