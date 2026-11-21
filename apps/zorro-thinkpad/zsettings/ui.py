@@ -205,6 +205,13 @@ def later(key, fn, ms=400):
     _later[key] = (GLib.timeout_add(ms, lambda: (_later.pop(key, None), fn()) and False), fn)
 
 
+def drop_later(key):
+    """forget what was waiting under this key (something newer replaces it)"""
+    waiting = _later.pop(key, None)
+    if waiting:
+        GLib.source_remove(waiting[0])
+
+
 def flush_later():
     """the window closes: do what was still waiting now"""
     for key, (tid, fn) in list(_later.items()):
@@ -216,10 +223,11 @@ def flush_later():
             print('zorro: on close:', e)
 
 
-def in_bg(fn, *args):
-    """a command in a thread, so the window never waits for it (nmcli, pactl, v4l2-ctl)"""
+def in_bg(fn, *args, finish=False):
+    """a command in a thread, so the window never waits for it (nmcli, pactl, v4l2-ctl).
+    finish: a change being saved; it still completes when the window closes meanwhile"""
     import threading
-    threading.Thread(target=fn, args=args, daemon=True).start()
+    threading.Thread(target=fn, args=args, daemon=not finish).start()
 
 
 # ---- form widgets, the same on every page (one spacing, one look) --------------------------

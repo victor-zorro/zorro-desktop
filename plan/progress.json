@@ -1,15 +1,15 @@
 {
- "updated": "2026-11-21 12:00",
+ "updated": "2026-11-21 12:50",
  "steps": [
   {
    "name": "Review before: Settings",
-   "state": "doing",
-   "note": "reviewer reading the code"
+   "state": "done",
+   "note": "46 findings in total, see Reviews"
   },
   {
    "name": "Review before: Dialer, Transfer, login",
-   "state": "doing",
-   "note": "reviewer reading the code"
+   "state": "done",
+   "note": "46 findings in total, see Reviews"
   },
   {
    "name": "Rules in the repo + check",
@@ -33,8 +33,8 @@
   },
   {
    "name": "Fix what the reviews find",
-   "state": "todo",
-   "note": ""
+   "state": "doing",
+   "note": "Settings and login fixed; Transfer being hardened; Dialer next"
   },
   {
    "name": "Every page opens in a test",

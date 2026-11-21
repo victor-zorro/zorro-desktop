@@ -19,9 +19,8 @@ Lock socket: client sends 'lock', gets 'locked' (screen is safe) and 'unlocked'.
 Face:   with zorro-face (IR camera) set up and a face learned, the greeter shows a face
         icon; pressing it checks the face (the password keeps working meanwhile).
         /etc/zorro-face.json: "lock" and "login" (both on) say where the icon shows.
-        After a boot or a hibernate the password is needed once first (like a phone):
-        a right password leaves /run/zorro-dm/password-ok/USER, which a reboot clears
-        and the system-sleep hook (zorro-dm.sleep) removes before hibernating.
+        After a boot or hibernate the password is needed once first: a right password leaves
+        /run/zorro-dm/password-ok/USER (cleared by a reboot, and by zorro-dm.sleep before hibernating).
 """
 import configparser
 import fcntl
@@ -302,14 +301,15 @@ class FaceCheck:
         return bool(on and user and FaceCheck.password_typed(user) and os.access(FACE, os.X_OK)
                     and os.path.exists(f'{FACE_DATA}/{user}.npy'))
 
+    plain_name = staticmethod(lambda user: bool(user) and '/' not in user and not user.startswith('.'))
     @staticmethod
     def password_typed(user):
         """the password was typed once since the last boot / hibernate"""
-        return '/' not in user and os.path.exists(f'{PW_OK}/{user}')
+        return FaceCheck.plain_name(user) and os.path.isfile(f'{PW_OK}/{user}')
 
     @staticmethod
     def remember_password(user):
-        if user and '/' not in user:
+        if FaceCheck.plain_name(user):
             try:
                 os.makedirs(PW_OK, mode=0o700, exist_ok=True)
                 open(f'{PW_OK}/{user}', 'w').close()
@@ -515,8 +515,8 @@ class DM:
                     self.send(type='complete', ok=m.ok)
                 continue
             if kind == 'face_ok':
-                if m is not face:
-                    continue
+                if m is not face or not FaceCheck.password_typed(m.user):
+                    continue                # also: hibernated while it was looking
                 log(f'face recognised: {m.user}')
                 if mode == 'lock':
                     result = True

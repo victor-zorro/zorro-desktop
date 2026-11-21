@@ -148,8 +148,17 @@ def cable(iface):
     if not os.path.exists(backup):
         with open(backup, 'w') as fh:
             fh.writelines(lines)
-    out = ['# zorro: NetworkManager manages this now: ' + ln if word.search(ln) and not ln.lstrip().startswith('#')
-           else ln for ln in lines]
+    out, mine = [], False
+    for ln in lines:
+        indented = ln[:1] in (' ', '\t') and ln.strip()
+        if word.search(ln) and not ln.lstrip().startswith('#'):
+            mine = ln.split()[:1] == ['iface']          # its option lines (address, gateway) follow
+            out.append('# zorro: NetworkManager manages this now: ' + ln)
+        elif mine and indented and not ln.lstrip().startswith('#'):
+            out.append('# zorro: NetworkManager manages this now: ' + ln)
+        else:
+            mine = mine and bool(indented)
+            out.append(ln)
     tmp = path + '.zorro-tmp'
     with open(tmp, 'w') as fh:
         fh.writelines(out)

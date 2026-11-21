@@ -9,6 +9,7 @@ from .base import HOME, RUNTIME, load_conf, spawn, update_conf, write_atomic
 from .look import CBLUR_MODES, CUSTOM_PRESETS, DM_DIR, LOOK_ANIMALS, animal_id, LOOK_BACKGROUNDS, LOOK_DEFAULTS, LOOK_FILE, _look_draft, custom_presets, theme_presets
 from .power import LOOK_HELPER
 
+SAVING = threading.Lock()         # one login-look save at a time: the last one asked wins
 KEEP_ON_PRESET = ('clock',)     # your own choices a look preset never changes
 from . import ui
 from .ui import Pages, heading, idle, note
@@ -97,11 +98,13 @@ class LookPages:
         for k in KEEP_ON_PRESET:
             look[k] = now.get(k, LOOK_DEFAULTS[k])
         self.theme_msg.set_text(f'Applying {p["name"]}… (your password, once)')
+        ui.drop_later('greeter-look')       # a slider change still waiting: the preset replaces it
 
         def work():
             try:
-                r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(look)],
-                                   capture_output=True, text=True, timeout=120)
+                with SAVING:
+                    r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(look)],
+                                       capture_output=True, text=True, timeout=120)
                 ok = r.returncode == 0
                 msg = (f'{p["name"]} is on: login, lock screen and wallpaper' if ok else
                        (r.stderr.strip().splitlines() or ['not applied'])[-1])
@@ -120,6 +123,8 @@ class LookPages:
         threading.Thread(target=work, daemon=True).start()
 
     def theme_done(self, msg, ok):
+        if getattr(self, 'dead', False):        # this window was rebuilt meanwhile
+            return False
         if ok:                                  # rebuild: Login & lock screen shows the new look
             app = self.get_application()
             self.destroy()
@@ -290,8 +295,9 @@ class LookPages:
 
         def work():
             try:
-                r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(self.look)],
-                                   capture_output=True, text=True, timeout=60)
+                with SAVING:                # the look as it is when its turn comes
+                    r = subprocess.run(['pkexec', LOOK_HELPER, 'greeter-look', json.dumps(self.look)],
+                                       capture_output=True, text=True, timeout=60)
                 msg = ('Saved: shows at the next login / lock' if r.returncode == 0 else
                        'Not saved (password cancelled): change something to try again' if r.returncode in (126, 127) else
                        (r.stderr.strip().splitlines() or ['failed'])[-1])
@@ -307,6 +313,7 @@ class LookPages:
         spawn([str(DM_DIR / 'zorro-greeter'), '--preview', '--look', str(path)])
 
     def look_reset(self):
+        ui.drop_later('greeter-look')
         _look_draft.update(LOOK_DEFAULTS)
         for k in KEEP_ON_PRESET:            # your own choices stay (the clock)
             _look_draft[k] = getattr(self, 'look', {}).get(k, LOOK_DEFAULTS[k])

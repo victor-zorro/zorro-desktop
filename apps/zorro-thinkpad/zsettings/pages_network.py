@@ -75,8 +75,8 @@ class NetworkPages:
         Only rebuilt when the rows really change; signal strength and such are updated in
         place, so a button is never replaced under the mouse (a rebuild between press and
         release loses the click)"""
-        struct = [(title, tuple(lb for lb, _ in acts), state) for title, _, acts, state in rows]
-        box.zcbs = [[cb for _, cb in acts] for _, _, acts, _ in rows]
+        struct = [(title, tuple(a[0] for a in acts), state) for title, _, acts, state in rows]
+        box.zcbs = [[a[1] for a in acts] for _, _, acts, _ in rows]
         if getattr(box, 'zstruct', None) == struct:
             for lab, (_, detail, _, _) in zip(box.zdetails, rows):
                 if lab is not None and lab.get_text() != detail:
@@ -86,8 +86,8 @@ class NetworkPages:
         for c in box.get_children():
             c.destroy()
         for i, (title, detail, acts, state) in enumerate(rows):
-            row = device_row(title, detail, [(label, lambda i=i, j=j: box.zcbs[i][j]())  # the newest action
-                                             for j, (label, _cb) in enumerate(acts)],
+            row = device_row(title, detail, [(a[0], lambda i=i, j=j: box.zcbs[i][j](), *a[2:])  # the newest action
+                                             for j, a in enumerate(acts)],
                              icon=icon, state=state)
             box.zdetails.append(row.zdetail)
             box.add(row)
@@ -154,25 +154,23 @@ class NetworkPages:
                 ('saved' if s in saved else ('open network' if not lock else ''))
             acts = []
             if s == cur:
-                acts.append(('Disconnect', lambda: dev.disconnect_async(None, self.net_done, 'Disconnected')))
+                acts.append(('Disconnect', lambda: dev.disconnect_async(
+                    None, self.net_done, ('disconnect_finish', 'Disconnected'))))
             else:
                 acts.append(('Connect', lambda ap=ap, s=s: self.wifi_connect(ap, s)))
             if s in saved:
                 acts.append(('Forget', lambda con=saved[s], s=s: con.delete_async(
-                    None, self.net_done, f'{s} forgotten')))
+                    None, self.net_done, ('delete_finish', f'{s} forgotten'))))
             rows.append((s, detail, acts, 'on' if s == cur else None))
         if not rows and on:
             rows.append(('No networks found', 'Click Search', [], None))
         self.net_rows(self.wifi_list, rows, 'network-wireless-symbolic')
 
-    def net_done(self, obj, res, text):
-        """finish an async libnm call and say how it went"""
+    def net_done(self, obj, res, done):
+        """finish an async libnm call and say how it went; done = (its finish call, the text)"""
+        finish, text = done
         try:
-            for fin in ('disconnect_finish', 'delete_finish', 'activate_connection_finish',
-                        'add_and_activate_connection_finish', 'request_scan_finish'):
-                if hasattr(obj, fin):
-                    getattr(obj, fin)(res)
-                    break
+            getattr(obj, finish)(res)
             self.net_msg.set_text(text)
         except GLib.Error as e:
             self.net_msg.set_text(f'Failed: {e.message}')
@@ -186,7 +184,7 @@ class NetworkPages:
         dev = self.wifi_dev()
         if dev:
             self.net_msg.set_text('Searching…')
-            dev.request_scan_async(None, self.net_done, 'Search done')
+            dev.request_scan_async(None, self.net_done, ('request_scan_finish', 'Search done'))
 
     def wifi_connect(self, ap, ssid):
         c, dev = self.net_client(), self.wifi_dev()
@@ -194,11 +192,11 @@ class NetworkPages:
         self.net_msg.set_text(f'Connecting to {ssid}…')
         if saved:
             c.activate_connection_async(saved, dev, ap.get_path(), None, self.net_done,
-                                        f'Connected to {ssid}')
+                                        ('activate_connection_finish', f'Connected to {ssid}'))
             return
         if not secured(ap):
             c.add_and_activate_connection_async(None, dev, ap.get_path(), None, self.net_done,
-                                                f'Connected to {ssid}')
+                                                ('add_and_activate_connection_finish', f'Connected to {ssid}'))
             return
         pw = self.ask_password(ssid)
         if pw is None:
@@ -210,7 +208,7 @@ class NetworkPages:
         sec.set_property('psk', pw)
         con.add_setting(sec)
         c.add_and_activate_connection_async(con, dev, ap.get_path(), None, self.net_done,
-                                            f'Connected to {ssid}')
+                                            ('add_and_activate_connection_finish', f'Connected to {ssid}'))
 
     def ask_password(self, ssid):
         d = Gtk.Dialog(title=f'Wi-Fi password for {ssid}', transient_for=self, modal=True)
@@ -245,6 +243,9 @@ class NetworkPages:
     def eth_first(self, on):
         """cable first (NetworkManager's default metric) or after Wi-Fi, on every wired connection"""
         update_conf(None, cable_first=bool(on))
+        c = self.net_client()           # libnm objects are read here, not in the worker thread
+        live = [dev.get_iface() for dev in (c.get_devices() if c else [])
+                if isinstance(dev, NM.DeviceEthernet) and dev.get_state() == NM.DeviceState.ACTIVATED]
 
         def work():
             out = []
@@ -256,10 +257,8 @@ class NetworkPages:
                 r = subprocess.run(['nmcli', 'connection', 'modify', uuid, 'ipv4.route-metric', m,
                                     'ipv6.route-metric', m], capture_output=True, text=True)
                 out.append(r.returncode == 0)
-            c = self.net_client()
-            for dev in (c.get_devices() if c else []):
-                if isinstance(dev, NM.DeviceEthernet) and dev.get_state() == NM.DeviceState.ACTIVATED:
-                    run('nmcli', 'device', 'reapply', dev.get_iface())
+            for iface in live:
+                run('nmcli', 'device', 'reapply', iface)
             msg = ('Cable first' if on else 'Wi-Fi first, the cable as backup') if out and all(out) else \
                 'No wired connection to change yet' if not out else 'Could not change it (no permission?)'
             idle(lambda: (self.eth_msg.set_text(msg), self.eth_refresh()) and False)
@@ -301,9 +300,10 @@ class NetworkPages:
             m = route_metric(iface)
             detail = f'{drv} · ' + (f'{ip4(dev)} · {speed} Mbit/s' + (f' · metric {m}' if m else '')
                                     if on else 'cable in, not connected')
-            acts = [('Disconnect', lambda d=dev: d.disconnect_async(None, self.net_done, 'Disconnected'))] \
+            acts = [('Disconnect', lambda d=dev: d.disconnect_async(
+                None, self.net_done, ('disconnect_finish', 'Disconnected')))] \
                 if on else [('Connect', lambda d=dev: c.activate_connection_async(
-                    None, d, None, None, self.net_done, 'Connected'))]
+                    None, d, None, None, self.net_done, ('activate_connection_finish', 'Connected')))]
             rows.append((iface, detail, acts, 'on' if on else None))
         self.net_rows(self.eth_list, rows or [('No wired port', '', [], None)], 'network-wired-symbolic')
 

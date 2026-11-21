@@ -27,19 +27,31 @@ def bt_session(mac, timeout=40):
                          stderr=subprocess.STDOUT, text=True, bufsize=1)
     out = []
     import select
+    fd = p.stdout.fileno()
 
     def send(cmd):
         p.stdin.write(cmd + '\n')
         p.stdin.flush()
 
+    buf, ready = [''], []               # read by hand: select() cannot see Python's own buffer
+
+    def next_line(wait):
+        """the next full line of output; '' when none came within `wait`; None at the end"""
+        if not ready and select.select([fd], [], [], wait)[0]:
+            data = os.read(fd, 4096)
+            if not data:
+                return None
+            *full, buf[0] = (buf[0] + data.decode(errors='replace')).split('\n')
+            ready.extend(full)
+        return ready.pop(0) + '\n' if ready else ''
+
     def wait_for(words, secs):
         end = time.time() + secs
         while time.time() < end:
-            r, _, _ = select.select([p.stdout], [], [], 0.5)
-            if r:
-                line = p.stdout.readline()
-                if not line:
-                    break
+            line = next_line(0.5)
+            if line is None:
+                break
+            if line:
                 out.append(line)
                 for w in words:
                     if w in line:

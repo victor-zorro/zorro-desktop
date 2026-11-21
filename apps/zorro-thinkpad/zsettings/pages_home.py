@@ -134,7 +134,11 @@ class HomePages:
 
     def bg(self, fn, then=None):
         def work():
-            res = fn()
+            try:
+                res = fn()
+            except Exception as e:      # noqa: BLE001  then() still runs: nothing stays stuck
+                print('zorro: background step failed:', e)
+                res = None
             if then:
                 idle(lambda: then(res) and False)
         threading.Thread(target=work, daemon=True).start()
@@ -276,7 +280,7 @@ class HomePages:
         for s in self.real_sinks(d):
             outs.add(self.pill(('● ' if s['name'] == cur else '') + s['desc'][:28], s['name'] == cur,
                                lambda n=s['name']: self.sound_use(n)))
-        vol_dev = next((s for s in self.real_sinks(d) if s['name'] == cur), None)
+        vol_dev = next((s for s in d['sinks'] if s['name'] == cur), None)    # also "Together"
         vol = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 150, 1)
         vol.set_hexpand(True)
         vol.set_value(vol_dev['volume'] if vol_dev else 0)
@@ -444,7 +448,6 @@ class HomePages:
         box.add(self.eq_bottom)
         box.add(note('Ten bands for everything you play, remembered per output: the Douk can '
                      'sound different from the speaker. Built into PipeWire; nothing runs while it is off.'))
-        self.eq_save_id = None
         self.eq_page_fill()
         return box
 
@@ -489,13 +492,9 @@ class HomePages:
         self.fill(self.eq_bottom, outs)
 
     def eq_changed(self):
-        if self.eq_save_id:
-            GLib.source_remove(self.eq_save_id)
         gains = [s.get_value() for s in self.eq_scales]
         target = self.eq_target
-        self.eq_save_id = GLib.timeout_add(150, lambda: (
-            setattr(self, 'eq_save_id', None),
-            threading.Thread(target=eq.set_gains, args=(target, gains), daemon=True).start()) and False)
+        ui.later('eq-save', lambda: ui.in_bg(eq.set_gains, target, gains, finish=True), 150)
 
     # -- the webcam page
     def cam_card_preview(self):

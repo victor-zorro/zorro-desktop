@@ -4,7 +4,7 @@ import time
 
 from . import audio
 from .base import load_conf
-from .ui import Pages, device_list, device_row, heading, idle, in_bg, note
+from .ui import Pages, device_list, device_row, heading, idle, in_bg, later, note
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk  # noqa: E402
@@ -110,12 +110,23 @@ class AudioPages:
             return 'You should have heard "front left" from the left and "front right" from the right.'
         self.au_bg('▶ Playing a voice on the left, then on the right…', fn)
 
+    def au_use(self, kind, name):
+        """make this the output / input; the equaliser, when on, moves along"""
+        from . import eq
+        if kind == 'sinks' and eq.settings()['on'] and eq.running():
+            eq.retarget(name)
+        else:
+            audio.use(kind, name)
+
     def au_bg(self, busy, fn):
         if busy:
             self.au_say(busy)
 
         def work():
-            msg = fn()
+            try:
+                msg = fn()
+            except Exception as e:      # noqa: BLE001  shown; the page must not stay on "…"
+                msg = f'Failed: {e}'
             idle(lambda: (self.au_say(msg or ''), self.au_refresh(force=True)) and False)
         threading.Thread(target=work, daemon=True).start()
 
@@ -133,13 +144,16 @@ class AudioPages:
                tuple((s['id'], s['sink']) for s in streams))
         self.vol_sync('sinks', sinks)
         self.vol_sync('sources', sources)
-        if sig == self.au_seen and not force:
-            return True
+        old = self.au_seen if isinstance(self.au_seen, tuple) and not force else (None, None, None)
         self.au_seen = sig
-        self.au_devices(self.au_out, 'sinks', sinks)
-        self.au_devices(self.au_in, 'sources', sources)
-        self.au_streams(sinks, streams)
-        self.au_together_list(sinks)
+        if sig[0] != old[0]:
+            self.au_devices(self.au_out, 'sinks', sinks)
+        if sig[1] != old[1]:
+            self.au_devices(self.au_in, 'sources', sources)
+        if (sig[2], sig[0]) != (old[2], old[0]):
+            self.au_streams(sinks, streams)
+        if tuple(n for n, _, _ in sig[0]) != tuple(n for n, _, _ in old[0] or ()):
+            self.au_together_list(sinks)
         return True
 
     def au_devices(self, box, kind, devs):
@@ -163,7 +177,7 @@ class AudioPages:
             acts = [mute]
             if not d['default']:
                 acts.append(('Use', lambda n=d['name'], t=d['desc']: self.au_bg(
-                    f'Switching to {t}…', lambda: (audio.use(kind, n), f'Now: {t}')[1])))
+                    f'Switching to {t}…', lambda: (self.au_use(kind, n), f'Now: {t}')[1])))
             box.add(device_row(d['desc'], what + (' · in use' if d['default'] else ''), acts,
                                icon=KIND_ICON.get(d['kind'], 'audio-card-symbolic'),
                                state='on' if d['default'] else 'off', below=[vol]))
@@ -198,11 +212,7 @@ class AudioPages:
             return                      # moved by vol_sync, not by the user
         key = (kind, name)
         self.__dict__.setdefault('vol_touched', {})[key] = time.monotonic()
-        ids = self.__dict__.setdefault('au_vol_ids', {})
-        if ids.get(key):
-            GLib.source_remove(ids[key])
-        ids[key] = GLib.timeout_add(120, lambda: (in_bg(audio.set_volume, kind, name, value),
-                                                  ids.pop(key, None)) and False)
+        later(f'volume-{kind}-{name}', lambda: in_bg(audio.set_volume, kind, name, value, finish=True), 120)
 
     def au_streams(self, sinks, streams):
         for c in self.au_play.get_children():
@@ -212,14 +222,16 @@ class AudioPages:
             for d in sinks:
                 combo.append(d['name'], d['desc'])
             combo.set_active_id(s['sink'])
-            combo.connect('changed', lambda w, i=s['id'], a=s['app']: self.au_bg(
-                f'Moving {a}…', lambda: (audio.move(i, w.get_active_id()),
-                                        f'{a} → {w.get_active_text()}')[1]))
+            combo.connect('changed', lambda w, i=s['id'], a=s['app']: self.au_move(
+                i, a, w.get_active_id(), w.get_active_text()))
             what = s['what'][:80] if s['what'] and s['what'] != '(null)' else ''
             self.au_play.add(device_row(s['app'], what, [combo]))
         if not streams:
             self.au_play.add(note('Nothing is playing right now.'))
         self.au_play.show_all()
+
+    def au_move(self, stream, app, sink, sink_text):
+        self.au_bg(f'Moving {app}…', lambda: (audio.move(stream, sink), f'{app} → {sink_text}')[1])
 
     def au_together_list(self, sinks):
         for c in self.au_tog.get_children():

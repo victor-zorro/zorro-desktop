@@ -144,3 +144,5 @@ textarea { width: 100%; min-height: 58px; resize: vertical; background: var(--bg
 .card ol { margin: 0; padding-left: 20px; display: grid; gap: 5px }
 .card a { color: var(--cyan) }
 pre.block { display: block; margin: 0; padding: 10px 12px; overflow-x: auto; white-space: pre; user-select: all }
+.scrollbox { max-height: 46vh; overflow-y: auto; padding-right: 4px }
+.step.problem .s::before { content: "fix "; }

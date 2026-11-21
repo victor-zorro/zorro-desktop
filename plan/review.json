@@ -1,0 +1,327 @@
+{
+ "before": [
+  {
+   "id": "S1",
+   "area": "Settings",
+   "level": "high",
+   "title": "Ethernet list crashes when the cable is not managed by NetworkManager; NetBird and Wi-Fi stop refreshing",
+   "state": "fixed"
+  },
+  {
+   "id": "S2",
+   "area": "Settings",
+   "level": "high",
+   "title": "Power tab puts back an old power mode after Home changed it",
+   "state": "fixed"
+  },
+  {
+   "id": "S3",
+   "area": "Settings",
+   "level": "high",
+   "title": "Mobile: an action pressed while the modem is busy is silently dropped (the PIN too)",
+   "state": "fixed"
+  },
+  {
+   "id": "S4",
+   "area": "Settings",
+   "level": "high",
+   "title": "Closing the window loses changes still waiting to be saved (info circle, windows, icons, equaliser, volume)",
+   "state": "fixed"
+  },
+  {
+   "id": "S5",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Login look: two saves can run at once and the older one can win",
+   "state": "fixed"
+  },
+  {
+   "id": "S6",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Audio \u2192 Use ignores the equaliser, Home then shows the wrong output",
+   "state": "fixed"
+  },
+  {
+   "id": "S7",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Wi-Fi errors (wrong password) were never shown",
+   "state": "fixed"
+  },
+  {
+   "id": "S8",
+   "area": "Settings",
+   "level": "medium",
+   "title": "A hanging root helper cannot be stopped by the app (mobile, power, look)",
+   "state": "later (in DEVS)"
+  },
+  {
+   "id": "S9",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Red dot: the app and the key service both write it, the wrong pattern can stay",
+   "state": "fixed"
+  },
+  {
+   "id": "S10",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Audio lists rebuild on every change: unsaved ticks reset, open menus close",
+   "state": "fixed"
+  },
+  {
+   "id": "S11",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Home volume slider does nothing when \"Together\" is the output",
+   "state": "fixed"
+  },
+  {
+   "id": "S12",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Widgets read from worker threads (audio, face, network)",
+   "state": "fixed"
+  },
+  {
+   "id": "S13",
+   "area": "Settings",
+   "level": "low",
+   "title": "Bluetooth pairing can say \"failed\" although it worked",
+   "state": "fixed"
+  },
+  {
+   "id": "S14",
+   "area": "Settings",
+   "level": "medium",
+   "title": "Slow commands on the window's thread at start (webcam, equaliser, notes scan, fonts)",
+   "state": "later (in DEVS)"
+  },
+  {
+   "id": "S15",
+   "area": "Settings",
+   "level": "low",
+   "title": "Equaliser off waits 3 seconds for nothing (audio gap)",
+   "state": "fixed"
+  },
+  {
+   "id": "S16",
+   "area": "Settings",
+   "level": "low",
+   "title": "\"Use the cable\" breaks a hand-made static network setup",
+   "state": "fixed"
+  },
+  {
+   "id": "S17",
+   "area": "Settings",
+   "level": "low",
+   "title": "Hardware list can show the state from before your click",
+   "state": "fixed"
+  },
+  {
+   "id": "S18",
+   "area": "Settings",
+   "level": "low",
+   "title": "Printers: \"Added\" / \"Forgotten\" message is wiped at once",
+   "state": "fixed"
+  },
+  {
+   "id": "S19",
+   "area": "Settings",
+   "level": "low",
+   "title": "Theme apply can make a second, ownerless window",
+   "state": "fixed"
+  },
+  {
+   "id": "S20",
+   "area": "Settings",
+   "level": "low",
+   "title": "Windows apply: a change can be missed, or half written when closing",
+   "state": "fixed"
+  },
+  {
+   "id": "S21",
+   "area": "Settings",
+   "level": "medium",
+   "title": "A missing command leaves parts of the app stuck on \"\u2026\"",
+   "state": "fixed"
+  },
+  {
+   "id": "T1",
+   "area": "Transfer",
+   "level": "critical",
+   "title": "A sending device can make the receiver write (and delete) outside the transfer folder",
+   "state": "being fixed"
+  },
+  {
+   "id": "T2",
+   "area": "Transfer",
+   "level": "critical",
+   "title": "Keys and logins arrive readable by other users; SSH keys unusable; scripts lose their run bit",
+   "state": "being fixed"
+  },
+  {
+   "id": "T3",
+   "area": "Transfer",
+   "level": "high",
+   "title": "Old sessions never expire: a device that once received can come back for everything",
+   "state": "being fixed"
+  },
+  {
+   "id": "T4",
+   "area": "Transfer",
+   "level": "high",
+   "title": "One unreadable file makes the transfer retry for ever",
+   "state": "being fixed"
+  },
+  {
+   "id": "T5",
+   "area": "Transfer",
+   "level": "high",
+   "title": "The receiver takes files it did not ask for, and writes through linked folders into the repo",
+   "state": "being fixed"
+  },
+  {
+   "id": "T6",
+   "area": "Transfer",
+   "level": "high",
+   "title": "Files are not checked after transfer (a damaged or cut file counts as done)",
+   "state": "being fixed"
+  },
+  {
+   "id": "T7",
+   "area": "Transfer",
+   "level": "high",
+   "title": "The 6-digit code can be guessed without limit",
+   "state": "being fixed"
+  },
+  {
+   "id": "T8",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "The window freezes or stops updating while comparing received files",
+   "state": "being fixed"
+  },
+  {
+   "id": "T9",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "\"Close the apps\" loop on any permission error; other errors stop the background step",
+   "state": "being fixed"
+  },
+  {
+   "id": "T10",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "Two fetches can run at once and damage a file",
+   "state": "being fixed"
+  },
+  {
+   "id": "T11",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "After a sender ended, the next \"Send\" stops within a second",
+   "state": "being fixed"
+  },
+  {
+   "id": "T12",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "The sender stops under a reopened window",
+   "state": "being fixed"
+  },
+  {
+   "id": "T13",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "Folders of abandoned transfers (with copied keys) are never removed",
+   "state": "being fixed"
+  },
+  {
+   "id": "T14",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "On Ubuntu 24.04 pairing hangs (needs Python 3.13)",
+   "state": "being fixed"
+  },
+  {
+   "id": "T15",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "Wi-Fi names/passwords with : or \\\\ import wrong; password visible on a command line",
+   "state": "being fixed"
+  },
+  {
+   "id": "T16",
+   "area": "Transfer",
+   "level": "medium",
+   "title": "Bad data from the other side leaves the window on \"Connecting\u2026\"",
+   "state": "being fixed"
+  },
+  {
+   "id": "D17",
+   "area": "Dialer",
+   "level": "medium",
+   "title": "Notes and Files both have \"Recent\": one shows the other's items",
+   "state": "open"
+  },
+  {
+   "id": "D18",
+   "area": "Dialer",
+   "level": "medium",
+   "title": "An action finishing after you switched part lands in the wrong part",
+   "state": "open"
+  },
+  {
+   "id": "D19",
+   "area": "Dialer",
+   "level": "medium",
+   "title": "A big image preview freezes the Dialer (and the whole desktop while it holds the keys)",
+   "state": "open"
+  },
+  {
+   "id": "D20",
+   "area": "Dialer",
+   "level": "low",
+   "title": "Parts refreshed while being drawn: a broken frame; early Music buttons do nothing",
+   "state": "open"
+  },
+  {
+   "id": "D21",
+   "area": "Dialer",
+   "level": "low",
+   "title": "A hung network folder blocks that part until the Dialer restarts",
+   "state": "open"
+  },
+  {
+   "id": "D22",
+   "area": "Dialer",
+   "level": "high",
+   "title": "A broken config makes the next Super press kill the Dialer",
+   "state": "open"
+  },
+  {
+   "id": "D23",
+   "area": "Dialer",
+   "level": "low",
+   "title": "A slow leak on every opening",
+   "state": "open"
+  },
+  {
+   "id": "L24",
+   "area": "Login",
+   "level": "low",
+   "title": "A face check started just before hibernate could still unlock after it",
+   "state": "fixed"
+  },
+  {
+   "id": "L25",
+   "area": "Login",
+   "level": "low",
+   "title": "Password marker check accepts \".\" names (harmless today)",
+   "state": "fixed"
+  }
+ ],
+ "after": []
+}

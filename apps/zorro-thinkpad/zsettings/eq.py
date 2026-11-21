@@ -84,8 +84,9 @@ def running():
     try:
         pid = int(PIDFILE.read_text())
         os.kill(pid, 0)
-        return pid
-    except (OSError, ValueError):
+        state = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0]
+        return None if state == 'Z' else pid      # ended, only not collected by its parent yet
+    except (OSError, ValueError, IndexError):
         return None
 
 

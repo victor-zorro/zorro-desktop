@@ -37,14 +37,11 @@ class DesktopPages:
             cur.update(pending)
             pending.clear()
             write_atomic(orb.CONF, json.dumps(cur, indent=2) + '\n')
-            self.orb_save_id = None
             return False
 
         def save(**kv):                     # sliders: write once they rest (0.3 s)
             pending.update(kv)
-            if getattr(self, 'orb_save_id', None):
-                GLib.source_remove(self.orb_save_id)
-            self.orb_save_id = GLib.timeout_add(300, flush)
+            ui.later('orb-save', flush, 300)
 
         def combo(current, on_change, options):
             cb = Gtk.ComboBoxText()
@@ -239,9 +236,7 @@ class DesktopPages:
                     cur = orb.load_conf()
                     cur['text_colour'] = value
                     write_atomic(orb.CONF, json.dumps(cur, indent=2) + '\n')
-            if self.win_apply_id:
-                GLib.source_remove(self.win_apply_id)
-            self.win_apply_id = GLib.timeout_add(600, self.windows_apply)
+            ui.later('win-apply', self.windows_apply, 600)
 
         fams = sorted({l.split(',')[0].strip() for l in run('fc-list', ':', 'family').splitlines()
                        if l.strip() and 'Emoji' not in l})
@@ -272,7 +267,6 @@ class DesktopPages:
         icon_col.connect('format-value', lambda w, v: 'black and white' if v < 0.01 else
                          'full colour' if v > 0.99 else f'{v * 100:.0f}% colour')
         build = APPS / 'zorro-icons' / 'build-icons'
-        self.icon_build_id = None
 
         style = Gtk.ComboBoxText()
         for k, v in (('official', 'Official app icons'),
@@ -284,13 +278,10 @@ class DesktopPages:
             update_conf(None, icon_opacity=round(icon_op.get_value(), 2),
                         icon_style=style.get_active_id() or 'official',
                         icon_colour=round(icon_col.get_value(), 2))
-            if self.icon_build_id:
-                GLib.source_remove(self.icon_build_id)
-            self.icon_build_id = GLib.timeout_add(700, lambda: (
-                spawn([str(build), '--opacity', str(round(icon_op.get_value(), 2)),
-                       '--style', style.get_active_id() or 'official',
-                       '--colour', str(round(icon_col.get_value(), 2))]),
-                setattr(self, 'icon_build_id', None)) and False)
+            args = [str(build), '--opacity', str(round(icon_op.get_value(), 2)),
+                    '--style', style.get_active_id() or 'official',
+                    '--colour', str(round(icon_col.get_value(), 2))]
+            ui.later('icon-build', lambda: spawn(args), 700)
         style.connect('changed', icons_changed)
         icon_op.connect('value-changed', icons_changed)
         icon_col.connect('value-changed', icons_changed)
@@ -321,14 +312,11 @@ class DesktopPages:
         box = Pages()
         c = win_conf()
         self.win_c = c
-        self.win_apply_id = None
 
         def setv(key, value):
             c[key] = value
             update_conf('windows', **{key: value})
-            if self.win_apply_id:
-                GLib.source_remove(self.win_apply_id)
-            self.win_apply_id = GLib.timeout_add(400, self.windows_apply)
+            ui.later('win-apply', self.windows_apply, 400)
 
         grid = ui.form
 
@@ -373,27 +361,33 @@ class DesktopPages:
 
     def windows_apply(self):
         """one worker at a time; changes made meanwhile cause one more run after it"""
-        self.win_apply_id = None
         self.win_msg.set_text('Applying…')
-        if getattr(self, 'win_busy', False):
-            self.win_again = True
-            return False
-        self.win_busy, self.win_again = True, False
+        lock = self.__dict__.setdefault('win_lock', threading.Lock())
+        with lock:
+            if getattr(self, 'win_busy', False):
+                self.win_again = True
+                return False
+            self.win_busy, self.win_again = True, False
+
+        def again():
+            with lock:
+                more, self.win_again = self.win_again, False
+                self.win_busy = more
+                return more
 
         def work():
-            while True:
+            for _round in range(20):        # a change during a run: once more, not for ever
                 try:
                     apply_windows()
                 except Exception as e:      # noqa: BLE001 - shown to the user
                     idle(self.win_msg.set_text, f'Failed: {e}')
-                if not self.win_again:
+                if not again():
                     break
-                self.win_again = False
             self.win_busy = False
             idle(self.win_msg.set_text, 'Applied' if shutil.which('picom') or
                           not self.win_c['compositor'] else
                           'Title bars applied; transparency needs: sudo apt install picom')
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=work).start()       # not a daemon: it finishes when you close
         return False
 
     # -- the dial launcher (apps/zorro-dial)

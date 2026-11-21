@@ -90,7 +90,7 @@ class ThinkpadPages:
                 combo.set_active_id('balanced')
             self.prof[key] = combo
             # applies on its own, like the mode pills on Home (one helper call per change)
-            combo.connect('changed', lambda w: later('power', lambda: self.on_power_apply(None), 300))
+            combo.connect('changed', lambda w, key=key: self.power_changed(key))
             grid.attach(Gtk.Label(label=label, xalign=0), 0, i, 1, 1)
             grid.attach(combo, 1, i, 1, 1)
         box.add(grid)
@@ -101,8 +101,7 @@ class ThinkpadPages:
         lo = tlp.get('START_CHARGE_THRESH_BAT0', '75')
         self.charge = 'full' if lo in ('0', '95', '96') else 'long'
         box.add(radios([(k, v[0]) for k, v in CHARGE_PRESETS.items()], self.charge,
-                       lambda k: (setattr(self, 'charge', k),
-                                  later('power', lambda: self.on_power_apply(None), 300))))
+                       lambda k: (setattr(self, 'charge', k), self.power_changed('charge'))))
         box.add(note('Keeping a battery below 80% most of the time makes it last years longer.'))
 
         box.add(heading('Screen stays on', 'Screen on'))
@@ -125,8 +124,27 @@ class ThinkpadPages:
         self.refresh()
         return box
 
+    def power_changed(self, what):
+        """you changed this one here; the rest is sent as it is now (Home may have changed it)"""
+        if getattr(self, 'power_syncing', False):
+            return
+        self.power_touched = getattr(self, 'power_touched', set()) | {what}
+        later('power', lambda: self.on_power_apply(None), 300)
+
     def on_power_apply(self, _b):
-        _, lo, hi = CHARGE_PRESETS[self.charge]
+        touched, self.power_touched = getattr(self, 'power_touched', set()), set()
+        tlp = tlp_settings()
+        self.power_syncing = True
+        for key, combo in self.prof.items():
+            now = tlp.get(f'PLATFORM_PROFILE_ON_{key}')
+            if key not in touched and now in PROFILES:
+                combo.set_active_id(now)
+        self.power_syncing = False
+        if 'charge' in touched:
+            _, lo, hi = CHARGE_PRESETS[self.charge]
+        else:
+            lo = tlp.get('START_CHARGE_THRESH_BAT0', CHARGE_PRESETS[self.charge][1])
+            hi = tlp.get('STOP_CHARGE_THRESH_BAT0', CHARGE_PRESETS[self.charge][2])
         self.helper(['power', self.prof['AC'].get_active_id(),
                      self.prof['BAT'].get_active_id(), str(lo), str(hi)], 'Saved')
 
@@ -202,16 +220,23 @@ class ThinkpadPages:
 
     def hw_refresh(self):
         if self.hw_busy:
+            self.hw_again = True        # asked during a scan: one more after it
             return
-        self.hw_busy = True
+        self.hw_busy, self.hw_again = True, False
 
         def work():
-            rows = hardware_rows(self)
+            try:
+                rows = hardware_rows(self)
+            except Exception as e:      # noqa: BLE001  the list must not stay busy
+                print('zorro: hardware scan failed:', e)
+                rows = []
             idle(self.hw_show, rows)
         threading.Thread(target=work, daemon=True).start()
 
     def hw_show(self, rows):
         self.hw_busy = False
+        if getattr(self, 'hw_again', False) and not getattr(self, 'dead', False):
+            idle(self.hw_refresh)
         for lst in self.hw_lists.values():
             for c in lst.get_children():
                 c.destroy()

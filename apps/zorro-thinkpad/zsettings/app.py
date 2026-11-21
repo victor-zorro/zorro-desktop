@@ -223,11 +223,6 @@ class Win(HomePages, FacePages, LangPages, AppsPages, TransferPages, AccountsPag
             if tid:
                 GLib.source_remove(tid)
                 self.fx_save(profile)
-        for name in ('orb_save_id', 'win_apply_id'):
-            tid = getattr(self, name, None)
-            if tid:
-                GLib.source_remove(tid)
-                setattr(self, name, None)
 
     def show_page(self, pid):
         """open a sub-page by id, e.g. power:0 (sidebar + top tab), in all setup"""

@@ -144,9 +144,10 @@ class FacePages:
         if getattr(self, 'face_busy', False):
             return
 
+        value = 'on' if cb.get_active() else 'off'
+
         def work():
-            subprocess.run(['pkexec', FACE, 'set', key, 'on' if cb.get_active() else 'off'],
-                           capture_output=True)
+            subprocess.run(['pkexec', FACE, 'set', key, value], capture_output=True)
             self.face_check()
         threading.Thread(target=work, daemon=True).start()
 

@@ -26,6 +26,7 @@ LOCK = threading.Lock()
 FILES = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/html'),
          '/style.css': ('style.css', 'text/css'), '/page.js': ('page.js', 'text/javascript'),
          '/nav.js': ('nav.js', 'text/javascript'),
+         '/review.json': ('review.json', 'application/json'),
          '/progress.json': ('progress.json', 'application/json')}
 
 

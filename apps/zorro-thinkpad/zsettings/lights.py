@@ -186,12 +186,13 @@ def dot_mode():
 
 def dot_loop():
     """keyd thread: keeps the red dot on the right pattern and blinks the software ones"""
-    current = None
+    current = applied = None
     while True:
         try:
             mode, li = dot_mode()
-            if mode != current or _dot['refresh']:
-                _dot['refresh'] = False
+            # a settings change also re-applies: the app wrote the LED itself meanwhile
+            if mode != current or li != applied or _dot['refresh']:
+                _dot['refresh'], applied = False, li
                 if not li and mode == 'on':
                     current = mode                  # never configured: leave it alone
                 else:

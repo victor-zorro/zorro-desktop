@@ -40,3 +40,19 @@ async function progress() {
 }
 progress();
 setInterval(progress, 10000);
+
+async function review() {
+  try {
+    const r = await (await fetch('review.json', { cache: 'no-store' })).json();
+    const all = [...r.before, ...r.after];
+    const fixed = all.filter(f => f.state === 'fixed').length;
+    $('#rev-count').textContent = `Review before: ${r.before.length} findings, ${fixed} fixed` +
+      (r.after.length ? ` · review after: ${r.after.length}` : '');
+    const box = $('#findings'); box.innerHTML = '';
+    all.forEach(f => box.appendChild(stepRow({
+      state: f.state === 'fixed' ? 'done' : f.level === 'critical' || f.level === 'high' ? 'problem' : 'todo',
+      name: f.title, note: `${f.area} · ${f.level} · ${f.state}` })));
+  } catch (e) { /* the next round tries again */ }
+}
+review();
+setInterval(review, 15000);

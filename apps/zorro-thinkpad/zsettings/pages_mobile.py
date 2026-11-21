@@ -121,15 +121,30 @@ class MobilePages:
         return True
 
     def lte_bg(self, busy, fn, then):
+        """one modem command at a time; an action asked meanwhile waits its turn (a quiet
+        refresh, busy empty, is simply skipped)"""
         if self.lte_busy:
+            if busy:
+                self.lte_next = (busy, fn, then)
+                self.lte_msg.set_text(busy)
             return
         self.lte_busy = True
         if busy:
             self.lte_msg.set_text(busy)
 
+        def done(res):
+            self.lte_busy = False
+            then(res)
+            nxt, self.lte_next = getattr(self, 'lte_next', None), None
+            if nxt and not getattr(self, 'dead', False):
+                self.lte_bg(*nxt)
+
         def work():
-            res = fn()
-            idle(lambda: (setattr(self, 'lte_busy', False), then(res)) and False)
+            try:
+                res = fn()
+            except Exception as e:      # noqa: BLE001  the tab must not stay busy for ever
+                res = (1, '', str(e))
+            idle(done, res)
         threading.Thread(target=work, daemon=True).start()
 
     def lte_run(self, busy, *args, stdin=None):

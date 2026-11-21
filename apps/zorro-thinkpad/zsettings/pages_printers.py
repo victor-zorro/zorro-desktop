@@ -58,7 +58,8 @@ class PrinterPages:
 
     def pr_bg(self, busy, fn, then):
         """run fn() in a thread with a message; then(result) on the main loop"""
-        self.hw_msg.set_text(busy)
+        if busy:                        # a quiet refresh keeps the last message ("Added …")
+            self.hw_msg.set_text(busy)
 
         def work():
             try:
