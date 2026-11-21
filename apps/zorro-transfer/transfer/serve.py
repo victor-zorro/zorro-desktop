@@ -3,14 +3,17 @@
   offer     the groups with their sizes
   manifest  the file list of the groups asked for; the first one pins the session to those
             groups: a later one may not ask for more
-  get       one file, from an offset; after the bytes a SHA-256 of the whole file
-  batch     many small files in one go; after the bytes a SHA-256 for each
+  get       one file, from an offset; after the bytes a SHA-256 of the whole file ('' and
+            "unreadable" when it could not be read to the end: the bytes were padded)
+  batch     many small files in one go (each once, BATCH_CAP in all: the rest -1, to be
+            asked for alone); after the bytes a SHA-256 for each
   progress  the receiver's numbers, so both devices show the same
   finished  the receiver has everything
 
 Only files of the last manifest are served. A file that cannot be opened is answered with
 "not here" before any byte is sent, so the receiver skips it and goes on."""
 import hashlib
+import math
 import os
 import stat
 import time
@@ -18,6 +21,9 @@ import time
 from . import items, net, state
 
 BATCH_MOST = 4 * state.SMALL    # a small file that grew past this is not sent in a batch
+BATCH_CAP = 32 * state.CHUNK    # bytes in one batch, all files together
+BATCH_COUNT = 1000              # files in one batch
+BIGGEST = 1 << 50               # no number the receiver reports is larger
 
 
 class Serving:
@@ -94,7 +100,7 @@ class Serving:
             net.send_json(self.t, {'ok': True, 'size': st.st_size, 'offset': off})
             self.base = number(req.get('done')) - off    # the receiver's bytes before this file
             digest = self.stream(fh, st.st_size, off, req['path'])
-        net.send_json(self.t, {'sha256': digest})
+        net.send_json(self.t, {'sha256': digest} if digest else {'sha256': '', 'unreadable': True})
         self.t.settimeout(net.IDLE)
 
     def stream(self, fh, size, off, rel):
@@ -102,7 +108,10 @@ class Serving:
         file shrank meanwhile: the receiver then throws its copy away)"""
         sha, short, pos = hashlib.sha256(), False, 0
         while pos < size:
-            chunk = fh.read(min(state.CHUNK, size - pos))
+            try:
+                chunk = b'' if short else fh.read(min(state.CHUNK, size - pos))
+            except OSError:                 # a bad spot on the disk: the rest is padding
+                chunk = b''
             if not chunk:
                 short = True
                 chunk = b'\0' * min(state.CHUNK, size - pos)    # keeps the count; never kept
@@ -116,21 +125,26 @@ class Serving:
                 self.meter.at(self.base + pos, rel)
         return '' if short else sha.hexdigest()
 
-    def small(self, rel):
-        """the whole content of a small file, None when it cannot be read"""
+    def small(self, rel, room):
+        """the whole content of a small file, None when it cannot be read or does not fit"""
         fh = self.opened(rel)
         if fh is None:
             return None
         try:
             with fh:
-                data = fh.read(BATCH_MOST + 1)
+                data = fh.read(min(BATCH_MOST, room) + 1)
         except OSError:
             return None
-        return data if len(data) <= BATCH_MOST else None
+        return data if len(data) <= min(BATCH_MOST, room) else None
 
     def batch(self, req):
-        paths = (req.get('paths') or [])[:1000]
-        blobs = [self.small(rel) for rel in paths]
+        paths = req.get('paths') if isinstance(req.get('paths'), list) else []
+        paths, blobs, seen, room = paths[:BATCH_COUNT], [], set(), BATCH_CAP
+        for rel in paths:
+            fresh = isinstance(rel, str) and rel not in seen
+            seen.add(rel if isinstance(rel, str) else '')
+            blobs.append(self.small(rel, room) if fresh and room > 0 else None)
+            room -= len(blobs[-1] or b'')
         net.send_json(self.t, {'sizes': [-1 if b is None else len(b) for b in blobs]})
         for b in blobs:
             if b:
@@ -138,7 +152,7 @@ class Serving:
         net.send_json(self.t, {'sha256': ['' if b is None else sha(b) for b in blobs]})
         sent = sum(len(b) for b in blobs if b)
         self.s.update(done=number(req.get('done')) + sent, updated=time.time(),
-                      current=str(paths[-1]) if paths else '')
+                      current=str(paths[-1])[:4096] if paths else '')
         self.sender.save('sending')
 
     def progress(self, req):
@@ -159,7 +173,9 @@ def sha(data):
 
 
 def number(x):
-    return x if isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0 else 0
+    """a number the receiver reports, 0 when it is not a sane one"""
+    good = isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    return x if good and 0 <= x <= BIGGEST else 0
 
 
 def file_list(groups):

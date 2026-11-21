@@ -1,7 +1,8 @@
 """Finding Zorro devices nearby: a broadcast on the local network and a probe of every
-connected NetBird peer, both answered by the other device's beacon (beacon.py). Each device
-once, by its best way: a cable before Wi-Fi, the local network before NetBird; never this
-device itself."""
+connected NetBird peer, both answered by the other device's beacon (beacon.py). Each name
+and address once, by its best way: a cable before Wi-Fi, the local network before NetBird;
+never this device itself. Two devices with the same name are both listed (with their
+addresses): another device cannot take the place of yours by using its name."""
 import json
 import socket
 import subprocess
@@ -93,14 +94,14 @@ def listen(u, end, found):
 
 
 def best(devices):
-    """each device once (by name), by its best way; not this device"""
+    """each name and address once, by its best way; not this device"""
     mine = state.device_name()
     out = {}
     for f in sorted(devices, key=lambda f: BEST.index(f['via']) if f['via'] in BEST else 2):
         if f['name'] == mine and f['via'] == 'local':
             continue                    # this device's own beacon
-        out.setdefault(f['name'], f)
-    return sorted(out.values(), key=lambda f: f['name'].lower())
+        out.setdefault((f['name'], f['host']), f)
+    return sorted(out.values(), key=lambda f: (f['name'].lower(), f['host']))
 
 
 def discover(wait=1.5):

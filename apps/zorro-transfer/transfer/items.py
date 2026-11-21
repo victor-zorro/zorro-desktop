@@ -72,9 +72,17 @@ SKIP_FILES = ('.lock', '.tmp', 'lock', '.parentlock', 'SingletonLock', 'Singleto
 RESERVED = {'system', 'generated'}     # how sys: and gen: paths travel: not home folders
 NOT_FILES = {'zorro-desktop', 'UnrealEngine', 'Installers', 'snap'} | RESERVED
 SETUP_HELPER = '/usr/local/libexec/zorro-transfer-helper'   # login look + accounts (password)
-# folders with keys and logins: made for this user only on the new device
-PRIVATE = ('.ssh', '.gnupg', '.local/share/keyrings', '.config/rclone', '.config/gh',
-           '.mozilla', '.config/mozilla', '.local/share/firefox-*')
+# never sent, never accepted: who may log in to this device is decided here
+NEVER = ('.ssh/authorized_keys', '.ssh/authorized_keys2')
+# folders with keys and logins: for this user only on the new device (files 0600, or 0700
+# when runnable; folders 0700): everything in the logins group and apps' logins
+PRIVATE = tuple(r for r in GROUPS['logins'][2] if not r.startswith('gen:')) + (
+    '.gnupg', '.config/Claude', '.config/MQTTX')
+# what runs by itself at login: listed before it is put in place
+STARTERS = ('.config/autostart', '.config/systemd/user', '.config/environment.d',
+            '.config/openbox/autostart', '.local/bin', 'bin', '.profile', '.bashrc',
+            '.bash_profile', '.bash_login', '.bash_logout', '.zshrc', '.zprofile', '.zshenv',
+            '.xprofile', '.xsessionrc', '.xinitrc', '.pam_environment')
 
 
 def all_groups():
@@ -113,7 +121,8 @@ def walk(top, skip_caches):
             p = Path(d) / n
             if p.is_symlink() or not p.is_file() or n in SKIP_FILES or n.endswith(SKIP_FILES):
                 continue
-            yield entry(str(p.relative_to(HOME)), p)
+            if str(p.relative_to(HOME)) not in NEVER:
+                yield entry(str(p.relative_to(HOME)), p)
 
 
 def special(rel):
@@ -164,7 +173,7 @@ def roots(group):
 
 def belongs(group, rel):
     """may a path from the other device come along as part of this group?"""
-    if not safe_rel(rel):
+    if not safe_rel(rel) or rel in NEVER:
         return False
     first = Path(rel).parts[0]
     for root in roots(group):
@@ -190,9 +199,16 @@ def is_private(rel):
 
 def final_mode(rel, mode):
     """the permissions a received file gets: the sender's, but never setuid, setgid or
-    writable by everyone, and private paths only for this user"""
-    mode = (mode & 0o775) | 0o400
-    return mode & 0o700 if is_private(rel) else mode
+    writable by everyone; private paths only for this user (0600, runnable 0700)"""
+    if is_private(rel):
+        return 0o700 if mode & 0o100 else 0o600
+    return (mode & 0o775) | 0o400
+
+
+def starts_by_itself(rel):
+    """a file that runs at login without being asked: autostart, user services, the shell's
+    start-up files, programs on the PATH"""
+    return any(under(rel, root) for root in STARTERS)
 
 
 def running(groups):

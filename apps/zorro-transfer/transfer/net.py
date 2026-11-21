@@ -2,8 +2,8 @@
 
 Pairing: the receiver types the 6-digit code the sender shows. SPAKE2 (as in magic-wormhole)
 turns that short code into a strong shared key: someone who listens in learns nothing, and a
-wrong guess costs a whole new try (the sender allows one try at a time, waits longer after
-each wrong one and stops offering after 10). The key
+wrong guess costs a whole new try (the sender allows one try at a time, PAIR_TIME at most,
+and makes the device that guessed wrong wait longer each time). The key
 becomes the pre-shared key of a TLS 1.3 connection (no certificates needed: only the two who
 know the code can finish the handshake). After pairing, the sender hands out a session secret
 so an interrupted transfer continues without a new code.
@@ -17,6 +17,13 @@ import socket
 import ssl
 import struct
 import sys
+import threading
+from pathlib import Path
+
+from . import check
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'zorro-fx'))
+import zorro_net  # noqa: E402  (who may use the small servers on this device)
 
 # the sender listens on PORT (LAN and NetBird); the beacon answers "who is a Zorro device?"
 # on the next one (UDP, the local network) and on the one after (TCP, NetBird peers). The
@@ -27,6 +34,7 @@ BEACON_PORT = PORT + 2
 MAGIC = b'zorro-transfer/2'
 WHO = MAGIC + b' who?'           # the question on the discovery port
 IDLE = 60                       # seconds a side waits for the other's next message
+SMALL_FRAME = 4096              # bytes: what may arrive before pairing (hello, SPAKE2)
 
 
 class TooOld(Exception):
@@ -38,6 +46,42 @@ def need_psk():
     if not hasattr(ssl.SSLContext, 'set_psk_server_callback'):
         have = '.'.join(map(str, sys.version_info[:2]))
         raise TooOld(f'Transfer needs Python 3.13 or newer; this device has {have}.')
+
+
+def trusted(addr):
+    """may this address talk to the sender and the beacon? (tests replace this one function)"""
+    return zorro_net.trusted(addr)
+
+
+class Deadline:
+    """closes a connection when its time is up, however slowly the bytes drip in"""
+
+    def __init__(self, sock, seconds):
+        self.watch = socket.socket(fileno=os.dup(sock.fileno()))
+        self.lock, self.over = threading.Lock(), False
+        self.timer = threading.Timer(seconds, self.expire)
+        self.timer.daemon = True
+        self.timer.start()
+        sock.settimeout(seconds)
+
+    def expire(self):
+        with self.lock:
+            if not self.over:
+                self.over = True
+                try:
+                    self.watch.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                self.watch.close()
+
+    def cancel(self):
+        """stop watching; True when it was still in time"""
+        self.timer.cancel()
+        with self.lock:
+            in_time, self.over = not self.over, True
+            if in_time:
+                self.watch.close()
+        return in_time
 
 
 def patience(offset):
@@ -71,10 +115,15 @@ def send_json(sock, obj):
     send_frame(sock, json.dumps(obj).encode())
 
 
-def recv_json(sock):
-    msg = json.loads(recv_frame(sock).decode())
+def recv_json(sock, limit=64 << 20):
+    """the one place messages are read: anything that is not a JSON object is a bad peer"""
+    data = recv_frame(sock, limit)
+    try:
+        msg = json.loads(data.decode())
+    except (ValueError, RecursionError, MemoryError):
+        msg = None
     if not isinstance(msg, dict):
-        raise ValueError('not a message')
+        raise check.BadPeer(check.ODD + ' (message)')
     return msg
 
 
@@ -87,7 +136,7 @@ def spake(code, side, sock):
     from spake2 import SPAKE2_A, SPAKE2_B
     s = (SPAKE2_A if side == 'A' else SPAKE2_B)(code.encode(), idA=b'receiver', idB=b'sender')
     send_frame(sock, s.start())
-    return s.finish(recv_frame(sock, limit=4096))
+    return s.finish(recv_frame(sock, limit=SMALL_FRAME))
 
 
 def _ctx(server, psk):

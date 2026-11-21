@@ -89,6 +89,19 @@ class Side:
         except (OSError, ValueError):
             return {}
 
+    def files(self):
+        """the file list the receiver keeps (receiver-files.json)"""
+        try:
+            return json.loads((self.state_dir / 'receiver-files.json').read_text())
+        except (OSError, ValueError):
+            return []
+
+    def part(self, session):
+        """the one half-arrived file of a session"""
+        found = list((self.stage / f'{session}.parts').glob('*.part'))
+        assert len(found) == 1, found
+        return found[0]
+
     def write(self, rel, data, mode=0o644):
         p = self.home / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -183,12 +196,15 @@ class Proxy:
 class Peer:
     """a receiver that speaks the wire by hand, for tests of what the sender allows"""
 
-    def __init__(self, port):
-        self.port = port
+    def __init__(self, port, source=HOST):
+        self.port, self.source = port, source
+
+    def connect(self):
+        return socket.create_connection((HOST, self.port), timeout=10,
+                                        source_address=(self.source, 0))
 
     def hello(self, msg):
-        sock = net.connect(HOST, self.port)
-        sock.settimeout(10)
+        sock = self.connect()
         net.send_json(sock, dict(msg, name='peer'))
         return sock, net.recv_json(sock)
 

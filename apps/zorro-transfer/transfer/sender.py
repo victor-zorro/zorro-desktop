@@ -2,11 +2,14 @@
 
 Listens on the port, shows a 6-digit code and serves the files of the groups the receiver
 asked for (serve.py). Other devices find it through the beacon (beacon.py), which reads
-sender.json. It stops when the window is closed and nothing is being sent (an unfinished
+sender.json. It stops when the Send page is closed and nothing is being sent (an unfinished
 transfer: once the receiver stopped trying), or when the window says stop.
 
-Guessing the code: one pairing at a time, a longer wait after each wrong code, a new code
-after every 3, and after 10 no pairing at all until the user asks for a new code."""
+Who may connect: this device, NetBird peers and the home network (zorro_net), a few at a
+time. Guessing the code: one pairing at a time, PAIR_TIME at most for the whole of it; the
+device that guessed wrong waits longer each time and after PEER_FAILS is not let in any
+more; every 3 wrong codes a new code; after MAX_FAILS in all no pairing at all until the
+user asks for a new code."""
 import os
 import secrets
 import signal
@@ -18,10 +21,14 @@ import time
 from . import check, generated, net, state
 from .serve import Serving
 
-MAX_FAILS = 10                  # wrong codes before pairing is switched off
-FIRST_WAIT = 2                  # seconds after the first wrong code; doubles, up to LONGEST
+PAIR_TIME = 15                  # seconds for a whole pairing, from the first byte to the key
+MAX_CONNECTIONS = 8             # connections at the same time; more are closed at once
+PEER_FAILS = 10                 # wrong codes from one device before it is not let in
+MAX_FAILS = 100                 # wrong codes from everyone before pairing is switched off
+FIRST_WAIT = 2                  # seconds after a device's first wrong code; doubles, up to LONGEST
 LONGEST_WAIT = 60
 IDLE_EXIT = 60                  # seconds without a window and without work before it stops
+DONE_SHOWN = 600                # seconds a finished transfer stays listed (without its secret)
 LOCKED = 'Too many wrong codes: pairing is off until you ask for a new code.'
 
 
@@ -38,14 +45,21 @@ def fresh(sessions):
             and now - s.get('updated', s.get('started', 0)) < state.RETRY_FOR}
 
 
+def kept(sid, s, now):
+    """does a session stay in the list? a finished one only a while, to show it was done"""
+    age = now - s.get('updated', s.get('started', 0))
+    return age < (DONE_SHOWN if s.get('status') == 'done' else state.RETRY_FOR)
+
+
 class Sender:
     def __init__(self, gui_pid=None):
         self.gui_pid = gui_pid
         self.lock = threading.Lock()
         self.pairing = threading.Lock()
+        self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
         self.sessions = fresh(state.read_state('sender.json').get('sessions'))
         self.active = 0
-        self.fails, self.not_before = 0, 0
+        self.fails, self.peers = 0, {}     # wrong codes in all; address: [wrong codes, wait until]
         self.new_code()
 
     def new_code(self):
@@ -57,11 +71,17 @@ class Sender:
     def save(self, status='waiting'):
         off = self.pairing_off()
         with self.lock:
+            now = time.time()
+            for sid, s in list(self.sessions.items()):
+                if not kept(sid, s, now):
+                    del self.sessions[sid]
+                elif s.get('status') == 'done':
+                    s.pop('secret', None)   # a finished transfer cannot come back
             state.write_state('sender.json', {
                 'pid': os.getpid(), 'code': '' if off else self.code,
                 'status': 'locked' if off and status in ('waiting', 'wrong code') else status,
                 'why': LOCKED if off else '', 'fails': self.fails,
-                'name': state.device_name(), 'port': net.PORT, 'updated': time.time(),
+                'name': state.device_name(), 'port': net.PORT, 'updated': now,
                 'sessions': self.sessions})
 
     def unfinished(self):
@@ -69,10 +89,12 @@ class Sender:
         return any(s.get('total') for s in fresh(self.sessions).values())
 
     def gui_alive(self):
-        """the window that shows this sender; it may have been closed and opened again"""
+        """a Send page that shows this sender (the window may have been closed and opened
+        again): only the Send page leaves window.pid, and takes it away when it goes. No
+        window at all (gui_pid None): the command line, it runs until stopped"""
         if self.gui_pid is None:
             return True
-        return state.is_transfer(state.read_pid('window.pid')) or state.is_transfer(self.gui_pid)
+        return state.is_transfer(state.read_pid('window.pid'))
 
     def told(self, name):
         """did the window leave a signal file for this sender? (it is used up)"""
@@ -86,6 +108,7 @@ class Sender:
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         for name in ('sender.stop', 'sender.unlock'):       # left by an earlier sender
             (state.STATE / name).unlink(missing_ok=True)
+        state.touch('window.seen')          # Transfer is open: knocks may be shown again
         srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         srv.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)     # IPv4 too
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -100,18 +123,25 @@ class Sender:
             srv.close()
             self.save('stopped')
 
+    def accept(self, srv):
+        """take one connection, when there is one: only from a trusted address, a few at a time"""
+        try:
+            conn, addr = srv.accept()
+        except socket.timeout:
+            return
+        peer = addr[0][7:] if addr[0].startswith('::ffff:') else addr[0]   # IPv4 inside IPv6
+        if not net.trusted(peer) or not self.slots.acquire(blocking=False):
+            conn.close()
+            return
+        threading.Thread(target=self.handle, args=(conn, peer), daemon=True).start()
+
     def listen(self, srv):
         """take connections until the window is gone and nothing is being sent, or stop"""
         idle_since = time.time()
         while not self.told('sender.stop'):
-            try:
-                conn, addr = srv.accept()
-                peer = addr[0][7:] if addr[0].startswith('::ffff:') else addr[0]   # IPv4 inside IPv6
-                threading.Thread(target=self.handle, args=(conn, peer), daemon=True).start()
-            except socket.timeout:
-                pass
+            self.accept(srv)
             if self.told('sender.unlock'):
-                self.fails, self.not_before = 0, 0
+                self.fails, self.peers = 0, {}
                 self.new_code()
                 self.save()
             if self.active:
@@ -124,14 +154,15 @@ class Sender:
 
     def handle(self, sock, peer):
         """one connection: who is it, then serve it"""
+        deadline = net.Deadline(sock, PAIR_TIME)
         try:
-            sock.settimeout(30)
-            hello = net.recv_json(sock)
+            hello = net.recv_json(sock, limit=net.SMALL_FRAME)
             op = hello.get('op')
             if op == 'probe':
                 net.send_json(sock, {'name': state.device_name(), 'magic': net.MAGIC.decode()})
                 return
-            t, sid = self.pair(sock, hello, peer) if op == 'pair' else self.resume(sock, hello)
+            t, sid = self.pair(sock, hello, peer, deadline) if op == 'pair' else \
+                self.resume(sock, hello, deadline)
             if t is None:
                 return
             with self.lock:
@@ -139,30 +170,36 @@ class Sender:
             try:
                 Serving(self, t, sid, peer).run()
             finally:
+                t.close()
                 with self.lock:
                     self.active -= 1
         except (OSError, ValueError, TypeError, KeyError):
             pass                            # a lost or confused connection: the receiver retries
         finally:
+            deadline.cancel()
+            self.slots.release()
             try:
                 sock.close()
             except OSError:
                 pass
 
-    def refusal(self):
-        """why a new device cannot pair right now, '' when it can"""
+    def refusal(self, peer):
+        """why this device cannot pair right now, '' when it can"""
         if self.pairing_off():
             return 'too many wrong codes: ask for a new code on the sending device'
         if self.active:
             return 'busy sending to another device'     # one device at a time
-        wait = self.not_before - time.time()
+        fails, not_before = self.peers.get(peer, (0, 0))
+        if fails >= PEER_FAILS:
+            return 'too many wrong codes from this device: ask for a new code on the sending device'
+        wait = not_before - time.time()
         if wait > 0:
             return f'a wrong code was typed: wait {int(wait) + 1} s and try again'
         return ''
 
-    def pair(self, sock, hello, peer):
+    def pair(self, sock, hello, peer, deadline):
         """pairing with the code: (the secured connection, session id) or (None, None)"""
-        why = self.refusal()
+        why = self.refusal(peer)
         if why or not self.pairing.acquire(blocking=False):
             net.send_json(sock, {'ok': False, 'error': why or 'another device is pairing: try again'})
             return None, None
@@ -171,28 +208,34 @@ class Sender:
             try:
                 t = net.secure(sock, net.spake(self.code, 'B', sock), server=True)
             except Exception:               # whatever went wrong, it was one guess at the code
-                self.wrong_code()
+                t = None
+            if t is None or not deadline.cancel():
+                self.wrong_code(peer)
                 return None, None
-            sid, secret = new_session_id(), secrets.token_hex(32)
-            name = hello.get('name')
-            with self.lock:
-                self.sessions[sid] = {'secret': secret, 'started': time.time(), 'status': 'paired',
-                                      'peer': name[:64] if isinstance(name, str) and name else peer}
-            self.fails = 0
-            self.new_code()                 # a code works once
-            net.send_json(t, {'session': sid, 'secret': secret})
-            return t, sid
+            return t, self.paired(t, hello, peer)
         finally:
             self.pairing.release()
 
-    def wrong_code(self):
+    def paired(self, t, hello, peer):
+        sid, secret = new_session_id(), secrets.token_hex(32)
+        name = hello.get('name')
+        with self.lock:
+            self.sessions[sid] = {'secret': secret, 'started': time.time(), 'status': 'paired',
+                                  'peer': name[:64] if isinstance(name, str) and name else peer}
+        self.peers.pop(peer, None)
+        self.new_code()                     # a code works once
+        net.send_json(t, {'session': sid, 'secret': secret})
+        return sid
+
+    def wrong_code(self, peer):
         self.fails += 1
-        self.not_before = time.time() + min(FIRST_WAIT * 2 ** (self.fails - 1), LONGEST_WAIT)
+        fails = self.peers.get(peer, (0, 0))[0] + 1
+        self.peers[peer] = (fails, time.time() + min(FIRST_WAIT * 2 ** (fails - 1), LONGEST_WAIT))
         if self.fails % 3 == 0:
             self.new_code()
         self.save('wrong code')
 
-    def resume(self, sock, hello):
+    def resume(self, sock, hello, deadline):
         """an interrupted transfer comes back with its session: no new code needed"""
         sid = hello.get('session') if hello.get('op') == 'resume' else None
         with self.lock:
@@ -204,4 +247,5 @@ class Sender:
             net.send_json(sock, {'ok': False, 'error': 'unknown session'})
             return None, None
         net.send_json(sock, {'ok': True, 'name': state.device_name()})
-        return net.secure(sock, bytes.fromhex(s['secret']), server=True), sid
+        t = net.secure(sock, bytes.fromhex(s['secret']), server=True)
+        return (t, sid) if deadline.cancel() else (None, None)

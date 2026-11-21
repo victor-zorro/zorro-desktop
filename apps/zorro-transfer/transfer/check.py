@@ -7,9 +7,12 @@ from . import items
 SESSION = re.compile(r'[0-9a-f]{16}')
 SECRET = re.compile(r'[0-9a-f]{64}')
 ODD = 'the other device sent something this version does not understand'
+MOST_FILE = 4 << 40             # bytes in one file (4 TB)
+MOST_TOTAL = 16 << 40           # bytes in one transfer
+MOST_FILES = 2_000_000          # files in one transfer
 
 
-class BadPeer(Exception):
+class BadPeer(ValueError):
     """the other device broke the rules of the conversation: stop, do not retry"""
 
 
@@ -56,19 +59,21 @@ def offer(reply):
 def entry(f):
     return isinstance(f, dict) and isinstance(f.get('group'), str) \
         and isinstance(f.get('path'), str) and whole(f.get('size')) \
-        and whole(f.get('mtime')) and whole(f.get('mode'))
+        and f['size'] <= MOST_FILE and whole(f.get('mtime')) and whole(f.get('mode'))
 
 
 def manifest(files, asked):
     """the file list of a transfer: (the entries we accept, how many we refused).
     An entry is accepted when its group was asked for and its path belongs to that group."""
-    if not isinstance(files, list) or not all(entry(f) for f in files):
+    if not isinstance(files, list) or len(files) > MOST_FILES or not all(entry(f) for f in files):
         raise BadPeer(ODD + ' (file list)')
     good, seen = [], set()
     for f in files:
         if f['group'] in asked and f['path'] not in seen and items.belongs(f['group'], f['path']):
             seen.add(f['path'])
             good.append({k: f[k] for k in ('group', 'path', 'size', 'mtime', 'mode')})
+    if sum(f['size'] for f in good) > MOST_TOTAL:
+        raise BadPeer(ODD + ' (file list: too big)')
     return good, len(files) - len(good)
 
 
@@ -83,11 +88,13 @@ def header(hdr):
     return hdr['size'], hdr['offset']
 
 
-def sizes(reply, count, limit):
-    """the answer to 'batch': one size per file, -1 for a file that is gone"""
+def sizes(reply, count, limit, total):
+    """the answer to 'batch': one size per file (-1: not in this batch), all together at
+    most total bytes"""
     got = reply.get('sizes') if isinstance(reply, dict) else None
     if not isinstance(got, list) or len(got) != count or not all(
-            isinstance(n, int) and not isinstance(n, bool) and -1 <= n <= limit for n in got):
+            isinstance(n, int) and not isinstance(n, bool) and -1 <= n <= limit for n in got) \
+            or sum(n for n in got if n > 0) > total:
         raise BadPeer(ODD + ' (batch)')
     return got
 

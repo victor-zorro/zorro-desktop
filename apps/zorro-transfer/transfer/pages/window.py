@@ -7,6 +7,7 @@ import socket
 import ssl
 
 from .. import state
+from ..receiver import Receiver
 from .choose import Choose
 from .get import Get
 from .progress import Progress
@@ -24,14 +25,15 @@ class Win(Gtk.Window):
         super().__init__(title='Transfer')
         self.set_default_size(620, 520)
         self.set_icon_name('folder-remote')
-        self.connect('destroy', Gtk.main_quit)
+        self.connect('destroy', self.closed)
         self.body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=22)
         sc = Gtk.ScrolledWindow()
         sc.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sc.add(self.body)
         self.add(sc)
         self.timer = self.page = self.sender = None
-        state.write_pid('window.pid')       # the sender watches the window that shows it
+        state.touch('window.seen')          # Transfer was opened: the beacon may knock again
+        Receiver()                          # removes staging folders left for a week
         snd, rcv = state.read_state('sender.json'), state.read_state('receiver.json')
         if not hasattr(ssl.SSLContext, 'set_psk_server_callback'):
             self.go('start')                # this Python is too old: the start page says so
@@ -46,11 +48,21 @@ class Win(Gtk.Window):
         else:
             self.go('start')
 
-    def go(self, name, *args):
-        """show another page"""
+    def leave(self):
+        """the page that goes away tidies up (the Send page: its sign for the sender)"""
         if self.timer:
             GLib.source_remove(self.timer)
             self.timer = None
+        if hasattr(self.page, 'leave'):
+            self.page.leave()
+
+    def closed(self, *_):
+        self.leave()
+        Gtk.main_quit()
+
+    def go(self, name, *args):
+        """show another page"""
+        self.leave()
         for c in self.body.get_children():
             self.body.remove(c)
         self.page = PAGES[name](self, *args)

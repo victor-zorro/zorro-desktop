@@ -1,6 +1,6 @@
 """The getting page, first step: pick the sending device (the list fills by itself) and type
 its code."""
-from ..receiver import Receiver, Refused
+from ..receiver import Receiver, Refused, WrongCode
 from .nearby_list import NearbyList
 from .widgets import Gtk, background, btn, label
 
@@ -54,7 +54,7 @@ class Get:
         def failed(e):
             if isinstance(e, Refused):
                 self.msg.set_text(f'{host} says: {e}')
-            elif isinstance(e, PermissionError):
+            elif isinstance(e, WrongCode):
                 self.msg.set_text(WRONG)
             elif isinstance(e, ConnectionRefusedError):
                 self.msg.set_text(f'{host} is not sending yet: choose Send there first.')

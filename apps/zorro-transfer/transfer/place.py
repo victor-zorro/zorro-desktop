@@ -3,8 +3,9 @@
 What a file replaces stays next to it as NAME.before-transfer. Left alone (counted as kept):
 a path that is a symbolic link or lies behind one (set up by this device's own install, for
 example ~/.config/openbox into the repo), and anything that is not a plain file. Each file
-gets the sender's permissions, without setuid, setgid or "writable by everyone"; folders
-with keys are for this user only. A file that cannot be placed is noted; the rest goes on."""
+gets the sender's permissions, without setuid, setgid or "writable by everyone"; logins and
+keys are for this user only. A file that cannot be placed is noted; the rest goes on. Files
+that run by themselves at login (autostart, ~/bin…) are named in the notes."""
 import os
 import shutil
 import time
@@ -34,7 +35,7 @@ def accepted(rcv):
     """the saved file list, checked once more against the groups that were asked for"""
     asked = [g for g in rcv.st.get('groups') or [] if isinstance(g, str)]
     try:
-        return check.manifest(rcv.st.get('files') or [], asked)[0]
+        return check.manifest(rcv.files(), asked)[0]
     except check.BadPeer:
         return []
 
@@ -83,22 +84,40 @@ def put(stage, f):
     return 'moved'
 
 
-def apply(rcv, passwords=None):
+def starters(rcv):
+    """received files that would run by themselves at login, as they would land here"""
+    try:
+        stage = rcv.stage()
+    except check.BadPeer:
+        return []
+    return [f['path'] for f in accepted(rcv) if items.starts_by_itself(f['path'])
+            and (stage / f['path']).is_file()]
+
+
+def starters_note(paths):
+    if not paths:
+        return []
+    return [f'{len(paths)} received file{"s" if len(paths) != 1 else ""} start by themselves '
+            f'at login: ' + ', '.join(paths[:8]) + ('…' if len(paths) > 8 else '')]
+
+
+def apply(rcv, answers=None):
     """move what was received into place: (files moved, files kept).
-    passwords: {account name: password} for the new accounts (new_accounts())."""
+    answers: {'passwords': {new account: password}, 'groups': [groups you confirmed]}"""
     busy = items.running(rcv.st.get('groups') or [])
     if busy:
         raise AppsOpen(', '.join(busy))
     stage = rcv.stage()
     rcv.save(status='putting in place', error='')
+    starting = starters(rcv)
     count, problems = {'moved': 0, 'kept': 0, 'same': 0, 'none': 0}, []
     for f in accepted(rcv):
         try:
             count[put(stage, f)] += 1
         except OSError as e:
             problems.append(f"{f['path']}: {e.strerror or e}")
-    notes = after.steps(rcv, stage, passwords or {})
-    notes += trouble(rcv, problems)
+    notes = after.steps(rcv, stage, answers or {})
+    notes += starters_note(starting) + trouble(rcv, problems)
     shutil.rmtree(stage, ignore_errors=True)
     rcv.save(status='applied', moved=count['moved'], kept=count['kept'], notes=notes)
     return count['moved'], count['kept']
@@ -107,10 +126,13 @@ def apply(rcv, passwords=None):
 def trouble(rcv, problems):
     """notes about files that did not make it"""
     notes = []
-    for what, lines in (('not received', rcv.st.get('failed') or []), ('not put in place', problems)):
+    failed = rcv.st.get('failed') or []
+    counted = rcv.st.get('failed_count')
+    for what, lines, n in (('not received', failed, counted if isinstance(counted, int) else len(failed)),
+                           ('not put in place', problems, len(problems))):
         if lines:
-            notes.append(f'{len(lines)} file{"s" if len(lines) != 1 else ""} {what}: '
-                         + '; '.join(lines[:5]) + ('…' if len(lines) > 5 else ''))
+            notes.append(f'{n} file{"s" if n != 1 else ""} {what}: '
+                         + '; '.join(lines[:5]) + ('…' if n > 5 else ''))
     if rcv.st.get('refused'):
         notes.append(f"{rcv.st['refused']} files refused (not part of what you chose)")
     return notes

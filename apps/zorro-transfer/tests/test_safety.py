@@ -20,7 +20,7 @@ class SessionIds(Case):
         r = self.get('files:Docs', timeout=30)
         self.assertNotEqual(r.returncode, 0)
         self.assertNotIn('session', self.new.read('receiver.json'))
-        new = set(self.tree(self.root)) - set(before)
+        new = set(self.tree(self.root)) - set(before) - {'new/state'}
         self.assertTrue(all(p.startswith(('new/state/', 'old/state/')) for p in new), new)
 
     def test_a_path_upwards(self):
@@ -60,7 +60,7 @@ class Manifest(Case):
         r = self.get('files:Docs')
         self.assertEqual(r.returncode, 0, r.stderr)
         st = self.new.read('receiver.json')
-        self.assertEqual([f['path'] for f in st['files']], ['Docs/a.txt'])
+        self.assertEqual([f['path'] for f in self.new.files()], ['Docs/a.txt'])
         self.assertEqual(st['refused'], 4)
         self.assertEqual(self.tree(self.new.stage / st['session']), ['Docs', 'Docs/a.txt'])
         r = self.new.run('apply')
@@ -74,8 +74,8 @@ class Manifest(Case):
         st = self.new.read('receiver.json')
         stage = self.new.stage / st['session']
         (stage / '.bashrc').write_text('evil')
-        st['files'].append(entry('files:Docs', '.bashrc'))
-        (self.new.state_dir / 'receiver.json').write_text(json.dumps(st))
+        files = self.new.files() + [entry('files:Docs', '.bashrc')]
+        (self.new.state_dir / 'receiver-files.json').write_text(json.dumps(files))
         self.new.run('apply')
         self.assertFalse((self.new.home / '.bashrc').exists())
 

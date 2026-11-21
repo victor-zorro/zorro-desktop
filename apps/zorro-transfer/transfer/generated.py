@@ -14,6 +14,15 @@ from . import state
 GEN = state.STATE / 'generated'
 ACCOUNT = re.compile(r'[a-z_][a-z0-9_-]{0,31}')
 NO_SHELL = ('/usr/sbin/nologin', '/sbin/nologin', '/bin/false', '/usr/bin/false')
+# the groups your own account may join on the new device (the helper keeps its own copy of
+# this list: it runs as root and reads nothing of the user's); the powerful ones are off
+# unless you tick them
+GROUPS = ('sudo', 'audio', 'video', 'plugdev', 'netdev', 'bluetooth', 'lpadmin', 'scanner',
+          'render', 'kvm', 'cdrom', 'floppy', 'dip', 'users', 'dialout', 'input', 'libvirt')
+POWERFUL = {'sudo': 'admin: may change everything on this device',
+            'input': 'may read every key you type', 'libvirt': 'may run virtual machines as admin',
+            'kvm': 'may use the virtual machine hardware', 'docker': 'as good as admin',
+            'disk': 'may read every disk', 'adm': 'may read the system logs'}
 WIFI_FIELDS = ('802-11-wireless.ssid,802-11-wireless-security.key-mgmt,'
                '802-11-wireless-security.psk,802-11-wireless.hidden')
 
@@ -87,6 +96,23 @@ def read_accounts(path):
 def new_accounts(path):
     """the other people's accounts in a received list that this device does not have yet"""
     return [a for a in read_accounts(path) if not a['me'] and not known(a['name'])]
+
+
+def groups_here():
+    """(the groups on this device, the ones this user is in)"""
+    everything = {g.gr_name: g for g in grp.getgrall()}
+    me = pwd.getpwuid(os.getuid()).pw_name
+    mine = {g for g, e in everything.items() if me in e.gr_mem}
+    mine |= {g for g, e in everything.items() if e.gr_gid == os.getgid()}
+    return set(everything), mine
+
+
+def groups_to_add(path):
+    """the groups the received list would add your own account to: [(group, powerful)]"""
+    exist, mine = groups_here()
+    wanted = [g for a in read_accounts(path) if a['me'] for g in a['groups']]
+    return [(g, g in POWERFUL) for g in dict.fromkeys(wanted)
+            if g in GROUPS and g in exist and g not in mine]
 
 
 def nmcli(*args, text=None):

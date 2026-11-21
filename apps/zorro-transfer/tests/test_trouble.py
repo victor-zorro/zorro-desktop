@@ -41,7 +41,7 @@ class CutConnection(Case):
         self.assertEqual(r.returncode, 1)
         st = self.new.read('receiver.json')
         self.assertEqual(st['status'], 'interrupted')
-        part = self.new.stage / st['session'] / 'Docs/big.bin.part'
+        part = self.new.part(st['session'])
         half = part.read_bytes()
         self.assertGreater(len(half), SIZE // 4)
         part.write_bytes(b'damaged!' + half[8:])

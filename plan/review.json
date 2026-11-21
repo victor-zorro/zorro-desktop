@@ -595,56 +595,56 @@
    "area": "Transfer",
    "level": "high",
    "title": "A stranger on the network can block pairing for hours",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C5",
    "area": "Transfer",
    "level": "high",
    "title": "Before pairing, a device can make the sender use gigabytes of memory",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C6",
    "area": "Transfer",
    "level": "high",
    "title": "The send port answers any address, not only the home network",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C7",
    "area": "Transfer",
    "level": "high",
    "title": "A paired sender can lie about a file's size and fill the disk or memory",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C8",
    "area": "Transfer",
    "level": "high",
    "title": "One file with a very long name stops everything after it",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C9",
    "area": "Transfer",
    "level": "medium",
    "title": "With many files the progress window stutters (a big list rewritten twice a second)",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C10",
    "area": "Transfer",
    "level": "medium",
    "title": "Your own account silently gets the sender's groups (admin, input)",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C11",
    "area": "Transfer",
    "level": "medium",
    "title": "After the admin step, another program could make an admin account for a few minutes",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C12",
@@ -665,70 +665,70 @@
    "area": "Beacon",
    "level": "low",
    "title": "One device can keep three \"wants your setup\" notifications a minute on screen",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C15",
    "area": "Transfer",
    "level": "low",
    "title": "A rogue device with your laptop's name can replace it in the list (the code stays safe)",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C16",
    "area": "Transfer",
    "level": "medium",
    "title": "A disk read error in the middle of a file retries for 30 minutes",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C17",
    "area": "Transfer",
    "level": "medium",
    "title": "A paired receiver can make the sender load 2 GB into memory",
-   "state": "being fixed"
+   "state": "fixed (memory now bounded at 32 MB)"
   },
   {
    "id": "C18",
    "area": "Transfer",
    "level": "medium",
    "title": "Deeply nested data from the other side kills the background fetch",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C19",
    "area": "Transfer",
    "level": "low",
    "title": "A real file named X.part or X.meta can be damaged while staging",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C20",
    "area": "Transfer",
    "level": "low",
    "title": "Old session secrets pile up in the sender's state",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C21",
    "area": "Transfer",
    "level": "low",
    "title": "Pairing from the command line during a running fetch deletes its files",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C22",
    "area": "Transfer",
    "level": "low",
    "title": "Any Transfer window keeps a closed sender alive",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C23",
    "area": "Transfer",
    "level": "low",
    "title": "A paired receiver can crash the Send page's progress",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "C24",
@@ -742,7 +742,7 @@
    "area": "Transfer",
    "level": "medium",
    "title": "A paired sender can place start-up programs and login keys (by design; now listed)",
-   "state": "being fixed"
+   "state": "fixed"
   }
  ]
 }

@@ -9,11 +9,11 @@ NetBird peers, which a broadcast does not reach, it answers on a TCP port of its
   {"op": "knock", "name": "PC"}   -> {"ok": true} or {"ok": false, "error": ...}
 
 A knock shows a notification here ("PC wants this device's setup"); its Send button opens
-the Transfer window, nothing more. It never starts sending and never tells the code. Only
-devices on a private network, NetBird or this device get an answer; requests are small,
-slow ones are dropped, a few connections at a time."""
+the Transfer window, nothing more. It never starts sending and never tells the code. After a
+few knocks nobody acted on, it stays quiet until Transfer is opened here, or an hour passed.
+Only this device, NetBird peers and the home network get an answer (zorro_net); requests are
+small, slow ones are dropped, a few connections at a time."""
 import html
-import ipaddress
 import json
 import os
 import signal
@@ -31,17 +31,9 @@ TIMEOUT = 3                     # seconds for a whole request to arrive
 KNOCK_EACH = 60                 # seconds before the same device may knock again
 KNOCK_ALL = 3                   # notifications per minute, from everyone together
 KNOCK_SHOWN = 120               # seconds a notification waits for a choice
-NETBIRD = ipaddress.ip_network('100.64.0.0/10')
-
-
-def private(addr):
-    """an address on a private network, NetBird or this device"""
-    try:
-        ip = ipaddress.ip_address(addr.split('%')[0])
-    except (ValueError, AttributeError):
-        return False
-    ip = getattr(ip, 'ipv4_mapped', None) or ip
-    return ip.is_private or ip.is_loopback or ip in NETBIRD
+UNANSWERED = 3                  # knocks nobody acted on within UNANSWERED_IN: then quiet
+UNANSWERED_IN = 600
+QUIET_FOR = 3600                # seconds of quiet, unless Transfer is opened before
 
 
 def sending():
@@ -81,21 +73,38 @@ def read_request(conn):
         buf += chunk
 
 
-class Knocks:
-    """how often others may make this device show a notification"""
+def opened():
+    """when Transfer was last opened on this device (its window or the sender)"""
+    return state.touched('window.seen')
 
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.last, self.recent = {}, []
+
+class Knocks:
+    """how often others may make this device show a notification. now: time.time()"""
+
+    def __init__(self, seen=opened):
+        self.lock, self.seen = threading.Lock(), seen
+        self.last, self.recent, self.unanswered, self.quiet_from = {}, [], [], None
+
+    def quiet(self, now):
+        """after UNANSWERED knocks nobody acted on: none shown until Transfer is opened, or
+        QUIET_FOR passed"""
+        seen = self.seen()
+        self.unanswered = [t for t in self.unanswered if t > seen and now - t < UNANSWERED_IN]
+        if self.quiet_from is not None and (seen > self.quiet_from or now - self.quiet_from > QUIET_FOR):
+            self.quiet_from = None
+        return self.quiet_from is not None
 
     def allow(self, who, now):
         with self.lock:
             self.recent = [t for t in self.recent if now - t < 60]
             self.last = {k: t for k, t in self.last.items() if now - t < KNOCK_EACH}
-            if who in self.last or len(self.recent) >= KNOCK_ALL:
+            if self.quiet(now) or who in self.last or len(self.recent) >= KNOCK_ALL:
                 return False
             self.last[who] = now
             self.recent.append(now)
+            self.unanswered.append(now)
+            if len(self.unanswered) >= UNANSWERED:
+                self.quiet_from = now
             return True
 
 
@@ -146,7 +155,7 @@ class Beacon:
 
     def reply(self, req, peer):
         """the answer to one request, None for no answer at all"""
-        if not private(peer) or not isinstance(req, dict):
+        if not net.trusted(peer) or not isinstance(req, dict):
             return None
         op = req.get('op')
         if op == 'probe' and len(req) == 1:
@@ -160,7 +169,10 @@ class Beacon:
             return None
         if sending():
             return {'ok': True}         # it already sends: the asker sees that on its list
-        if not self.knocks.allow(peer, time.monotonic()):
+        if not self.knocks.allow(peer, time.time()):
+            if self.knocks.quiet_from is not None:
+                return {'ok': False, 'error': 'asked several times already: it shows no more '
+                                              'until Transfer is opened there'}
             return {'ok': False, 'error': 'already asked: try again in a minute'}
         threading.Thread(target=ask_user, args=(name,), daemon=True).start()
         return {'ok': True}
@@ -187,7 +199,7 @@ class Beacon:
                 time.sleep(0.5)
                 continue
             peer = addr[0][7:] if addr[0].startswith('::ffff:') else addr[0]
-            if not private(peer) or not self.slots.acquire(blocking=False):
+            if not net.trusted(peer) or not self.slots.acquire(blocking=False):
                 conn.close()
                 continue
             threading.Thread(target=self.handle, args=(conn, peer), daemon=True).start()
@@ -196,7 +208,7 @@ class Beacon:
         while not self.stop.is_set():
             try:
                 data, addr = u.recvfrom(MAX_REQUEST)
-                if data == net.WHO and private(addr[0]):
+                if data == net.WHO and net.trusted(addr[0]):
                     u.sendto(json.dumps(about()).encode(), addr)
             except socket.timeout:
                 pass

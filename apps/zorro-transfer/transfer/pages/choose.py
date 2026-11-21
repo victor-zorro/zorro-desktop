@@ -4,6 +4,7 @@
 the password is asked, once; then the copy runs as a process of its own."""
 from .. import state
 from ..receiver import Receiver
+from .groups import ask_groups
 from .passwords import ask_passwords
 from .widgets import GLib, Gtk, ROUTE, background, btn, human, label, spawn
 
@@ -73,14 +74,16 @@ class Choose:
                    lambda _: self.ready(groups), self.failed)
 
     def ready(self, groups):
-        """the small files are here: passwords for new accounts, then the admin password"""
+        """the small files are here: passwords for new accounts, your groups, then the admin
+        password"""
         r = Receiver()
         people = r.new_accounts()
         passwords = (ask_passwords(self.win, people) or {}) if people else {}
+        mine = ask_groups(self.win, r.groups_to_add()) or []
         self.line.set_text('Asking the admin password (login look, accounts)…')
 
         def root():
-            r.root_setup(passwords)
+            r.root_setup(passwords, mine)
             r.save(auto=True)
         background(self, root, lambda _: self.launch(groups), self.failed)
 

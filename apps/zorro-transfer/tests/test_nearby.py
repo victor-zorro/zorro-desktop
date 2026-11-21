@@ -7,25 +7,39 @@ import sys
 import time
 import unittest
 
+from unittest import mock
+
 from harness import HOST, Case, wait_for
 from transfer import beacon, net
 
 ABOUT = {'name', 'magic', 'sending'}
 
 
+def network(home):
+    """a made-up picture of the network for zorro_net: a home LAN (or a cafe) and NetBird"""
+    import ipaddress
+    nets = [('wlp1s0', ipaddress.ip_network('192.168.1.0/24')),
+            ('wt0', ipaddress.ip_network('100.64.0.0/16'))]
+    return mock.patch.object(net.zorro_net, 'look', return_value={'nets': nets, 'home': home})
+
+
 class Rules(unittest.TestCase):
-    def test_only_private_peers(self):
-        for addr in ('127.0.0.1', '192.168.1.5', '10.1.2.3', '172.16.0.9', '100.64.1.1',
-                     '100.127.255.254', '::1', '::ffff:192.168.1.5', 'fe80::1%eth0'):
-            self.assertTrue(beacon.private(addr), addr)
-        for addr in ('8.8.8.8', '100.128.0.1', '2a00:1450::1', '::ffff:8.8.8.8', 'nonsense', '',
-                     None):
-            self.assertFalse(beacon.private(addr), addr)
+    def test_only_trusted_peers(self):
+        with network(home=True):
+            for addr in ('127.0.0.1', '192.168.1.5', '100.64.1.1', '::1', '::ffff:192.168.1.5'):
+                self.assertTrue(net.trusted(addr), addr)
+            for addr in ('8.8.8.8', '10.1.2.3', '100.128.0.1', '2a00:1450::1', 'nonsense', ''):
+                self.assertFalse(net.trusted(addr), addr)
+        with network(home=False):               # a cafe: only this device and NetBird
+            self.assertFalse(net.trusted('192.168.1.5'))
+            self.assertTrue(net.trusted('100.64.1.1'))
+            self.assertTrue(net.trusted('127.0.0.1'))
 
     def test_a_public_peer_gets_no_answer(self):
         b = beacon.Beacon()
-        self.assertIsNone(b.reply({'op': 'probe'}, '8.8.8.8'))
-        self.assertIsNone(b.reply({'op': 'knock', 'name': 'x'}, '8.8.8.8'))
+        with network(home=True):
+            self.assertIsNone(b.reply({'op': 'probe'}, '8.8.8.8'))
+            self.assertIsNone(b.reply({'op': 'knock', 'name': 'x'}, '8.8.8.8'))
 
     def test_only_the_two_requests(self):
         b = beacon.Beacon()
@@ -35,13 +49,34 @@ class Rules(unittest.TestCase):
             self.assertIsNone(b.reply(req, '127.0.0.1'), req)
 
     def test_knocks_are_limited(self):
-        k = beacon.Knocks()
+        opened = [-1]
+        k = beacon.Knocks(seen=lambda: opened[0])
         self.assertTrue(k.allow('a', 0))
         self.assertFalse(k.allow('a', 30), 'the same device within a minute')
         self.assertTrue(k.allow('b', 31))
         self.assertTrue(k.allow('c', 32))
         self.assertFalse(k.allow('d', 33), 'more than three a minute')
+        opened[0] = 60                          # three unanswered: quiet until Transfer opens
         self.assertTrue(k.allow('a', 61))
+
+    def test_unanswered_knocks_make_it_quiet(self):
+        opened = [-1]
+        k = beacon.Knocks(seen=lambda: opened[0])
+        for i, t in enumerate((0, 100, 200)):
+            self.assertTrue(k.allow(f'pc{i}', t))
+        self.assertFalse(k.allow('pc0', 300), 'three nobody acted on: quiet')
+        self.assertFalse(k.allow('pc9', 1000), 'also for others')
+        self.assertTrue(k.allow('pc0', 200 + beacon.QUIET_FOR + 1), 'an hour later')
+        self.assertTrue(k.allow('pc1', 4000))
+        self.assertTrue(k.allow('pc2', 4100))
+        self.assertFalse(k.allow('pc3', 4200))
+        opened[0] = 4250                        # the user opened Transfer
+        self.assertTrue(k.allow('pc3', 4300))
+
+    def test_knocks_spread_out_stay_allowed(self):
+        k = beacon.Knocks(seen=lambda: -1)
+        for t in range(0, 6000, 700):           # one every 12 minutes: never three in 10
+            self.assertTrue(k.allow('pc', t), t)
 
     def test_names_are_cleaned(self):
         self.assertEqual(beacon.clean_name(' PC\n\x1b[31m '), 'PC[31m')

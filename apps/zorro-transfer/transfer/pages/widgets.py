@@ -1,4 +1,5 @@
 """Small things every page of the Transfer window uses."""
+import math
 import os
 import subprocess
 import sys
@@ -14,8 +15,9 @@ ROUTE = {'cable': 'over the cable', 'wifi': 'over Wi-Fi', 'netbird': 'over NetBi
 
 
 def num(x):
-    """a number from a state file, 0 when it is something else"""
-    return x if isinstance(x, (int, float)) and not isinstance(x, bool) else 0
+    """a number from a state file, 0 when it is something else (or endless)"""
+    good = isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    return x if good else 0
 
 
 def human(n):
@@ -26,7 +28,8 @@ def human(n):
 
 
 def eta(left, speed):
-    if speed <= 0:
+    left, speed = num(left), num(speed)
+    if speed <= 0 or left <= 0:
         return ''
     s = int(left / speed)
     return f'{s // 3600} h {s % 3600 // 60:02d} min left' if s >= 3600 else \

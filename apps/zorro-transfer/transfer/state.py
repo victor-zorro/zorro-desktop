@@ -21,6 +21,8 @@ RETRY_FOR = 30 * 60             # a lost connection: keep trying this long (seco
 RETRY_PAUSE = 5                 # between two tries
 APPS_WAIT = 24 * 3600           # "by itself" waits this long for apps to be closed
 APPS_POLL = 10
+STAGE_KEEP = 7 * 24 * 3600      # a staging folder nobody came back to for a week is removed
+PARTS = '.parts'                # SESSION.parts: half-arrived files, next to SESSION
 
 
 class Busy(Exception):
@@ -36,12 +38,26 @@ def write_state(name, data):
     tmp.replace(STATE / name)
 
 
-def read_state(name):
+def read_state(name, kind=dict):
     try:
         data = json.loads((STATE / name).read_text())
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, RecursionError):
+        return kind()
+    return data if isinstance(data, kind) else kind()
+
+
+def touch(name):
+    """a sign with only a time: the user opened Transfer"""
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / name).touch()
+
+
+def touched(name):
+    """when the sign was last left, 0 when never"""
+    try:
+        return (STATE / name).stat().st_mtime
+    except OSError:
+        return 0
 
 
 @contextmanager
@@ -95,8 +111,25 @@ def clean_stage(keep=None):
     if not STAGE.is_dir():
         return
     for d in STAGE.iterdir():
-        if d.name != keep and d.is_dir() and not d.is_symlink():
+        if d.name not in (keep, f'{keep}{PARTS}') and d.is_dir() and not d.is_symlink():
             shutil.rmtree(d, ignore_errors=True)
+
+
+def clean_old_stages(current=None, current_seen=0):
+    """remove staging folders nobody came back to for STAGE_KEEP; the current session counts
+    from its last sign of life"""
+    if not STAGE.is_dir():
+        return
+    now = time.time()
+    for d in STAGE.iterdir():
+        try:
+            seen = d.stat().st_mtime
+            if current and d.name in (current, f'{current}{PARTS}'):
+                seen = max(seen, current_seen)
+            if now - seen > STAGE_KEEP and d.is_dir() and not d.is_symlink():
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def notify(title, body=''):

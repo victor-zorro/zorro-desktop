@@ -19,30 +19,49 @@ Connect → Transfer, or the Dialer: type "transfer").
 
 Devices nearby: every device runs a small **beacon** (`zorro-beacon.service`, a user service
 that install.sh enables). It tells only its name, the Transfer version and whether it is
-sending; only to devices on a private network, NetBird or itself. A knock (Ask it to send)
-only shows a notification, at most once a minute per device and 3 a minute in all; it never
-starts sending and never tells the code. Settings → Connect → Transfer → Nearby lists them
-too, with **Get its setup**.
+sending; only to this device, NetBird peers and the home network (`apps/zorro-fx/zorro_net.py`:
+home is known by its router; a café's Wi-Fi or the mobile network is not). A knock (Ask it to
+send) only shows a notification, at most once a minute per device and 3 a minute in all;
+after 3 that nobody acted on (within 10 minutes) it stays quiet until Transfer is opened
+there, or an hour passed. It never starts sending and never tells the code. Two devices with
+the same name are both listed, with their addresses. Settings → Connect → Transfer → Nearby
+lists them too, with **Get its setup**.
 
-Safety: a transfer can only start with Transfer open on both devices. The code works once.
-One device pairs at a time; each wrong code makes the next try wait longer (2 s, 4 s… up to a
-minute), every 3 wrong tries a new code is made, and after 10 no code is offered until you
+Safety: a transfer can only start with Transfer open on both devices. The sender only lets
+in the same devices as the beacon, 8 connections at most. The code works once. One device
+pairs at a time, 15 seconds at most for the whole pairing; each wrong code makes the next try
+from that device wait longer (2 s, 4 s… up to a minute) and after 10 that device is not let
+in; every 3 wrong tries a new code is made; after 100 in all no code is offered until you
 press **New code**. Pairing uses SPAKE2 (as magic-wormhole does), so listening in does not
 reveal the code; the copy goes over TLS 1.3 with the paired key (this needs Python 3.13 or
 newer on both devices; Transfer says so when it is older).
 
 The new device does not take the sender's word for it:
 - It accepts only files that belong to the groups you ticked, checked against its own list
-  of what a group holds. Anything else in the sender's list is refused and counted.
+  of what a group holds. Anything else in the sender's list is refused and counted. Who may
+  log in to the new device is never copied: `.ssh/authorized_keys` does not travel.
+- Inside those groups a sender you paired with can still bring files that run by themselves
+  at login (autostart entries, user services, shell start-up files, `~/bin` programs). They
+  are listed before **Put in place** (in the window and by `apply`), and in the final notes
+  when it is put in place by itself: check them if you did not expect them.
+- Each file must come with the size of the list; a sender that sends more, or changes the
+  size, gets 3 tries for that file, then it is noted. Before the copy starts the new device
+  checks it has room for everything (and says so if not). Small files come in batches of
+  32 MB at most.
 - Every file is checked with a SHA-256 from the sender. A copy that does not match is thrown
   away and fetched again (3 times at most); then it is noted as "not received" and the rest
-  goes on. A file the sender cannot read is noted the same way.
+  goes on. A file the sender cannot read (also when the disk breaks halfway) is noted the
+  same way, and so is one that cannot be written here (a name taken by a folder…).
 - Received files wait in a folder only you can read (0700, files 0600). In place they get
-  the permissions they had (keys stay 0600, scripts stay runnable), never setuid, setgid or
-  writable by everyone; folders with keys and logins (`.ssh`, keyrings…) are yours only.
+  the permissions they had (scripts stay runnable), never setuid, setgid or writable by
+  everyone; everything of **Logins and keys** (and the logins of Claude and MQTTX) is yours
+  only: files 0600 (0700 when runnable), folders 0700.
 - A path that is a symbolic link, or lies behind one (`~/.config/openbox` into the repo), is
   left alone.
-- New accounts are shown with their groups before you type a password for them.
+- New accounts are shown with their groups before you type a password for them. The groups
+  your own account would join are shown before the admin password is asked; the powerful
+  ones (sudo, input, kvm, libvirt) only when you tick them (`apply` asks y/N). The admin
+  password is asked every time, never remembered.
 
 Interrupted (network gone, laptop closed)? It retries for half an hour after the last byte
 that arrived (the sender waits as long, also with its window closed), then stops; open
@@ -94,19 +113,24 @@ there for a clean copy). A home folder called `system` or `generated` cannot go 
     zorro-transfer apply           put in place
     zorro-transfer status          both sides' progress (JSON)
 
-State: `~/.local/state/zorro-transfer/` (sender.json, receiver.json, beacon.json, 0600; receiver.lock: one
-fetch at a time). Received files wait in `~/.local/share/zorro-transfer/SESSION/` until they
-are put in place; what an abandoned transfer left there is removed at the next pairing. Ports:
+State: `~/.local/state/zorro-transfer/` (sender.json, receiver.json with the progress,
+receiver-files.json with the file list, beacon.json, 0600; receiver.lock: one fetch or
+pairing at a time; window.pid: a Send page is open; window.seen: when Transfer was last
+opened). Received files wait in `~/.local/share/zorro-transfer/SESSION/` (half-arrived ones
+in `SESSION.parts/`) until they are put in place; what an abandoned transfer left there is
+removed at the next pairing, or after a week. Ports:
 47820 (TCP, the sender), 47821 (UDP, the beacon: "who?" on the local network) and 47822 (TCP,
 the beacon for NetBird peers: `{"op":"probe"}` and `{"op":"knock","name":…}`, 512 bytes at
 most); `ZORRO_TRANSFER_PORT` moves all three (tests).
 
 Code (`transfer/`): `sender.py` + `serve.py` the sending side, `receiver.py` + `fetch.py` the
 getting side, `place.py` + `after.py` putting in place, `check.py` everything the other device
-says is checked there, `items.py` + `generated.py` what goes along, `net.py` the wire,
+says is checked there, `items.py` + `generated.py` what goes along, `net.py` the wire (and who is trusted: `zorro_net`),
 `state.py` state files, `beacon.py` the beacon, `find.py` finding devices nearby, `cli.py`, `pages/` the window (one page
 per file).
 
 Tests: `python3 -m unittest discover apps/zorro-transfer/tests`: two made-up devices in a
 temporary folder talk over localhost; nmcli, pkexec and the root helper are stand-ins
 (`tests/bin`, also netbird and notify-send), nothing touches your real home or network.
+`test_window.py` opens the window's pages in a private Xvfb screen (skipped without Xvfb;
+`XVFB=/path/to/Xvfb` points to one).

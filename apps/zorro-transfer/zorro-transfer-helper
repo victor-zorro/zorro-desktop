@@ -4,11 +4,12 @@ password is asked once, at the start, and the rest runs on its own).
 Installed root-owned in /usr/local/libexec, run through pkexec.
 
   setup      reads JSON on stdin: {"look": {...} or null, "accounts": [...],
-             "passwords": {name: password}}
+             "passwords": {name: password}, "my_groups": [...]}
     look           the login look -> zorro-look-helper greeter-look (it checks every value)
     accounts       {"name", "full", "groups": [...], "me": bool} each
       me: true     the person running Transfer (their name here may differ from the old one):
-                   full name set, added to the groups; the password stays
+                   full name set; added only to the groups they confirmed (my_groups, which
+                   they saw before the password was asked); the password stays
       a new name   the account is made (home folder, bash), its password from "passwords"
                    (none: not made), full name, groups
       an existing name (not me)   left alone: never someone else's account changed
@@ -55,8 +56,9 @@ def group_exists(g):
     return subprocess.run(['getent', 'group', g], capture_output=True).returncode == 0
 
 
-def account(a, passwords):
-    """one account; 'updated', 'made', 'exists', 'skipped' or 'failed'"""
+def account(a, passwords, confirmed=()):
+    """one account; 'updated', 'made', 'exists', 'skipped' or 'failed'.
+    confirmed: the only groups the caller's own account may join"""
     try:
         name, full, groups, me = a['name'], a.get('full', ''), a.get('groups', []), a.get('me')
     except (KeyError, TypeError, AttributeError):
@@ -65,6 +67,8 @@ def account(a, passwords):
         full = ''
     if not isinstance(groups, list):
         groups = []
+    if me:
+        groups = [g for g in groups if g in confirmed]
     groups = [g for g in groups if g in GROUPS and group_exists(g)]
     if me:
         name = caller()                     # always yourself, whatever the old name was
@@ -99,8 +103,10 @@ def setup():
     if isinstance(look, dict):
         out['look'] = os.path.exists(LOOK) and subprocess.run(
             [LOOK, 'greeter-look', json.dumps(look)], capture_output=True).returncode == 0
+    confirmed = req.get('my_groups')
+    confirmed = {g for g in confirmed if isinstance(g, str)} if isinstance(confirmed, list) else set()
     for a in req.get('accounts') or []:
-        r = account(a, req.get('passwords') or {})
+        r = account(a, req.get('passwords') or {}, confirmed)
         if isinstance(a, dict) and a.get('me'):
             out['me'] = r == 'updated'
         elif r in ('made', 'skipped', 'failed'):

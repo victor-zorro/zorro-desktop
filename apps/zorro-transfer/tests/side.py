@@ -45,21 +45,76 @@ def lying_sha(real):
     return sha
 
 
+def lying_get(real):
+    """a sender that announces another size than its list, and then streams without end"""
+    def get(self, req):
+        if req.get('path') not in CFG.get('lie_size', []):
+            return real(self, req)
+        net.send_json(self.t, {'ok': True, 'size': 1 << 40, 'offset': 0})
+        while True:                         # until the receiver hangs up
+            self.t.sendall(b'x' * 65536)
+    return get
+
+
+def fat_batch(self, req):
+    """a sender that claims the biggest size for every file of a batch"""
+    n = len(req.get('paths') or [])
+    net.send_json(self.t, {'sizes': [serve.BATCH_MOST] * n})
+    while True:
+        self.t.sendall(b'x' * 65536)
+
+
+class BadDisk:
+    """a file that breaks after its first chunk, as a bad spot on a disk does"""
+
+    def __init__(self, fh):
+        self.fh, self.reads = fh, 0
+
+    def read(self, n):
+        self.reads += 1
+        if self.reads > 1:
+            raise OSError(5, 'Input/output error')
+        return self.fh.read(n)
+
+
+def failing_disk(real):
+    def stream(self, fh, size, off, rel):
+        return real(self, BadDisk(fh) if rel in CFG.get('eio', []) else fh, size, off, rel)
+    return stream
+
+
+def patch_wire():
+    """who is trusted, and the senders that do not play fair"""
+    distrust = set(CFG.get('distrust', []))
+    net.trusted = lambda addr: addr not in distrust and addr.startswith('127.')
+    serve.file_list = lying_file_list(serve.file_list)
+    serve.Serving.stream = failing_disk(lying_stream(serve.Serving.stream))
+    serve.Serving.get = lying_get(serve.Serving.get)
+    if CFG.get('fat_batch'):
+        serve.Serving.batch = fat_batch
+    serve.sha = lying_sha(serve.sha)
+    for name in ('BATCH_CAP',):
+        setattr(serve, name, CFG.get(name, getattr(serve, name)))
+    for name in ('FIRST_WAIT', 'MAX_FAILS', 'PEER_FAILS', 'IDLE_EXIT', 'PAIR_TIME', 'MAX_CONNECTIONS'):
+        setattr(sender, name, CFG.get(name, getattr(sender, name)))
+    if 'session_id' in CFG:
+        sender.new_session_id = lambda: CFG['session_id']
+
+
 def patch():
     items.running = running
+    desktop = items.GROUPS['desktop'][2]
+    desktop[:] = [r for r in desktop if not r.startswith('sys:')]     # never the real /etc
     items.SETUP_HELPER = CFG.get('helper', '/nonexistent/helper')
     after.SETTINGS = after.ICONS = Path('/nonexistent')
     generated.people = lambda: CFG.get('people', [])
     state.notify = lambda *a: None
     for name in ('RETRY_FOR', 'RETRY_PAUSE', 'APPS_WAIT', 'APPS_POLL'):
         setattr(state, name, CFG.get(name, getattr(state, name)))
-    for name in ('FIRST_WAIT', 'MAX_FAILS', 'IDLE_EXIT'):
-        setattr(sender, name, CFG.get(name, getattr(sender, name)))
-    if 'session_id' in CFG:
-        sender.new_session_id = lambda: CFG['session_id']
-    serve.file_list = lying_file_list(serve.file_list)
-    serve.Serving.stream = lying_stream(serve.Serving.stream)
-    serve.sha = lying_sha(serve.sha)
+    if 'groups_here' in CFG:
+        exist, mine = CFG['groups_here']
+        generated.groups_here = lambda: (set(exist), set(mine))
+    patch_wire()
     find.BROADCASTS = CFG.get('broadcasts', ['127.0.0.1'])    # never the real network
     for name in ('KNOCK_EACH', 'KNOCK_ALL', 'TIMEOUT'):
         setattr(beacon, name, CFG.get(name, getattr(beacon, name)))

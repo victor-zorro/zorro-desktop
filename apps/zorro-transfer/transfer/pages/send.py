@@ -27,6 +27,7 @@ def addresses():
 class Send:
     def __init__(self, win, start):
         self.win = win
+        state.write_pid('window.pid')       # the sender lives on while a Send page shows it
         if start:
             win.sender = spawn('send', '--gui-pid', str(os.getpid()))
         win.put(label('Sending this setup', big=True))
@@ -45,6 +46,10 @@ class Send:
         win.put(row)
         win.tip()
         win.every(500, self.tick)
+
+    def leave(self):
+        if state.read_pid('window.pid') == os.getpid():
+            (state.STATE / 'window.pid').unlink(missing_ok=True)
 
     def sender_pid(self):
         """the sender this page belongs to, None when none runs"""
@@ -93,9 +98,17 @@ class Send:
             self.line.set_text('')
         elif st.get('status') == 'wrong code':
             self.line.set_text('Someone typed a wrong code. Each wrong try makes the next one wait '
-                               'longer; after 10 no code is offered any more.')
+                               'longer; after 10 that device is not let in.')
 
     def tick(self):
+        """the timer: it never raises (a GLib timer that raises is gone for good)"""
+        try:
+            self.show()
+        except Exception as e:              # odd values in sender.json: shown, not fatal
+            self.line.set_text(f'Could not show the progress: {e}')
+        return True
+
+    def show(self):
         st = state.read_state('sender.json')
         sessions = [s for s in (st.get('sessions') or {}).values() if isinstance(s, dict)]
         busy = [s for s in sessions if s.get('status') in ('connected', 'paired')
@@ -105,4 +118,3 @@ class Send:
         self.show_progress(st, busy, sessions)
         if not self.sender_pid():
             self.line.set_text('Not sending any more.')
-        return True

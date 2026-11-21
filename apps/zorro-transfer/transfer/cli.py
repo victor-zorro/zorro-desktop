@@ -18,7 +18,7 @@ import getpass
 import json
 import sys
 
-from . import beacon, check, find, net, place, state
+from . import beacon, check, find, generated, net, place, state
 from .receiver import Receiver
 from .sender import Sender
 
@@ -91,11 +91,30 @@ def ask_password(acc):
     return ''
 
 
+def yes(question):
+    try:
+        return input(question).strip().lower() in ('y', 'yes')
+    except EOFError:
+        return False
+
+
+def ask_groups(groups):
+    """the groups your own account would join: plain ones are listed, powerful ones asked"""
+    if not groups:
+        return []
+    print('Your account here joins these groups: ' + ', '.join(g for g, _ in groups))
+    return [g for g, powerful in groups
+            if not powerful or yes(f'  {g} ({generated.POWERFUL[g]}): add it? [y/N] ')]
+
+
 def apply(_a):
     r = Receiver()
     passwords = {acc['name']: ask_password(acc) for acc in r.new_accounts()}
+    groups = ask_groups(r.groups_to_add())
+    for line in place.starters_note(r.starters()):
+        print(line)
     try:
-        moved, kept = r.apply(passwords)
+        moved, kept = r.apply(passwords, groups)
     except place.AppsOpen as e:
         print(f'!! close these first: {e}', file=sys.stderr)
         return 1

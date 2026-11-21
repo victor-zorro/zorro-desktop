@@ -2,6 +2,7 @@
 The copy is a process of its own (zorro-transfer continue); this page shows receiver.json."""
 from .. import place, state
 from ..receiver import Receiver
+from .groups import ask_groups
 from .passwords import ask_passwords
 from .widgets import Gtk, ROUTE, background, btn, eta, human, label, num, spawn
 
@@ -52,7 +53,7 @@ class Progress:
         self.buttons = win.put(Gtk.Box(spacing=8))
         win.tip()
         self.status = None
-        self.replaced = None                # how many files get replaced: counted once
+        self.replaced = None                # (files replaced, files that start by themselves)
         self.tick()
         win.every(500, self.tick)
 
@@ -77,15 +78,17 @@ class Progress:
             return f"Everything is here, but: {st['error']}"
         if self.replaced is None:
             self.replaced = 'counting'
-            background(self, lambda: len(Receiver().conflicts()),
+            background(self, lambda: (len(Receiver().conflicts()), Receiver().starters()),
                        lambda n: setattr(self, 'replaced', n),
-                       lambda e: setattr(self, 'replaced', 0))
+                       lambda e: setattr(self, 'replaced', (0, [])))
         if self.replaced == 'counting':
             return 'Everything is here.'
-        return 'Everything is here. ' + (
-            f'{self.replaced} of these files replace different ones on this device; those are '
-            f'kept as .before-transfer copies.' if self.replaced
+        replaced, starting = self.replaced
+        text = 'Everything is here. ' + (
+            f'{replaced} of these files replace different ones on this device; those are '
+            f'kept as .before-transfer copies.' if replaced
             else 'Nothing on this device gets replaced.')
+        return '\n'.join([text] + place.starters_note(starting))
 
     def fit_buttons(self, status):
         for c in self.buttons.get_children():
@@ -105,7 +108,8 @@ class Progress:
         r = Receiver()
         people = r.new_accounts()
         passwords = ask_passwords(self.win, people) if people else {}
-        if passwords is None:
+        mine = ask_groups(self.win, r.groups_to_add()) if passwords is not None else None
+        if mine is None:
             return
         self.line.set_text('Putting it in place… (the login look and accounts ask your password)')
         for c in self.buttons.get_children():
@@ -113,7 +117,7 @@ class Progress:
 
         def work():
             try:
-                r.apply(passwords)
+                r.apply(passwords, mine)
             except place.AppsOpen as e:
                 r.save(status='apps open', error=str(e))
             except Exception as e:          # the page shows it and offers the button again
