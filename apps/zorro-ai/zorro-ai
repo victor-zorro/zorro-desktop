@@ -1,0 +1,10 @@
+#!/usr/bin/python3
+"""zorro-ai: the one AI service every Zorro app asks. The code is the package zai/ next to this file."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from zai.cli import main  # noqa: E402
+
+if __name__ == '__main__':
+    sys.exit(main())

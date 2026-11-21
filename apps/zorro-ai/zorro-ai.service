@@ -1,0 +1,12 @@
+[Unit]
+Description=zorro-ai: the one AI service every Zorro app asks
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/zorro-ai serve
+Nice=5
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
