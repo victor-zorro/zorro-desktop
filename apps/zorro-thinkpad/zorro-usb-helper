@@ -1,0 +1,105 @@
+#!/usr/bin/python3 -I
+"""zorro-usb-helper: write an installer ISO to a USB stick (Connect → New device). Runs as
+root through polkit, which asks the admin password every time.
+
+  zorro-usb-helper write ISO DEVICE
+
+Only a whole, removable USB disk is accepted, never a disk the system runs from; the ISO
+must be a real ISO file of the user who asked. Everything on the stick is erased.
+"""
+import os
+import re
+import stat
+import subprocess
+import sys
+
+CHUNK = 4 << 20
+MAX_ISO = 8 << 30
+
+
+def die(msg):
+    print(f'zorro-usb-helper: {msg}', file=sys.stderr)
+    sys.exit(1)
+
+
+def usb_stick(dev):
+    """the disk's name (sdb) when DEVICE is a whole removable USB disk, else stop"""
+    if not re.fullmatch(r'/dev/sd[a-z]{1,2}', dev):
+        die('not a USB stick')
+    name = dev[5:]
+    sysdir = f'/sys/block/{name}'
+    try:
+        removable = open(f'{sysdir}/removable').read().strip() == '1'
+        on_usb = '/usb' in os.path.realpath(f'{sysdir}/device')
+    except OSError:
+        die('no such stick')
+    if not (removable and on_usb):
+        die('not a removable USB stick')
+    return name
+
+
+def in_use(name):
+    """mount points of this disk's partitions; stop when the system itself runs from it"""
+    points = []
+    for line in open('/proc/self/mounts'):
+        src, point = line.split()[:2]
+        if re.fullmatch(rf'/dev/{name}\d*', src):
+            if point in ('/', '/boot', '/boot/efi', '/home', '/usr', '/var'):
+                die('the system runs from this disk')
+            points.append(point)
+    for line in open('/proc/swaps').read().splitlines()[1:]:
+        if re.match(rf'/dev/{name}\d*\s', line):
+            die('this disk is used as swap')
+    return points
+
+
+def iso_file(path, uid):
+    """the ISO, opened once (no link followed): the file that is checked is the file copied"""
+    try:
+        src = os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb')
+        st = os.fstat(src.fileno())
+        src.seek(32769)
+        magic = src.read(5)
+        src.seek(0)
+    except OSError as e:
+        die(str(e))
+    if not stat.S_ISREG(st.st_mode) or st.st_uid != uid:
+        die('not your ISO file')
+    if magic != b'CD001' or not 0 < st.st_size <= MAX_ISO:
+        die('not an ISO file')
+    return src, st.st_size
+
+
+def write(iso, dev):
+    try:
+        uid = int(os.environ['PKEXEC_UID'])
+    except (KeyError, ValueError):
+        die('run through pkexec')
+    name = usb_stick(dev)
+    src, size = iso_file(iso, uid)
+    disk = int(open(f'/sys/block/{name}/size').read()) * 512
+    if disk < size:
+        die('the stick is too small')
+    for point in in_use(name):
+        if subprocess.run(['umount', point]).returncode != 0:
+            die(f'{point} is in use: close what uses the stick')
+    with src, open(dev, 'wb') as dst:
+        while True:
+            block = src.read(CHUNK)
+            if not block:
+                break
+            dst.write(block)
+        dst.flush()
+        os.fsync(dst.fileno())
+    sys.exit(0)
+
+
+def main():
+    a = sys.argv[1:]
+    if a[:1] == ['write'] and len(a) == 3:
+        write(a[1], a[2])
+    die('usage: write ISO DEVICE')
+
+
+if __name__ == '__main__':
+    main()

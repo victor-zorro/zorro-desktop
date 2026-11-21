@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Make an installer ISO that sets up the Zorro desktop: the official Debian 13 network
+# installer with our answers added (tools/iso/preseed.cfg). Boot a new machine from it
+# (as a file in a VM, or written to a USB stick), answer name, password and disk; at the
+# first login the desktop installs itself.
+#   tools/make-iso [OUT.iso]        default: ~/Installers/zorro-desktop.iso
+# Needs xorriso (apt install xorriso; or XORRISO=/path/to/xorriso), curl, cpio, gzip.
+set -euo pipefail
+here=$(dirname "$(realpath "$0")")
+out=${1:-$HOME/Installers/zorro-desktop.iso}
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/zorro-iso
+base=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
+xorriso=${XORRISO:-xorriso}
+
+for tool in "$xorriso" curl cpio gzip sha256sum; do
+  command -v "$tool" >/dev/null || { echo "$tool is missing (sudo apt install xorriso curl cpio)"; exit 1; }
+done
+
+# the newest Debian installer, checked against Debian's own list of checksums
+mkdir -p "$cache" "$(dirname "$out")"
+line=$(curl -fsSL "$base/SHA256SUMS" | grep -E '  debian-[0-9.]+-amd64-netinst\.iso$' | head -1)
+[[ -n $line ]] || { echo "could not find the Debian installer at $base"; exit 1; }
+sum=${line%% *}; name=${line##* }; iso=$cache/$name
+good() { [[ -f $iso ]] && echo "$sum  $iso" | sha256sum -c --quiet 2>/dev/null; }
+if ! good; then
+  echo "Downloading $name…"
+  curl -fsSL -C - --retry 3 -o "$iso" "$base/$name"
+  good || { rm -f "$iso"; echo "the download is damaged: try again"; exit 1; }
+fi
+
+work=$(mktemp -d)
+trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
+cp "$here/iso/preseed.cfg" "$here/iso/zorro-first-login.sh" "$work/"
+
+# our answers go into the installer's start-up files (text and graphical installer)
+maps=(); n=0
+for rd in /install.amd/initrd.gz /install.amd/gtk/initrd.gz; do
+  n=$((n + 1)); f=$work/initrd$n
+  "$xorriso" -osirrox on -indev "$iso" -extract "$rd" "$f.gz" >/dev/null 2>&1 || continue
+  chmod u+w "$f.gz"
+  gzip -d "$f.gz"
+  (cd "$work" && printf 'preseed.cfg\nzorro-first-login.sh\n' | cpio -o -H newc -A -F "$f" 2>/dev/null)
+  gzip -1 "$f"
+  maps+=(-map "$f.gz" "$rd")
+done
+[[ ${#maps[@]} -gt 0 ]] || { echo "this Debian installer looks different: nothing changed"; exit 1; }
+
+rm -f "$out.tmp"
+"$xorriso" -indev "$iso" -outdev "$out.tmp" -boot_image any replay -volid ZORRO_DESKTOP \
+  "${maps[@]}" >/dev/null 2>"$work/log" || { tail -3 "$work/log"; exit 1; }
+mv "$out.tmp" "$out"
+echo "Ready: $out ($(du -h "$out" | cut -f1))"
