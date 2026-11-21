@@ -1,26 +1,24 @@
 """The web server: the page, the API and the plan page, for private addresses only
 (home network, NetBird, this laptop)."""
-import ipaddress
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from . import api, plan
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'zorro-fx'))
+import zorro_net  # noqa: E402  (who may use the small servers on this device)
+
 WEB = Path(__file__).resolve().parent / 'web'
 TYPES = {'.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript'}
 MAX_BODY = 20000
-NETBIRD = ipaddress.ip_network('100.64.0.0/10')
 
 
 def private(addr):
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    ip = getattr(ip, 'ipv4_mapped', None) or ip
-    return ip.is_private or ip.is_loopback or ip in NETBIRD
+    """may this address use DEVS: this device, NetBird or the home network"""
+    return zorro_net.trusted(addr)
 
 
 def web_files():
@@ -33,6 +31,7 @@ def web_files():
 
 class Page(BaseHTTPRequestHandler):
     files = web_files()
+    timeout = 15                        # a request that dribbles in does not keep a thread
 
     def send(self, code, body, kind='application/json'):
         if not isinstance(body, (str, bytes)):
@@ -46,7 +45,9 @@ class Page(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def allowed(self):
-        if private(self.client_address[0]):
+        # also: asked for by this device's own name, and not from another website's page
+        if private(self.client_address[0]) and zorro_net.host_ok(self.headers.get('Host')) \
+                and zorro_net.same_site(self.headers):
             return True
         self.send(403, 'only for the home network / NetBird', 'text/plain')
         return False
@@ -77,12 +78,12 @@ class Page(BaseHTTPRequestHandler):
         if not 0 <= size <= MAX_BODY:
             self.send(400, {'error': 'too long'})
             return None
-        if 'json' not in (self.headers.get('Content-Type') or ''):
+        if self.headers.get_content_type() != 'application/json':
             self.send(400, {'error': 'send JSON'})
             return None
         try:
             return json.loads(self.rfile.read(size) or b'{}')
-        except ValueError:
+        except (ValueError, RecursionError, OSError):
             self.send(400, {'error': 'not JSON'})
             return None
 

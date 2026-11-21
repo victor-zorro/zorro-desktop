@@ -27,9 +27,13 @@ def path(state, topic):
 
 def load(state, topic):
     try:
-        return json.loads(path(state, topic).read_text())
+        chat = json.loads(path(state, topic).read_text())
     except (OSError, ValueError):
         return {'messages': []}
+    if topic not in BUSY:           # left over from a stop in the middle of an answer
+        for m in chat.get('messages', []):
+            m.pop('busy', None)
+    return chat
 
 
 def save(state, topic, chat):
@@ -83,9 +87,13 @@ def answer(state, topic, chat, ask_text):
         killer.cancel()
         if proc.wait() != 0 and not reply['content']:
             reply['content'] = 'No answer: the AI could not be reached.'
-    except OSError as e:
-        reply['content'] = f'No answer: {e}'
-    reply.pop('busy', None)
-    save(state, topic, chat)
-    with LOCK:
-        BUSY.discard(topic)
+    except Exception as e:      # noqa: BLE001  whatever happens, the chat must not stay "writing…"
+        reply['content'] = reply['content'] or f'No answer: {e}'
+    finally:
+        reply.pop('busy', None)
+        with LOCK:
+            BUSY.discard(topic)
+        try:
+            save(state, topic, chat)
+        except OSError:
+            pass

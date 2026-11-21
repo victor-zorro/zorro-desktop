@@ -9,15 +9,19 @@ this laptop) may open it.
   plan/serve.py            run in the foreground
   systemd-run --user --unit zorro-plan plan/serve.py     run in the background
 """
-import ipaddress
 import json
 import os
 import re
+import sys
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import chat
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'apps' / 'zorro-fx'))
+import zorro_net  # noqa: E402  (who may use this server: this device, NetBird, the home network)
 
 PORT = int(os.environ.get('ZORRO_PLAN_PORT', '8099'))
 HERE = Path(__file__).resolve().parent
@@ -25,6 +29,7 @@ STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state'))
 ANSWERS = STATE / 'answers.json'
 ID = re.compile(r'[a-z0-9-]{1,40}')
 LOCK = threading.Lock()
+MAX_ANSWERS = 200               # the page has a few dozen questions; nobody fills the disk
 FILES = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/html'),
          '/style.css': ('style.css', 'text/css'), '/page.js': ('page.js', 'text/javascript'),
          '/nav.js': ('nav.js', 'text/javascript'),
@@ -40,16 +45,9 @@ def read():
         return {}
 
 
-def private(addr):
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    ip = getattr(ip, 'ipv4_mapped', None) or ip
-    return ip.is_private or ip.is_loopback or ip in ipaddress.ip_network('100.64.0.0/10')
-
-
 class Page(BaseHTTPRequestHandler):
+    timeout = 15                        # a request that dribbles in does not keep a thread
+
     def send(self, code, body, kind='application/json'):
         data = body.encode() if isinstance(body, str) else body
         self.send_response(code)
@@ -60,10 +58,31 @@ class Page(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def allowed(self):
-        if private(self.client_address[0]):
+        """this device, NetBird or the home network, asking for this device by its own name
+        (a website cannot pose as it), and no other website's page behind the request"""
+        if zorro_net.trusted(self.client_address[0]) and zorro_net.host_ok(self.headers.get('Host')) \
+                and zorro_net.same_site(self.headers):
             return True
         self.send(403, 'only for the home network / NetBird', 'text/plain')
         return False
+
+    def body(self, limit):
+        """the JSON object a POST carries, or None (and the refusal is sent)"""
+        try:
+            n = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            n = -1
+        if self.headers.get_content_type() != 'application/json' or not 0 < n <= limit:
+            self.send(400, 'expected a JSON body', 'text/plain')
+            return None
+        try:
+            data = json.loads(self.rfile.read(n))
+        except (ValueError, RecursionError, OSError):
+            data = None
+        if not isinstance(data, dict):
+            self.send(400, 'not JSON', 'text/plain')
+            return None
+        return data
 
     def do_GET(self):
         if not self.allowed():
@@ -87,19 +106,19 @@ class Page(BaseHTTPRequestHandler):
         m = re.fullmatch(r'/api/answers/(.+)', self.path)
         if not m or not ID.fullmatch(m.group(1)):
             return self.send(404, 'not found', 'text/plain')
-        n = int(self.headers.get('Content-Length') or 0)
-        if not 0 < n <= 20000:
-            return self.send(400, 'too long', 'text/plain')
+        v = self.body(20000)
+        if v is None:
+            return
         try:
-            v = json.loads(self.rfile.read(n))
             entry = {'pick': [str(x)[:200] for x in v.get('pick', [])][:20],
                      'note': str(v.get('note', ''))[:10000]}
-        except (ValueError, AttributeError, TypeError):
+        except TypeError:
             return self.send(400, 'not JSON', 'text/plain')
-        from datetime import datetime
         entry['at'] = datetime.now().isoformat(timespec='seconds')
         with LOCK:
             data = read()
+            if m.group(1) not in data and len(data) >= MAX_ANSWERS:
+                return self.send(400, 'too many answers', 'text/plain')
             data[m.group(1)] = entry
             STATE.mkdir(parents=True, exist_ok=True)
             tmp = ANSWERS.with_suffix('.tmp')
@@ -108,13 +127,12 @@ class Page(BaseHTTPRequestHandler):
         self.send(200, '{"ok": true}')
 
     def post_chat(self, topic):
-        n = int(self.headers.get('Content-Length') or 0)
-        if topic not in chat.BRIEFS or not 0 < n <= 20000:
+        if topic not in chat.BRIEFS:
             return self.send(404, 'not found', 'text/plain')
-        try:
-            text = str(json.loads(self.rfile.read(n)).get('text', '')).strip()[:8000]
-        except (ValueError, AttributeError):
-            return self.send(400, 'not JSON', 'text/plain')
+        v = self.body(20000)
+        if v is None:
+            return
+        text = str(v.get('text', '')).strip()[:8000]
         if not text:
             return self.send(400, 'empty', 'text/plain')
         notes = str(read().get(f'{topic}-notes', {}).get('note', ''))

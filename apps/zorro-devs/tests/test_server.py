@@ -6,11 +6,18 @@ from devs import devices, server, store
 
 
 class Address(unittest.TestCase):
-    def test_only_private_addresses(self):
-        for good in ('127.0.0.1', '192.168.1.5', '10.0.0.7', '100.80.1.1', '::1', '::ffff:192.168.1.5'):
+    def test_only_this_device_and_known_networks(self):
+        for good in ('127.0.0.1', '::1', '::ffff:127.0.0.1'):
             self.assertTrue(server.private(good), good)
-        for bad in ('8.8.8.8', '100.128.0.1', '2a00:1450::1', '::ffff:8.8.8.8', 'laptop', ''):
+        for bad in ('8.8.8.8', '100.128.0.1', '2a00:1450::1', '::ffff:8.8.8.8', '2002::1', 'laptop', ''):
             self.assertFalse(server.private(bad), bad)
+
+    def test_another_websites_page_is_refused(self):
+        net = server.zorro_net
+        self.assertFalse(net.host_ok('evil.example:8098'))
+        self.assertTrue(net.host_ok('127.0.0.1:8098'))
+        self.assertFalse(net.same_site({'Origin': 'http://evil.example', 'Host': '127.0.0.1:8098'}))
+        self.assertTrue(net.same_site({'Origin': 'http://127.0.0.1:8098', 'Host': '127.0.0.1:8098'}))
 
 
 class Api(ServerCase):
@@ -57,6 +64,7 @@ class Api(ServerCase):
         self.assertEqual(self.call('/api/items', raw=b'{nope')[0], 400)
         self.assertEqual(self.call('/api/items', raw=b'"' + b'x' * 30000 + b'"')[0], 400)
         self.assertEqual(self.call('/api/items', {'kind': 'bug', 'title': 'x'}, kind='text/plain')[0], 400)
+        self.assertEqual(self.call('/api/items', {'kind': 'bug', 'title': 'x'}, kind='text/plain;json')[0], 400)
         self.assertEqual(self.call(f'/api/items/{made["id"]}', {'id': 'other'})[0], 400)
         self.assertEqual(self.call('/api/items/..%2F..%2Fdevices', {'status': 'done'})[0], 400)
         self.assertEqual(self.call('/api/items/../devices', {'status': 'done'})[0], 404)

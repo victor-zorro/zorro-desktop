@@ -1,6 +1,7 @@
 """The JSON API: each route takes plain values and returns (status code, answer)."""
 import re
 import threading
+import time
 
 from . import checks, devices, plan, store
 
@@ -8,6 +9,8 @@ ITEM = re.compile(r'/api/items/([^/]+)')
 ITEM_TEST = re.compile(r'/api/items/([^/]+)/test')
 ANSWER = re.compile(r'/plan/api/answers/([^/]+)')
 CHECKING = threading.Lock()
+CHECK_GAP = 60                  # seconds between two runs of the automatic checks
+LAST_CHECK = {"at": -CHECK_GAP}
 MISSING = (404, {'error': 'not found'})
 
 
@@ -70,6 +73,9 @@ def run_checks():
     if not CHECKING.acquire(blocking=False):
         return 409, {'error': 'the checks are already running'}
     try:
+        if time.monotonic() - LAST_CHECK['at'] < CHECK_GAP:
+            return 429, {'error': 'the checks just ran: wait a minute'}
+        LAST_CHECK['at'] = time.monotonic()
         return 200, {'checks': checks.run()}
     finally:
         CHECKING.release()
