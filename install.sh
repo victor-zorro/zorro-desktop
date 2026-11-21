@@ -64,6 +64,21 @@ if ! has vm && [[ -f /etc/network/interfaces ]] && command -v nmcli >/dev/null; 
   fi
 fi
 
+# The cable keeps its address: ifupdown asked the router for one as dhcpcd, with dhcpcd's own
+# ID. A router that reserved an address for that ID sees NetworkManager as a new device and
+# gives another one. So NetworkManager uses the same ID (ff + last 4 bytes of the MAC + DUID).
+if ! has vm && sudo test -s /var/lib/dhcpcd/duid && command -v nmcli >/dev/null; then
+  duid=$(sudo cat /var/lib/dhcpcd/duid)
+  for dev in /sys/class/net/en* /sys/class/net/eth*; do
+    [[ -e $dev/device ]] || continue
+    c=${dev##*/}; conf=/etc/NetworkManager/conf.d/20-zorro-cable-id-$c.conf
+    [[ -f $conf ]] && continue
+    log "Cable $c: keeps the ID the router knows it by (same address as before)"
+    printf '[connection-zorro-cable-id-%s]\nmatch-device=interface-name:%s\nipv4.dhcp-client-id=ff:%s:%s\n' \
+      "$c" "$c" "$(cut -d: -f3-6 "$dev/address")" "$duid" | sudo tee "$conf" >/dev/null
+  done
+fi
+
 # --- Apt repositories ---------------------------------------------------
 # A repo is added once; a rerun skips the key downloads and the second apt update.
 log "Adding apt repositories"

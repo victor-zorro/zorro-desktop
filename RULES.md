@@ -18,9 +18,14 @@ run it before every commit. CLAUDE.md points here.
    when these rules started are listed in `tools/rules-baseline.json`. Their listed
    size is their limit. Adding a feature to one of them means splitting it first.
    After shrinking, run `tools/check-rules --update`.
-7. **Each page opens in a test.** Every page is built once in a private test screen
+7. **Code a person can read.** Plain names, short straight functions, no clever
+   tricks. Comments only where the code cannot say why; never a comment that repeats
+   the code.
+8. **No endless loops.** Every loop that waits or retries has an end: a count, a
+   deadline or a stop signal. Nothing polls faster than it must.
+9. **Each page opens in a test.** Every page is built once in a private test screen
    by the page check; a page that fails to open, or is taller than one screen, fails.
-8. **Reviews.** A code review before a build starts and one after it, findings into
+10. **Reviews.** A code review before a build starts and one after it, findings into
    DEVS.
 
 ## Design rules: direct, never long
