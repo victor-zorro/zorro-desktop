@@ -193,6 +193,18 @@
    "ran": "Opus reviewers (asked for); fixes: Fable and Opus"
   },
   {
+   "name": "Model choice for the AI (Haiku, Sonnet, Opus per place)",
+   "state": "done",
+   "note": "Dialer: Haiku, Intelligence and DEVS/design: Sonnet, unless you choose; checked with real calls",
+   "pct": 100,
+   "model": "Sonnet",
+   "ran": "Sonnet (asked for)",
+   "started": "12:56",
+   "est": 15,
+   "est_at": "12:56",
+   "finished": "13:00"
+  },
+  {
    "name": "WinBox replacement",
    "state": "todo",
    "note": "design first: use the design area",
