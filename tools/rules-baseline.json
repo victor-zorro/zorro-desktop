@@ -81,15 +81,9 @@
   "functions": {},
   "lines": 497
  },
- "apps/zorro-thinkpad/zsettings/app.py": {
-  "functions": {
-   "__init__": 79
-  },
-  "lines": 0
- },
  "apps/zorro-thinkpad/zsettings/hardware.py": {
   "functions": {
-   "hardware_rows": 83
+   "hardware_rows": 61
   },
   "lines": 0
  },
@@ -107,18 +101,18 @@
  },
  "apps/zorro-thinkpad/zsettings/pages_desktop.py": {
   "functions": {
-   "dial_page": 148,
+   "dial_page": 129,
    "fx_page": 86,
-   "orb_page": 72,
-   "text_page": 89
+   "orb_page": 69,
+   "text_page": 83
   },
-  "lines": 595
+  "lines": 594
  },
  "apps/zorro-thinkpad/zsettings/pages_home.py": {
   "functions": {
    "home_refresh": 82
   },
-  "lines": 644
+  "lines": 642
  },
  "apps/zorro-thinkpad/zsettings/pages_look.py": {
   "functions": {
@@ -135,20 +129,13 @@
  },
  "apps/zorro-thinkpad/zsettings/pages_thinkpad.py": {
   "functions": {
-   "lights_page": 83,
-   "power_page": 61
+   "lights_page": 83
   },
   "lines": 0
  },
  "apps/zorro-thinkpad/zsettings/windows.py": {
   "functions": {
    "write_theme": 82
-  },
-  "lines": 0
- },
- "apps/zorro-transfer/transfer/cli.py": {
-  "functions": {
-   "main": 61
   },
   "lines": 0
  },

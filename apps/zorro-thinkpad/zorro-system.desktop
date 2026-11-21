@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zorro System
+GenericName=Settings and hardware
+Comment=Network, audio, power, hardware, screens, ThinkPad keys and lights
+Exec=zorro-settings --app system
+Icon=preferences-system
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=network;wifi;audio;power;battery;bluetooth;printer;screen;monitor;thinkpad;

@@ -3,7 +3,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from .base import run, sysread
+from .base import load_conf, run, sysread
 
 
 # ---- hardware check -----------------------------------------------------------------------
@@ -55,12 +55,45 @@ def bt_state():
         p = line.split(' ', 2)
         if len(p) == 3 and p[0] == 'Device':
             info = run('bluetoothctl', 'info', p[1])
-            devs.append((p[1], p[2], 'Connected: yes' in info))
+            sound = bool(re.search(r'Icon: audio|Audio Sink|Headset|Handsfree', info))
+            devs.append((p[1], p[2], 'Connected: yes' in info, sound))
     return {'powered': powered, 'paired': devs}
 
 
 def input_names():
     return re.findall(r'N: Name="([^"]+)"', sysread('/proc/bus/input/devices'))
+
+
+def bluetooth_rows(ui, lsusb):
+    """the adapter, what is paired (with the Music tick for sound devices), what was found"""
+    rows = []
+    bt = bt_state()
+    usb_bt = next((l.split(' ', 6)[-1] for l in lsusb.splitlines() if 'Bluetooth' in l), 'adapter')
+    if bt is None:
+        rows.append(('bluetooth-symbolic', 'Bluetooth', 'warn',
+                     'No Bluetooth controller (switched off with F8 / airplane mode?)', []))
+    else:
+        detail = f'{usb_bt} · {"on" if bt["powered"] else "off"}'
+        if bt['powered']:
+            detail += ' · ' + (f'{len(bt["paired"])} paired' if bt['paired'] else 'nothing paired yet')
+        acts = [('Turn off' if bt['powered'] else 'Turn on', lambda p=bt['powered']: ui.bt_power(not p))]
+        if bt['powered']:
+            acts.append(('Search', ui.bt_scan))
+        rows.append(('bluetooth-active-symbolic' if bt['powered'] else 'bluetooth-disabled-symbolic',
+                     'Bluetooth', 'ok' if bt['powered'] else 'off', detail, acts))
+        music = set(load_conf().get('music_outputs') or [])
+        for mac, dname, conn, sound in bt['paired']:
+            acts = [('Disconnect' if conn else 'Connect',
+                     lambda m=mac, c=conn: ui.bt_cmd('disconnect' if c else 'connect', m)),
+                    ('Forget', lambda m=mac: ui.bt_cmd('remove', m))]
+            if sound:       # a tick: this device shows in the Dialer's Music part, one tap to play there
+                acts.insert(0, ('check', 'In Music', mac in music, lambda on, m=mac: ui.bt_music(m, on)))
+            rows.append((None, f'    {dname}', 'ok' if conn else 'off',
+                         f'    {mac} · {"connected" if conn else "not connected"}', acts))
+        for mac, dname in ui.bt_found:
+            rows.append((None, f'    {dname}', 'off', f'    {mac} · found nearby',
+                         [('Pair & connect', lambda m=mac: ui.bt_pair(m), True)]))
+    return rows
 
 
 def hardware_rows(ui):
@@ -93,29 +126,7 @@ def hardware_rows(ui):
 
     # sound outputs and inputs: the Audio tab (pages_audio.py)
 
-    bt = bt_state()
-    usb_bt = next((l.split(' ', 6)[-1] for l in lsusb.splitlines() if 'Bluetooth' in l), 'adapter')
-    if bt is None:
-        rows.append(('bluetooth-symbolic', 'Bluetooth', 'warn',
-                     'No Bluetooth controller (switched off with F8 / airplane mode?)', []))
-    else:
-        detail = f'{usb_bt} · {"on" if bt["powered"] else "off"}'
-        if bt['powered']:
-            detail += ' · ' + (f'{len(bt["paired"])} paired' if bt['paired'] else 'nothing paired yet')
-        acts = [('Turn off' if bt['powered'] else 'Turn on', lambda p=bt['powered']: ui.bt_power(not p))]
-        if bt['powered']:
-            acts.append(('Search', ui.bt_scan))
-        rows.append(('bluetooth-active-symbolic' if bt['powered'] else 'bluetooth-disabled-symbolic',
-                     'Bluetooth', 'ok' if bt['powered'] else 'off', detail, acts))
-        for mac, dname, conn in bt['paired']:
-            rows.append((None, f'    {dname}', 'ok' if conn else 'off',
-                         f'    {mac} · {"connected" if conn else "not connected"}',
-                         [('Disconnect' if conn else 'Connect',
-                           lambda m=mac, c=conn: ui.bt_cmd('disconnect' if c else 'connect', m)),
-                          ('Forget', lambda m=mac: ui.bt_cmd('remove', m))]))
-        for mac, dname in ui.bt_found:
-            rows.append((None, f'    {dname}', 'off', f'    {mac} · found nearby',
-                         [('Pair & connect', lambda m=mac: ui.bt_pair(m), True)]))
+    rows += bluetooth_rows(ui, lsusb)
 
     # Wi-Fi, Ethernet, mobile data and NetBird: the Network tab (pages_network.py)
 

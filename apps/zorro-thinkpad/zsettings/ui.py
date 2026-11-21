@@ -288,6 +288,14 @@ def colour(value, on_change):
 LIST = 10                               # space between the rows of a device list
 
 
+def scroll_list(widget, height=380):
+    """a long list or table in its own scrolling box, so the page itself stays one screen"""
+    sw = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=height,
+                            vexpand=True)
+    sw.add(widget)
+    return sw
+
+
 def device_list(**kw):
     """the box that holds device_row()s"""
     return Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=LIST, **kw)

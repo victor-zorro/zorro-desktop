@@ -239,7 +239,7 @@ class LookPages:
                       ('Line density', scale('density', 0.3, 3, 0.1, x)),
                       ('Size', scale('size', 0.2, 3, 0.05, x)),
                       ('Swim speed', scale('swim_speed', 0.1, 5, 0.1, x))]))
-        box.add(heading('Passing by', 'Passing'))
+        box.add(heading('Passing by'))
         box.add(grid([('Crossing takes', scale('pass_seconds', 10, 300, 5, lambda v: f'{v:.0f} s')),
                       ('Empty water between', scale('gap_seconds', 0, 300, 5, lambda v: f'{v:.0f} s')),
                       ('Far away, deep down', scale('far', 0, 1, 0.05, lambda v: f'{v * 100:.0f}%'))]))

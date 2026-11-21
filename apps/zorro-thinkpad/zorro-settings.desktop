@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Zorro
-GenericName=Settings
-Comment=Desktop, ThinkPad and login settings: keys, power, lights, hardware, overlays, info circle
+Name=Zorro Desktop
+GenericName=Look and how you work
+Comment=Home, Dialer, wallpaper, windows, look, login screen and accounts
 Exec=zorro-settings
 Icon=preferences-desktop
 Terminal=false

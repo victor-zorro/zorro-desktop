@@ -16,6 +16,30 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gdk, Gtk
 
 
+def slices_table(c, save):
+    """the six slices of the Dialer: a name and the app categories that go in it"""
+    g = Gtk.Grid(column_spacing=10, row_spacing=6)
+    g.attach(Gtk.Label(label='Name', xalign=0), 0, 0, 1, 1)
+    g.attach(Gtk.Label(label='App categories (comma separated)', xalign=0), 1, 0, 1, 1)
+    entries = []
+
+    def changed(_w):
+        c['slices'] = [{'name': n.get_text().strip(),
+                        'categories': [x.strip() for x in k.get_text().split(',') if x.strip()]}
+                       for n, k in entries if n.get_text().strip()] or c['slices']
+        save(slices=c['slices'])
+    for i, s in enumerate((c['slices'] + [{'name': '', 'categories': []}] * 6)[:6]):
+        name = Gtk.Entry(text=s['name'], width_chars=9, placeholder_text='(unused)')
+        cats = Gtk.Entry(text=', '.join(s['categories']), hexpand=True)
+        name.connect('changed', changed)
+        cats.connect('changed', changed)
+        entries.append((name, cats))
+        g.attach(name, 0, i + 1, 1, 1)
+        g.attach(cats, 1, i + 1, 1, 1)
+    g.zlist = True                      # one table of six alike rows
+    return g
+
+
 class DesktopPages:
     """Desktop tab: info circle, overlays, windows, text, launcher, wallpaper (a mixin of the app window)"""
 
@@ -439,26 +463,7 @@ class DesktopPages:
                      'sit right next to the clock, the outer rings hold more. In a corner the '
                      'Dialer has its own clock. Takes effect the next time it opens.'))
         box.add(heading('Slices (up to six)', 'Slices'))
-        g = Gtk.Grid(column_spacing=10, row_spacing=6)
-        g.attach(Gtk.Label(label='Name', xalign=0), 0, 0, 1, 1)
-        g.attach(Gtk.Label(label='App categories (comma separated)', xalign=0), 1, 0, 1, 1)
-        rows = (c['slices'] + [{'name': '', 'categories': []}] * 6)[:6]
-        entries = []
-
-        def changed(_w):
-            c['slices'] = [{'name': n.get_text().strip(),
-                            'categories': [x.strip() for x in k.get_text().split(',') if x.strip()]}
-                           for n, k in entries if n.get_text().strip()] or c['slices']
-            save(slices=c['slices'])
-        for i, s in enumerate(rows):
-            name = Gtk.Entry(text=s['name'], width_chars=9, placeholder_text='(unused)')
-            cats = Gtk.Entry(text=', '.join(s['categories']), hexpand=True)
-            name.connect('changed', changed)
-            cats.connect('changed', changed)
-            entries.append((name, cats))
-            g.attach(name, 0, i + 1, 1, 1)
-            g.attach(cats, 1, i + 1, 1, 1)
-        box.add(g)
+        box.add(slices_table(c, save))
         box.add(note('An app goes to the slice you chose for it (Apps), else to the first '
                      'slice whose categories match its .desktop file, else the last slice.'))
 
@@ -494,7 +499,7 @@ class DesktopPages:
             grid.attach(Gtk.Label(label=a['name'], xalign=0, ellipsize=3, max_width_chars=32,
                                   hexpand=True), 1, i, 1, 1)
             grid.attach(cb, 2, i, 1, 1)
-        box.add(grid)
+        box.add(ui.scroll_list(grid))
 
         box.add(heading('Rings', 'Rings'))
         g = Gtk.Grid(column_spacing=10, row_spacing=8)

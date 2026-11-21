@@ -29,6 +29,7 @@ class LangPages:
             grid.attach(cb, 0, i, 1, 1)
             grid.attach(st, 1, i, 1, 1)
             self.lang_checks[code], self.lang_state[code] = cb, st
+        grid.zlist = True               # one list of languages
         box.add(grid)
         row = Gtk.Box(spacing=8, margin_top=10)
         self.lang_btn = Gtk.Button(label='Apply')

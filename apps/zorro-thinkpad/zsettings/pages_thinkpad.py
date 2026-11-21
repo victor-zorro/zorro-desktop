@@ -11,7 +11,7 @@ from .keys import key_star
 from .lights import BAT_LOW, DOT_LED, DOT_MODES, KBD_LEVELS, MORSE_TEXT, MORSE_UNIT, OVERRIDES, OVERRIDE_MODES, POWER_LED, set_kbd, set_led
 from . import printers
 from .power import CHARGE_PRESETS, HELPER, PROFILES, battery_text, tlp_settings
-from .ui import KEY_TABLE, Pages, button, device_list, device_row, heading, idle, in_bg, later, mark, note, radios
+from .ui import KEY_TABLE, Pages, button, device_list, device_row, heading, idle, in_bg, later, mark, note, radios, scroll_list
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
@@ -33,7 +33,7 @@ class ThinkpadPages:
             kl.set_markup(f'<tt>{GLib.markup_escape_text(k)}</tt>')
             grid.attach(kl, 0, i, 1, 1)
             grid.attach(Gtk.Label(label=what, xalign=0, wrap=True), 1, i, 1, 1)
-        box.add(grid)
+        box.add(scroll_list(grid))
 
         box.add(heading('Star key (F12 ★)', 'Star key ★'))
         c = load_conf()
@@ -242,6 +242,7 @@ class ThinkpadPages:
                 c.destroy()
         group = 'Other devices'
         for icon, title, state, detail, acts in rows:
+            acts = [self.hw_check(*a[1:]) if a[0] == 'check' else a for a in acts]
             row = device_row(title.strip(), detail.replace('    ', ''), acts, icon=icon,
                              state=state, sub=not icon)     # sub: a Bluetooth device under its adapter
             if icon:
@@ -250,6 +251,12 @@ class ThinkpadPages:
         for lst in self.hw_lists.values():
             lst.show_all()
         return False
+
+    def hw_check(self, label, active, cb):
+        """a tick box among a row's actions (made here, on the main loop)"""
+        box = Gtk.CheckButton(label=label, active=active)
+        box.connect('toggled', lambda w: cb(w.get_active()))
+        return box
 
     def hw_do(self, busy_text, fn, done_text=None):
         """run fn() in a thread, show progress, then check the hardware again"""

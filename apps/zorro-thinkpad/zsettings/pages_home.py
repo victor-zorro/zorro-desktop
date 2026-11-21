@@ -95,8 +95,7 @@ class HomePages:
 
     def home_tick(self):
         # only while you look at it: not when another window is in front
-        if self.is_active() and self.top.get_visible_child_name() == 'home' \
-                and self.home.get_visible_child_name() == 'dash':
+        if self.is_active() and self.tab_on('home') and self.home.get_visible_child_name() == 'dash':
             self.home_refresh()
         return True
 

@@ -84,6 +84,12 @@ class BluetoothPages:
     def bt_power(self, on):
         self.hw_do('…', lambda: run('bluetoothctl', 'power', 'on' if on else 'off') and None)
 
+    def bt_music(self, mac, on):
+        """tick: this sound device is a one-tap output in the Dialer's Music part"""
+        now = [m for m in (load_conf().get('music_outputs') or []) if m != mac]
+        update_conf(None, music_outputs=now + [mac] if on else now)
+        self.hw_msg.set_text('Shows in the Dialer under Music' if on else 'Taken out of Music')
+
     def bt_cmd(self, cmd, mac):
         words = {'connect': 'Connecting', 'disconnect': 'Disconnecting', 'remove': 'Forgetting'}
 

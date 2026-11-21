@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Zorro Connect
+GenericName=Set up and link devices
+Comment=Transfer this setup to another device, start a new machine (command, USB, ISO), install apps
+Exec=zorro-settings --app connect
+Icon=network-transmit-receive
+Terminal=false
+Categories=Settings;
+Keywords=transfer;bootstrap;usb;iso;install;netbird;

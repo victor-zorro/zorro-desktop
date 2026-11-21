@@ -5,6 +5,8 @@ gnome-keyring-daemon --start --components=secrets &
 # Window theme, compositor (picom) and kitty opacity from the Zorro app; before the
 # indicator below, which picks real or faked transparency when it starts
 command -v zorro-settings >/dev/null && zorro-settings --apply-windows --login
+# the second and third screen where you put them (System → Hardware → Screens)
+command -v zorro-settings >/dev/null && zorro-settings --apply-screens
 lxpolkit &
 dunst &
 # Lock before sleep and when the screen blanks: zorro lock screen, else LightDM's

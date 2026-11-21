@@ -6,5 +6,7 @@ mkdir -p ~/.local/bin ~/.local/share/applications
 ln -sfn "$here/zorro-thinkpad" ~/.local/bin/zorro-thinkpad
 ln -sfn "$here/zorro-thinkpad" ~/.local/bin/zorro-settings      # the app: no arguments
 rm -f ~/.local/share/applications/zorro-thinkpad.desktop         # old name
-ln -sfn "$here/zorro-settings.desktop" ~/.local/share/applications/zorro-settings.desktop
+for app in settings system connect; do      # Desktop, System, Connect: one program, three entries
+  ln -sfn "$here/zorro-$app.desktop" ~/.local/share/applications/zorro-$app.desktop
+done
 echo "zorro-thinkpad linked (rofi: Zorro)"

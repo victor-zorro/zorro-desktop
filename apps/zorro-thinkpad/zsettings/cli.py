@@ -8,7 +8,9 @@
                             F11, Fn+PrtSc) and the keyboard light (Fn+Space)
   zorro-thinkpad osd ICON VALUE [TEXT]   show the indicator (testing)
   zorro-thinkpad morse TEXT  blink TEXT once as Morse code on the red lid dot
-  zorro-settings [--page SECTION:N]   the Zorro app (e.g. --page power:0)
+  zorro-settings [--app desktop|system|devs|connect] [--page SECTION:N]
+                            the Zorro apps (e.g. --app system, --page power:0)
+  zorro-settings --apply-screens      the saved arrangement of the second / third screen
   zorro-settings --apply-windows [--login]   write window theme, picom, kitty, GTK css
 
 Which key arrives where (measured with ./keytest on a T14 Gen 1 AMD):
@@ -43,12 +45,12 @@ def main():
             set_led(DOT_LED, 'on')
     elif a[:1] == ['osd'] and len(a) >= 3:
         osd(a[1], None if a[2] == '-' else int(a[2]), ' '.join(a[3:]))
-    elif not a:
-        from .app import cmd_app
-        cmd_app()
-    elif a[:1] == ['--page'] and len(a) == 2:      # e.g. zorro-settings --page power:0
-        from .app import cmd_app
-        cmd_app(a[1])
+    elif not a or (len(a) in (2, 4) and set(a[::2]) <= {'--page', '--app'}):
+        from .app import cmd_app            # e.g. zorro-settings --app system, --page power:0
+        cmd_app(a)
+    elif a[:1] == ['--apply-screens']:            # autostart: the saved screen arrangement
+        from .screens import apply_saved
+        apply_saved()
     elif a[:1] == ['--apply-windows']:            # theme, compositor, kitty (autostart: --login)
         from .windows import apply_windows
         apply_windows(login='--login' in a)

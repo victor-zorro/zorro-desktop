@@ -63,6 +63,8 @@ def main():
             bad += 1
             marks.append('DOES NOT OPEN: ' + p['error'])
         else:
+            if p.get('entries'):
+                marks.append(f'{p["entries"]} entries (at most 7)')
             if p['height'] > MAX_HEIGHT:
                 marks.append(f'too tall ({p["height"]} px)')
             if p['controls'] > MAX_CONTROLS:
