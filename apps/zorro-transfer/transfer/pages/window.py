@@ -20,7 +20,7 @@ GETTING = ('starting', 'receiving', 'reconnecting', 'interrupted', 'received', '
 
 
 class Win(Gtk.Window):
-    def __init__(self, first=None):
+    def __init__(self, first=None, host=None):
         super().__init__(title='Transfer')
         self.set_default_size(620, 520)
         self.set_icon_name('folder-remote')
@@ -42,7 +42,7 @@ class Win(Gtk.Window):
         elif first == '--send':
             self.go('send', True)
         elif first == '--get':
-            self.go('get')
+            self.go('get', host)
         else:
             self.go('start')
 
@@ -71,8 +71,8 @@ class Win(Gtk.Window):
                            'faster and steadier than Wi-Fi. Wi-Fi works too.', dim=True))
 
 
-def main(first=None):
+def main(first=None, host=None):
     socket.setdefaulttimeout(None)
-    Win(first)
+    Win(first, host)
     Gtk.main()
     return 0

@@ -1,2 +1,6 @@
 #!/bin/sh
+# A stand-in for notify-send: each call is a line in $ZT_NOTIFY_LOG; with an action it
+# answers what $ZT_NOTIFY_ANSWER says (the button the user "pressed").
+[ -n "$ZT_NOTIFY_LOG" ] && printf '%s\n' "$*" >> "$ZT_NOTIFY_LOG"
+case "$*" in *--action*) [ -n "$ZT_NOTIFY_ANSWER" ] && echo "$ZT_NOTIFY_ANSWER" ;; esac
 exit 0

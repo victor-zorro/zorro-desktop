@@ -1,0 +1,13 @@
+[Unit]
+Description=zorro-beacon: lets your other devices find this one for Transfer
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/zorro-transfer beacon
+Nice=10
+MemoryMax=80M
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target

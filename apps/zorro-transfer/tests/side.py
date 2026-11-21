@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from transfer import after, cli, generated, items, net, sender, serve, state  # noqa: E402
+from transfer import after, beacon, cli, find, generated, items, net, sender, serve, state  # noqa: E402
 
 CFG = json.loads(os.environ.get('ZT_TEST') or '{}')
 
@@ -60,6 +60,13 @@ def patch():
     serve.file_list = lying_file_list(serve.file_list)
     serve.Serving.stream = lying_stream(serve.Serving.stream)
     serve.sha = lying_sha(serve.sha)
+    find.BROADCASTS = CFG.get('broadcasts', ['127.0.0.1'])    # never the real network
+    for name in ('KNOCK_EACH', 'KNOCK_ALL', 'TIMEOUT'):
+        setattr(beacon, name, CFG.get(name, getattr(beacon, name)))
+    if 'send_cmd' in CFG:
+        beacon.send_command = lambda: CFG['send_cmd']
+    if 'notify_answer' in CFG:
+        os.environ['ZT_NOTIFY_ANSWER'] = CFG['notify_answer']
     if CFG.get('old_python'):
         net.ssl = type('ssl', (), {'SSLContext': object, 'SSLError': ssl.SSLError})
 

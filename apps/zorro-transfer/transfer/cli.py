@@ -1,9 +1,14 @@
 """zorro-transfer: set up another device like this one, over the network (LAN or NetBird).
 
-  zorro-transfer [--send|--get]  the app (Settings → Desktop → Transfer opens the same),
-                                 on the sending or the getting side
+  zorro-transfer [--send|--get [--from HOST]]
+                                 the app (Settings → Connect → Transfer opens the same), on
+                                 the sending or the getting side (--from: that device picked)
   zorro-transfer send            offer this device: shows a code (the app runs this)
-  zorro-transfer find            senders on the network and among the NetBird peers
+  zorro-transfer nearby [--json] [--wait SECONDS]
+                                 Zorro devices on the network and among the NetBird peers,
+                                 and whether they are sending (also: find)
+  zorro-transfer knock HOST      ask that device to send: it shows a notification there
+  zorro-transfer beacon          answer "who is a Zorro device?" (the zorro-beacon service)
   zorro-transfer get HOST [--code CODE] [--groups a,b]
                                  pair with HOST; without --groups: list what it offers
   zorro-transfer continue        go on with an interrupted transfer (no code needed)
@@ -13,7 +18,7 @@ import getpass
 import json
 import sys
 
-from . import check, find, net, place, state
+from . import beacon, check, find, net, place, state
 from .receiver import Receiver
 from .sender import Sender
 
@@ -29,9 +34,29 @@ def send(a):
     return 0
 
 
-def found(_a):
-    for f in find.discover():
-        print(f"{f['name']:24} {f['host']:40} {f['via']}")
+def nearby(a):
+    wait = min(max(float(option(a, '--wait') or 1.5), 0.2), 30)
+    devices = find.discover(wait)
+    if '--json' in a:
+        print(json.dumps(devices))
+        return 0
+    for f in devices:
+        print(f"{f['name']:24} {f['host']:40} {f['via']:14} "
+              f"{'sending' if f['sending'] else 'not sending'}")
+    return 0
+
+
+def knock(a):
+    if len(a) < 2:
+        return usage()
+    r = find.knock(a[1])
+    print('asked: it shows a notification there' if r.get('ok') else
+          f"!! {r.get('error') or 'no answer'}", file=sys.stdout if r.get('ok') else sys.stderr)
+    return 0 if r.get('ok') else 1
+
+
+def run_beacon(_a):
+    beacon.Beacon().run()
     return 0
 
 
@@ -91,15 +116,15 @@ def usage(_a=None):
     return 2
 
 
-COMMANDS = {'send': send, 'find': found, 'get': get, 'continue': go_on, 'apply': apply,
-            'status': status}
+COMMANDS = {'send': send, 'find': nearby, 'nearby': nearby, 'knock': knock,
+            'beacon': run_beacon, 'get': get, 'continue': go_on, 'apply': apply, 'status': status}
 
 
 def main():
     a = sys.argv[1:]
     if not a or a[0] in ('--send', '--get'):
         from .pages.window import main as gui
-        return gui(a[0] if a else None)
+        return gui(a[0] if a else None, option(a, '--from'))
     if a[0] in ('-h', '--help'):
         print(__doc__)
         return 0

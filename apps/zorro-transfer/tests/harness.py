@@ -21,13 +21,15 @@ HOST = '127.0.0.1'
 
 
 def free_port():
-    """a TCP port whose neighbour (the UDP one) is free too"""
+    """a TCP port whose neighbours are free too: the UDP one and the beacon's TCP one"""
     for _ in range(50):
-        port = random.randrange(20000, 40000, 2)
+        port = random.randrange(20000, 40000, 4)
         try:
-            with socket.socket() as a, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as b:
+            with socket.socket() as a, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as b, \
+                    socket.socket() as c:
                 a.bind((HOST, port))
                 b.bind((HOST, port + 1))
+                c.bind((HOST, port + 2))
             return port
         except OSError:
             continue
@@ -54,6 +56,8 @@ class Side:
         self.stage = self.root / 'data' / 'zorro-transfer'
         self.home.mkdir(parents=True)
         self.nm = self.root / 'nm.json'
+        self.netbird = self.root / 'netbird.json'
+        self.notified = self.root / 'notify.log'
         self.helper_log = self.root / 'helper.json'
         self.cfg = dict({'helper': str(HERE / 'bin/helper'), 'running': str(self.root / 'running'),
                          'RETRY_PAUSE': 0.2, 'APPS_POLL': 0.2}, **cfg)
@@ -64,7 +68,8 @@ class Side:
                 'XDG_DATA_HOME': str(self.root / 'data'), 'PATH': f'{HERE}/bin:/usr/bin:/bin',
                 'ZORRO_TRANSFER_PORT': str(self.port), 'ZORRO_TRANSFER_NAME': self.name,
                 'ZT_TEST': json.dumps(self.cfg), 'ZT_NM': str(self.nm),
-                'ZT_HELPER_LOG': str(self.helper_log), 'LANG': 'C.UTF-8'}
+                'ZT_HELPER_LOG': str(self.helper_log), 'ZT_NETBIRD': str(self.netbird),
+                'ZT_NOTIFY_LOG': str(self.notified), 'LANG': 'C.UTF-8'}
 
     def start(self, *args):
         p = subprocess.Popen([sys.executable, str(HERE / 'side.py'), *args], env=self.env(),

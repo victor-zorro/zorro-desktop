@@ -20,10 +20,10 @@ SECTION_MENU = {
     'theme': 'look', 'fx': 'look', 'applook': 'look', 'face': 'look', 'look': 'login',
     'sc': 'accounts', 'ob': 'accounts',
     'wifi': 'network', 'eth': 'network', 'lte': 'network', 'nb': 'network',
-    'aout': 'audio', 'ain': 'audio', 'aplay': 'audio', 'atog': 'audio', 'power': 'power',
+    'aout': 'audio', 'ain': 'audio', 'aplay': 'audio', 'atog': 'audio', 'power': 'power', 'session': 'power',
     'hw': 'hardware', 'pad': 'hardware', 'screens': 'hardware', 'sys': 'hardware',
     'keys': 'thinkpad', 'lights': 'thinkpad',
-    'transfer': 'transfer', 'boot': 'newdevice', 'nblink': 'newdevice', 'apps': 'install',
+    'transfer': 'transfer', 'nearby': 'transfer', 'boot': 'newdevice', 'nblink': 'newdevice', 'apps': 'install',
 }
 
 
@@ -98,6 +98,7 @@ class Menus:
     def build_power(self):
         g = Group()
         g.section('power', None, self.power_page())
+        g.section('session', None, self.session_page())
         return g
 
     def build_hardware(self):
@@ -119,6 +120,7 @@ class Menus:
     def build_transfer(self):
         g = Group()
         g.section('transfer', None, self.transfer_page())
+        g.section('nearby', None, self.nearby_page())
         return g
 
     def build_newdevice(self):

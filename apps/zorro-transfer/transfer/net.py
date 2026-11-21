@@ -18,11 +18,14 @@ import ssl
 import struct
 import sys
 
-# the sender listens on PORT (LAN and NetBird); the next one, UDP: "who sends?" on the local
-# network. The variable is for tests.
+# the sender listens on PORT (LAN and NetBird); the beacon answers "who is a Zorro device?"
+# on the next one (UDP, the local network) and on the one after (TCP, NetBird peers). The
+# variable moves all three (tests).
 PORT = int(os.environ.get('ZORRO_TRANSFER_PORT') or 47820)
 DISCOVER_PORT = PORT + 1
+BEACON_PORT = PORT + 2
 MAGIC = b'zorro-transfer/2'
+WHO = MAGIC + b' who?'           # the question on the discovery port
 IDLE = 60                       # seconds a side waits for the other's next message
 
 

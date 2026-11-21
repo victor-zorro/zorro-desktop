@@ -12,8 +12,10 @@ from .pages_lang import LangPages
 from .pages_apps import AppsPages
 from .pages_transfer import TransferPages
 from .pages_connect import ConnectPages
+from .pages_nearby import NearbyPages
 from .pages_devs import DevsPages
 from .pages_screens import ScreensPages
+from .pages_session import SessionPages
 from .pages_accounts import AccountsPages
 from .pages_audio import AudioPages
 from .pages_mobile import MobilePages
@@ -26,8 +28,8 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gtk
 
-PAGES = (Menus, HomePages, FacePages, LangPages, AppsPages, TransferPages, ConnectPages, DevsPages,
-         ScreensPages, AccountsPages, ThinkpadPages, PrinterPages, BluetoothPages, DesktopPages,
+PAGES = (Menus, HomePages, FacePages, LangPages, AppsPages, TransferPages, ConnectPages, NearbyPages, DevsPages,
+         ScreensPages, SessionPages, AccountsPages, ThinkpadPages, PrinterPages, BluetoothPages, DesktopPages,
          LookPages, MobilePages, NetworkPages, AudioPages)
 
 

@@ -1,13 +1,12 @@
 """The sending side (zorro-transfer send): runs only while the app started it.
 
-Listens on the port, shows a 6-digit code, answers "who sends?" on the local network and
-serves the files of the groups the receiver asked for (serve.py). It stops when the window
-is closed and nothing is being sent (an unfinished transfer: once the receiver stopped
-trying), or when the window says stop.
+Listens on the port, shows a 6-digit code and serves the files of the groups the receiver
+asked for (serve.py). Other devices find it through the beacon (beacon.py), which reads
+sender.json. It stops when the window is closed and nothing is being sent (an unfinished
+transfer: once the receiver stopped trying), or when the window says stop.
 
 Guessing the code: one pairing at a time, a longer wait after each wrong code, a new code
 after every 3, and after 10 no pairing at all until the user asks for a new code."""
-import json
 import os
 import secrets
 import signal
@@ -47,7 +46,6 @@ class Sender:
         self.sessions = fresh(state.read_state('sender.json').get('sessions'))
         self.active = 0
         self.fails, self.not_before = 0, 0
-        self.stopping = False
         self.new_code()
 
     def new_code(self):
@@ -94,12 +92,10 @@ class Sender:
         srv.bind(('::', net.PORT))
         srv.listen(4)
         srv.settimeout(1)
-        threading.Thread(target=self.discovery, daemon=True).start()
         try:
             self.save()
             self.listen(srv)
         finally:
-            self.stopping = True
             generated.remove()
             srv.close()
             self.save('stopped')
@@ -125,24 +121,6 @@ class Sender:
             wait = IDLE_EXIT + (state.RETRY_FOR if self.unfinished() else 0)
             if not self.gui_alive() and not self.active and time.time() - idle_since > wait:
                 break
-
-    def discovery(self):
-        """answer 'who sends?' on the local network"""
-        try:
-            u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            u.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            u.bind(('', net.DISCOVER_PORT))
-            u.settimeout(2)
-        except OSError:
-            return
-        me = json.dumps({'name': state.device_name(), 'port': net.PORT}).encode()
-        while not self.stopping:
-            try:
-                data, addr = u.recvfrom(512)
-                if data == net.MAGIC + b' who?':
-                    u.sendto(me, addr)
-            except OSError:
-                pass
 
     def handle(self, sock, peer):
         """one connection: who is it, then serve it"""

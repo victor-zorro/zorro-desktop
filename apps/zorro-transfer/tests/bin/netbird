@@ -1,2 +1,4 @@
 #!/bin/sh
+# A stand-in for netbird: `status --json` prints the file $ZT_NETBIRD a test wrote.
+[ "$1 $2" = "status --json" ] && [ -f "$ZT_NETBIRD" ] && exec cat "$ZT_NETBIRD"
 exit 1

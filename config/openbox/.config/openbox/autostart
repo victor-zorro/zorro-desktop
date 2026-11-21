@@ -4,6 +4,8 @@
 gnome-keyring-daemon --start --components=secrets &
 # Window theme, compositor (picom) and kitty opacity from the Zorro app; before the
 # indicator below, which picks real or faked transparency when it starts
+# user services (the Transfer beacon's "Send" button) may open windows on this screen
+systemctl --user import-environment DISPLAY XAUTHORITY 2>/dev/null
 command -v zorro-settings >/dev/null && zorro-settings --apply-windows --login
 # the second and third screen where you put them (System → Hardware → Screens)
 command -v zorro-settings >/dev/null && zorro-settings --apply-screens

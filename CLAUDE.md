@@ -16,7 +16,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
   - `apps/zorro-thinkpad/` — the Zorro apps in one program (`zorro-settings --app desktop|system|devs|connect`, F9): Desktop (Home, Dialer, wallpaper, windows, look, login, accounts), System (network, audio, power, hardware, screens, ThinkPad), Connect (Transfer, new device: one-liner / ISO / USB, install apps), with DEVS in the same switcher; plus the ThinkPad keys/indicator (keyd), LEDs, LTE. `zsettings/menus.py` says which app holds which menu
   - `apps/zorro-shot/` — screenshot overlay (PrtSc): region / window / screen to file + clipboard
   - `apps/zorro-icons/` — icon theme Zorro-Lucide: official app icons in black and white + white Lucide line icons for symbols (build-icons, mapping.json)
-  - `apps/zorro-dial/` — the Dialer: app launcher around the clock; hub in six parts (Apps, Music, Notes, Messages, System, Files) (Super tap / Super+Space)
+  - `apps/zorro-dial/` — the Dialer: app launcher around the clock; hub in six parts (Apps, Music, Notes, AI, Messages, Files), the centre shows time, connection and battery; code in the package `dial/` (Super tap / Super+Space)
   - `apps/zorro-wall/` — living wallpaper: the login engine (iridescent deep sea + wireframe animal) on the desktop
   - `apps/zorro-orb/` — round info area on the desktop (replaces conky): resting display + 4 hidden hover zones
   - `apps/zorro-music/` — SoundCloud player (mpv + yt-dlp with your Firefox login); the Dialer's Music part

@@ -1,11 +1,13 @@
 # Transfer
 
 Set up another device like this one: open **Transfer** on both devices (Zorro Settings →
-Desktop → Transfer, or the Dialer: type "transfer").
+Connect → Transfer, or the Dialer: type "transfer").
 
 1. On this device: **Send this setup to another device**. It shows a 6-digit code.
-2. On the new device: **Get the setup from another device**. It finds this one on the local
-   network or among your NetBird peers (or type its NetBird name), then type the code.
+2. On the new device: **Get the setup from another device**. Your devices nearby show up by
+   themselves (local network and NetBird peers; or type a name or address). One that is not
+   sending yet has **Ask it to send**: a notification on that device says who asks, and its
+   **Send** button opens Transfer there. Then type the code it shows.
 3. Choose what comes along (with sizes). **Put everything in place by itself** is on: press
    **Start**, and the admin password is asked once, right away (login look and user accounts,
    with the passwords for other people's accounts typed here). From then on it runs on its
@@ -14,6 +16,13 @@ Desktop → Transfer, or the Dialer: type "transfer").
    would change (Firefox, Obsidian…) are waited for: a notification says which to close.
 4. Off: when everything is there, press **Put in place** yourself. A file it replaces is
    kept as `NAME.before-transfer` either way.
+
+Devices nearby: every device runs a small **beacon** (`zorro-beacon.service`, a user service
+that install.sh enables). It tells only its name, the Transfer version and whether it is
+sending; only to devices on a private network, NetBird or itself. A knock (Ask it to send)
+only shows a notification, at most once a minute per device and 3 a minute in all; it never
+starts sending and never tells the code. Settings → Connect → Transfer → Nearby lists them
+too, with **Get its setup**.
 
 Safety: a transfer can only start with Transfer open on both devices. The code works once.
 One device pairs at a time; each wrong code makes the next try wait longer (2 s, 4 s… up to a
@@ -75,26 +84,29 @@ would replace are closed (Firefox, Obsidian…), for a day at most; then it asks
 **Put in place**. The sender shows which of them are open on the sending device (close them
 there for a clean copy). A home folder called `system` or `generated` cannot go along.
 
-    zorro-transfer [--send|--get]  the window (on the sending / getting side)
+    zorro-transfer [--send|--get [--from HOST]]  the window (sending / getting side)
     zorro-transfer send            offer this device (the window runs this)
-    zorro-transfer find            senders on the network / NetBird
+    zorro-transfer nearby [--json] [--wait S]    Zorro devices nearby, sending or not
+    zorro-transfer knock HOST      ask that device to send (a notification there)
+    zorro-transfer beacon          the beacon (zorro-beacon.service runs this)
     zorro-transfer get HOST        pair (asks the code) and list what it offers
     zorro-transfer continue [--groups a,b]   fetch / go on
     zorro-transfer apply           put in place
     zorro-transfer status          both sides' progress (JSON)
 
-State: `~/.local/state/zorro-transfer/` (sender.json, receiver.json, 0600; receiver.lock: one
+State: `~/.local/state/zorro-transfer/` (sender.json, receiver.json, beacon.json, 0600; receiver.lock: one
 fetch at a time). Received files wait in `~/.local/share/zorro-transfer/SESSION/` until they
-are put in place; what an abandoned transfer left there is removed at the next pairing. Port
-47820 (TCP) and 47821 (UDP, finding devices on the local network); `ZORRO_TRANSFER_PORT`
-moves both (tests).
+are put in place; what an abandoned transfer left there is removed at the next pairing. Ports:
+47820 (TCP, the sender), 47821 (UDP, the beacon: "who?" on the local network) and 47822 (TCP,
+the beacon for NetBird peers: `{"op":"probe"}` and `{"op":"knock","name":…}`, 512 bytes at
+most); `ZORRO_TRANSFER_PORT` moves all three (tests).
 
 Code (`transfer/`): `sender.py` + `serve.py` the sending side, `receiver.py` + `fetch.py` the
 getting side, `place.py` + `after.py` putting in place, `check.py` everything the other device
 says is checked there, `items.py` + `generated.py` what goes along, `net.py` the wire,
-`state.py` state files, `find.py` finding senders, `cli.py`, `pages/` the window (one page
+`state.py` state files, `beacon.py` the beacon, `find.py` finding devices nearby, `cli.py`, `pages/` the window (one page
 per file).
 
 Tests: `python3 -m unittest discover apps/zorro-transfer/tests`: two made-up devices in a
 temporary folder talk over localhost; nmcli, pkexec and the root helper are stand-ins
-(`tests/bin`), nothing touches your real home.
+(`tests/bin`, also netbird and notify-send), nothing touches your real home or network.
