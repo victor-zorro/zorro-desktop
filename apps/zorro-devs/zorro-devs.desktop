@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DEVS
+Comment=Everything built and to be built, tested per device
+Exec=xdg-open http://127.0.0.1:8098
+Icon=applications-development
+Terminal=false
+Categories=Development;

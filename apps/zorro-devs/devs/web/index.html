@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DEVS</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav id="menu" aria-label="Menu">
+  <h1>DEVS</h1>
+  <div id="menu-list" class="entries"></div>
+</nav>
+
+<nav id="sub" class="entries" aria-label="Apps"></nav>
+
+<main>
+  <h2 id="title"></h2>
+
+  <div id="page-items" class="page" hidden>
+    <div class="filter">
+      <input id="search" type="search" placeholder="Search" aria-label="Search">
+      <button id="only-here" class="btn" aria-pressed="false">Not tested here</button>
+      <button id="only-stale" class="btn" aria-pressed="false">Stale</button>
+    </div>
+    <input id="add" type="text" maxlength="120" placeholder="Add: type a title, Enter" aria-label="Add an item">
+    <div id="list" class="box" role="list"></div>
+  </div>
+
+  <div id="page-devices" class="page" hidden>
+    <div id="device-list" class="box"></div>
+    <div class="filter">
+      <span class="label">Automatic checks</span>
+      <button id="run-checks" class="btn">Run checks</button>
+    </div>
+    <div id="check-list" class="box"></div>
+  </div>
+
+  <iframe id="page-plan" class="page" title="Plan" hidden></iframe>
+
+  <footer id="say" class="saved"></footer>
+</main>
+
+<aside id="panel" hidden></aside>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

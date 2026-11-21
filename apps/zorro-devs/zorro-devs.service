@@ -1,0 +1,11 @@
+[Unit]
+Description=zorro-devs: the DEVS catalogue as a web page (port 8098)
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/zorro-devs serve
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
