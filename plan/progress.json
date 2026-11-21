@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-21 14:30",
+ "updated": "2026-11-21 15:05",
  "steps": [
   {
    "name": "Review before: Settings",
@@ -52,9 +52,9 @@
   {
    "name": "Fix what the reviews found",
    "state": "doing",
-   "note": "Settings and login fixed; Transfer and Dialer being fixed",
-   "pct": 70,
-   "eta": 35,
+   "note": "Settings, login and Transfer fixed (39 of 46); the Dialer ones come with its split",
+   "pct": 85,
+   "eta": 25,
    "model": "Fable or Opus (security)"
   },
   {
@@ -93,16 +93,16 @@
    "name": "Dialer: split, six parts, centre info, music output, AI chat",
    "state": "doing",
    "note": "being built",
-   "pct": 55,
-   "eta": 40,
+   "pct": 70,
+   "eta": 25,
    "model": "Opus"
   },
   {
    "name": "Intelligence app",
-   "state": "doing",
-   "note": "being built",
-   "pct": 45,
-   "eta": 40,
+   "state": "done",
+   "note": "7 pages, 51 tests; installed",
+   "pct": 100,
+   "eta": 0,
    "model": "Sonnet"
   },
   {
@@ -115,26 +115,26 @@
   },
   {
    "name": "Connect finds devices nearby (the laptop is found by itself)",
-   "state": "todo",
-   "note": "new: asked during the run",
-   "pct": 0,
-   "eta": 60,
+   "state": "doing",
+   "note": "being built (running on Opus)",
+   "pct": 15,
+   "eta": 50,
    "model": "Opus"
   },
   {
    "name": "ISO carries the setup and Connect, runs during the install",
-   "state": "todo",
-   "note": "new: asked during the run; includes a full install in a VM",
-   "pct": 0,
-   "eta": 90,
+   "state": "doing",
+   "note": "being built and installed for real in a VM (running on Sonnet)",
+   "pct": 10,
+   "eta": 80,
    "model": "Sonnet + a long test"
   },
   {
    "name": "Switch everything on (services, launchers)",
-   "state": "todo",
-   "note": "needs a few commands from you",
-   "pct": 0,
-   "eta": 20,
+   "state": "doing",
+   "note": "AI service, DEVS, Intelligence and the launchers are on; the password steps wait for you",
+   "pct": 60,
+   "eta": 10,
    "model": "Haiku"
   },
   {
@@ -154,5 +154,5 @@
    "model": "design: Opus; build: later"
   }
  ],
- "eta_total": 200
+ "eta_total": 150
 }
