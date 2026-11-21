@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Zorro Build Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one dark Zorro screen (same palette as the login screen and apps): a sticky
+   section bar, then wide panels; questions at the end save answers for Claude. */
+:root {
+  --bg: #05070a; --panel: #0b0f15; --raise: #111722; --fg: #d8d8de; --dim: #6f7079;
+  --line: rgba(255,255,255,.13); --cyan: #19e6ff; --red: #ff2a4a; --green: #4dff9e;
+  --cyan-soft: rgba(25,230,255,.12); --red-soft: rgba(255,42,74,.12);
+  --mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+  --sans: "IBM Plex Sans", "DejaVu Sans", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box }
+html { background: var(--bg) }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans); }
+.wrap { max-width: 1280px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 80px; }
+h1, h2, h3 { font-family: var(--mono); font-weight: 700; text-wrap: balance; margin: 0 }
+h1 { font-size: clamp(28px, 4vw, 44px); letter-spacing: -.02em;
+  text-shadow: -1.4px 0 rgba(255,42,74,.5), 1.4px 0 rgba(25,230,255,.5) }
+h2 { font-size: 22px } h3 { font-size: 16px }
+p { margin: 0; max-width: 68ch }
+.dim { color: var(--dim) }
+.label { font: 600 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--dim) }
+header.top { padding-block: 36px 20px; display: grid; gap: 14px }
+.legend { display: flex; flex-wrap: wrap; gap: 8px }
+.chip { font: 600 11px var(--mono); letter-spacing: .06em; padding: 3px 9px; border-radius: 99px;
+  border: 1px solid var(--line); color: var(--dim); white-space: nowrap }
+.chip.new { color: var(--cyan); border-color: var(--cyan) }
+.chip.open { color: var(--red); border-color: var(--red) }
+.chip.done { color: var(--green); border-color: var(--green) }
+.chip.moved { color: var(--fg); border-style: dashed }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg) }
+nav.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: rgba(5,7,10,.92);
+  backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+nav.bar .in { display: flex; gap: 4px; overflow-x: auto; padding-block: 8px; max-width: 1280px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+nav.bar a { font: 600 12px var(--mono); color: var(--fg); text-decoration: none; padding: 6px 12px;
+  border-radius: 6px; white-space: nowrap }
+nav.bar a:hover, nav.bar a:focus-visible { background: var(--raise); outline: none }
+nav.bar .count { margin-left: auto; color: var(--dim); font: 12px var(--mono); padding: 6px 4px; white-space: nowrap }
+section { padding-top: 48px; display: grid; gap: 18px; scroll-margin-top: 60px }
+.head { display: grid; gap: 6px }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px;
+  display: grid; gap: 10px; align-content: start; min-width: 0 }
+.card ul { margin: 0; padding-left: 18px; display: grid; gap: 3px }
+.card li::marker { color: var(--dim) }
+.card .tag { justify-self: start }
+/* app switcher mock */
+.switcher { display: flex; flex-wrap: wrap; gap: 2px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 4px; justify-self: start; max-width: 100% }
+.switcher button { font: 600 13px var(--mono); background: none; color: var(--dim); border: 0;
+  padding: 8px 16px; border-radius: 7px; cursor: pointer }
+.switcher button[aria-pressed="true"] { background: var(--cyan-soft); color: var(--cyan) }
+.switcher button:focus-visible { outline: 1px solid var(--cyan) }
+.appcard[data-dim="1"] { opacity: .35 }
+.appcard { transition: opacity .2s }
+/* dialer */
+.dial { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 24px; align-items: center }
+.dial svg { width: 100%; height: auto; max-width: 420px }
+.dial text { font-family: var(--mono) }
+/* devices mock */
+.devices { display: grid; gap: 6px; max-width: 460px }
+.dev { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--raise); font: 13px var(--mono) }
+.dev.off { opacity: .45 }
+.dev.on { border-color: var(--cyan) }
+.dev .st { margin-left: auto; font-size: 11px; color: var(--dim) }
+.dev.on .st { color: var(--cyan) }
+.dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--dim); flex: none }
+.on .dot { background: var(--cyan); border-color: var(--cyan) }
+/* ai flow */
+.flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 12px; align-items: center }
+.flow .col { display: grid; gap: 8px; min-width: 0 }
+.node { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel);
+  font: 13px var(--mono); min-width: 0 }
+.node b { display: block; font-size: 13px }
+.node span { color: var(--dim); font-size: 11.5px; font-family: var(--sans) }
+.node.hub { border-color: var(--cyan); box-shadow: 0 0 0 3px var(--cyan-soft) }
+.node.main { border-color: var(--fg) }
+.node.fb { border-style: dashed }
+.arrow { color: var(--dim); font: 18px var(--mono) }
+table.choose { border-collapse: collapse; width: 100%; font-size: 13.5px }
+.tablebox { overflow-x: auto }
+table.choose th, table.choose td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top }
+table.choose th { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim) }
+/* done */
+.done li { margin-bottom: 4px }
+code, .cmd { font: 12.5px var(--mono); background: var(--raise); padding: 2px 6px; border-radius: 4px }
+.cmdrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+/* reactions + questions */
+.react { display: grid; gap: 8px; border-top: 1px dashed var(--line); padding-top: 12px }
+.opts { display: flex; flex-wrap: wrap; gap: 6px }
+.opt { font: 13px var(--sans); background: var(--raise); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 7px; padding: 7px 12px; cursor: pointer; text-align: left }
+.opt:hover { border-color: var(--dim) }
+.opt[aria-pressed="true"] { border-color: var(--cyan); background: var(--cyan-soft); color: var(--cyan) }
+.opt:focus-visible, textarea:focus-visible, .btn:focus-visible { outline: 1px solid var(--cyan); outline-offset: 1px }
+textarea { width: 100%; min-height: 58px; resize: vertical; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font: 14px var(--sans) }
+.saved { font: 11px var(--mono); color: var(--dim); min-height: 1em }
+.saved.ok { color: var(--green) } .saved.err { color: var(--red) }
+.q { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px }
+.q[data-answered="1"] { border-color: rgba(77,255,158,.35) }
+.q .qh { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap }
+.q .qn { font: 700 12px var(--mono); color: var(--red) }
+.q[data-answered="1"] .qn { color: var(--green) }
+.qs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)) }
+.btn { font: 600 12px var(--mono); background: var(--raise); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 10px; cursor: pointer }
+.notice { font: 12px var(--mono); color: var(--dim); border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px }
+@media (max-width: 760px) {
+  .dial { grid-template-columns: 1fr }
+  .flow { grid-template-columns: 1fr } .arrow { transform: rotate(90deg); justify-self: center }
+  .qs { grid-template-columns: 1fr }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <span class="label">zorro-desktop · build plan · 21 Nov 2026 · still planning, nothing built yet</span>
+  <h1>Zorro Build Plan</h1>
+  <p class="dim">Everything we agreed so far, on one screen. React anywhere: the buttons and notes save
+    by themselves on the laptop, and Claude reads them there. Red numbers are questions still open.</p>
+  <div class="legend">
+    <span class="chip new">new</span><span class="chip moved">moved</span>
+    <span class="chip open">open question</span><span class="chip done">done</span>
+  </div>
+  <div class="notice" id="dbnote">Connecting to the laptop…</div>
+</header>
+
+<nav class="bar"><div class="in">
+  <a href="#apps">Five apps</a><a href="#dialer">Dialer</a><a href="#music">Music output</a>
+  <a href="#ai">AI</a><a href="#how">Reviews</a><a href="#done">Done</a><a href="#questions">Questions</a>
+  <span class="count" id="count"></span>
+</div></nav>
+
+<main class="wrap">
+
+<section id="apps">
+  <div class="head">
+    <span class="label">1 · the apps</span>
+    <h2>Five apps, one switcher in the top bar</h2>
+    <p class="dim">Today's Zorro Settings splits in two. DEVS, Intelligence and Connect are new. Every app has the same
+      bar at the top to jump between the five. Click a name to see what it holds.</p>
+  </div>
+  <div class="switcher" role="group" aria-label="App switcher (mock)" id="switcher"></div>
+  <div class="grid" id="appcards"></div>
+  <div class="card">
+    <h3>Also: a clearer order inside the apps</h3>
+    <p class="dim">The pages get regrouped while splitting, so each app reads top to bottom in the order you use it.
+      I'll show the new order here before building.</p>
+  </div>
+  <div class="react" data-r="sec-apps"></div>
+</section>
+
+<section id="dialer">
+  <div class="head">
+    <span class="label">2 · the dialer</span>
+    <h2>Seven parts around the clock</h2>
+    <p class="dim">Apps, Music and Notes stay. AI is new: a chat with a more regular layout, in the same look.
+      Messages and notifications become one part. System and Files stay.</p>
+  </div>
+  <div class="dial">
+    <svg id="ring" viewBox="0 0 420 420" role="img" aria-label="Dialer parts in a ring"></svg>
+    <div class="grid" style="grid-template-columns: 1fr">
+      <div class="card"><span class="chip new tag">new</span><h3>AI</h3>
+        <p>A chat: type a question, answers below, a short history. Same black, thin lines and font as the rest of the Dialer.
+          Which engine answers is your choice (see AI).</p></div>
+      <div class="card"><span class="chip moved tag">merged</span><h3>Messages &amp; notifications</h3>
+        <p>SMS and other messages together with the desktop notifications, in one part.</p></div>
+    </div>
+  </div>
+  <div class="react" data-r="sec-dialer"></div>
+</section>
+
+<section id="music">
+  <div class="head">
+    <span class="label">3 · music output</span>
+    <h2>Pick where the music plays, in one tap</h2>
+    <p class="dim">In the Dialer's Music part: your audio Bluetooth devices, greyed when not connected.
+      One tap connects the device and plays through it. In System → Bluetooth, a checkbox per device decides
+      whether it gets this shortcut.</p>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <span class="label">mock · example devices</span>
+      <div class="devices">
+        <div class="dev on"><span class="dot"></span>Laptop speaker<span class="st">playing</span></div>
+        <div class="dev"><span class="dot"></span>Douk Audio ST-01 PLUS<span class="st">connected</span></div>
+        <div class="dev off"><span class="dot"></span>Headphones<span class="st">tap to connect</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <span class="label">mock · system → bluetooth</span>
+      <div class="devices">
+        <label class="dev"><input type="checkbox" checked disabled> Douk Audio ST-01 PLUS<span class="st">in Music</span></label>
+        <label class="dev"><input type="checkbox" checked disabled> Headphones<span class="st">in Music</span></label>
+        <label class="dev off"><input type="checkbox" disabled> Phone<span class="st">not in Music</span></label>
+      </div>
+    </div>
+  </div>
+  <div class="react" data-r="sec-music"></div>
+</section>
+
+<section id="ai">
+  <div class="head">
+    <span class="label">4 · ai</span>
+    <h2>One AI service, Claude first, Mistral as fallback</h2>
+    <p class="dim">The Dialer, Intelligence and DEVS all ask one small background service. It sends the question to
+      Claude, or to Mistral when Claude can't be reached. Per place, you choose which one is used.</p>
+  </div>
+  <div class="flow">
+    <div class="col">
+      <div class="node"><b>Dialer · AI</b><span>short questions</span></div>
+      <div class="node"><b>Intelligence</b><span>search your notes + documents, AI answers from them</span></div>
+      <div class="node"><b>DEVS</b><span>bugs, wishes, features, tests</span></div>
+    </div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="col"><div class="node hub"><b>zorro-ai</b><span>one service: picks the engine by your choice, falls back by itself</span></div></div>
+    <div class="arrow" aria-hidden="true">→</div>
+    <div class="col">
+      <div class="node main"><b>Claude</b><span>main · cloud, best answers</span></div>
+      <div class="node fb"><b>Mistral</b><span>fallback · on the laptop or Mistral's cloud (open question)</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>What the laptop can run (Ryzen 5 4650U, 14 GB, no real GPU)</h3>
+    <div class="tablebox"><table class="choose">
+      <tr><th>Local model</th><th>Speed</th><th>RAM when loaded</th><th>Quality</th></tr>
+      <tr><td>small (3–4B)</td><td>~10–15 words/s</td><td>~2–3 GB</td><td>fine for short questions, more mistakes</td></tr>
+      <tr><td>medium (7–8B)</td><td>~5 words/s</td><td>~5–6 GB</td><td>clearly better, heavy on 14 GB</td></tr>
+    </table></div>
+    <p class="dim">Estimates, not measured. Reading a few pages of notes first takes a local model ~½–1 minute;
+      short questions don't have that wait. The model loads when asked and unloads after a few idle minutes.</p>
+  </div>
+  <div class="react" data-r="sec-ai"></div>
+</section>
+
+<section id="how">
+  <div class="head">
+    <span class="label">5 · how we build</span>
+    <h2>A code review before and after</h2>
+    <p class="dim">The build is wrapped in two reviews, so we start from clean code and end with checked code.</p>
+  </div>
+  <div class="grid">
+    <div class="card"><span class="chip new tag">step 1</span><h3>Review before</h3>
+      <p>A review of the code the build will change: Zorro Settings (zsettings), the Dialer (zorro-dial),
+        Transfer and this session's commits. Bugs found get fixed first, or go into DEVS.</p></div>
+    <div class="card"><span class="chip tag">step 2</span><h3>Build</h3>
+      <p>In small steps, each tested in a private test screen and the VM, committed and pushed.</p></div>
+    <div class="card"><span class="chip new tag">step 3</span><h3>Review after</h3>
+      <p>A review of everything the build changed, before you take it into use. Findings are fixed or listed.</p></div>
+  </div>
+  <p class="dim">The findings of both reviews will show on this page.</p>
+  <div class="react" data-r="sec-how"></div>
+</section>
+
+<section id="done">
+  <div class="head">
+    <span class="label">6 · already done</span>
+    <h2>Finished this session</h2>
+  </div>
+  <div class="grid">
+    <div class="card"><span class="chip done tag">done</span><h3>Volume keys</h3>
+      <p>They now change the output that is actually playing (also with the equaliser on), and volume up never
+        pulls a level above 100 % down. Active now.</p></div>
+    <div class="card"><span class="chip done tag">done</span><h3>Login clock stays off</h3>
+      <p>Presets and Back to defaults keep your clock choice. Restart Settings once.</p></div>
+    <div class="card"><span class="chip done tag">needs install</span><h3>Password first after boot or hibernate</h3>
+      <p>Face unlock only after you typed the password once since the last boot or hibernate. A short lid-close keeps face unlock.</p>
+      <div class="cmdrow"><span class="cmd" id="cmd">sudo ~/zorro-desktop/apps/zorro-dm/install.sh</span>
+        <button class="btn" id="copy">Copy</button></div>
+      <p class="dim">Then reboot.</p></div>
+  </div>
+</section>
+
+<section id="questions">
+  <div class="head">
+    <span class="label">7 · open questions</span>
+    <h2>Your call</h2>
+    <p class="dim">Tap an answer, add a note if you like. Saved by itself.</p>
+  </div>
+  <div class="qs" id="qs"></div>
+</section>
+</main>
+
+<script>
+const APPS = [
+  { id: 'desktop', name: 'Desktop', kind: 'moved', what: 'Use: how it looks and how you work',
+    items: ['Desktop', 'Look', 'Dialer', 'Wallpaper', 'Info circle', 'Windows', 'Text & colours', 'Login look', 'Face unlock', 'Shortcuts'] },
+  { id: 'system', name: 'System', kind: 'moved', what: 'Settings and hardware',
+    items: ['Network', 'Audio', 'Power', 'Hardware', 'ThinkPad keys', 'Bluetooth (+ Music shortcut checkbox)', 'Printers', 'System info'] },
+  { id: 'devs', name: 'DEVS', kind: 'new', what: 'Everything built and to be built',
+    items: ['Bugs, feature wishes, backlog', 'Existing features too', 'Sorted by category and main app', 'Checked and tested, per device', 'On the laptop now, to the cloud later'] },
+  { id: 'intel', name: 'Intelligence', kind: 'new', what: 'Search + AI',
+    items: ['Search notes and documents by meaning', 'AI answers from your own files', 'Engine: your choice (Claude / Mistral)'] },
+  { id: 'connect', name: 'Connect', kind: 'new', what: 'Set up and link devices',
+    items: ['Transfer: send and receive settings, apps, files', 'Bootstrap a new machine', 'Install apps (extras)', 'NetBird link'] },
+];
+const QS = [
+  { id: 'mistral-where', q: 'Mistral as fallback: where does it run?', opts: ['On the laptop (offline, private)', "Mistral's cloud (API key, needs internet)", 'Both'] },
+  { id: 'mistral-size', q: 'If on the laptop: which size?', opts: ['Small: lighter, more mistakes', 'Medium (7–8B): better, ~5 GB RAM'] },
+  { id: 'ai-read', q: 'What may the AI read?', multi: true, opts: ['Notes', 'Documents', 'This repo', 'Everything in home', 'Only folders I choose'] },
+  { id: 'ai-act', q: 'In DEVS, may the AI act?', opts: ['Change code + commit after I approve', 'Only suggest'] },
+  { id: 'ai-devs', q: 'What does the AI do in DEVS?', multi: true, opts: ['Sort new items into category / app', 'Write test steps', 'Work on bugs', 'Fill the catalogue from the repo'] },
+  { id: 'offline', q: 'Must the AI ever work fully offline?', opts: ['Yes', 'No, Claude online is fine'] },
+  { id: 'devs-devices', q: 'DEVS: which devices get a test status?', multi: true, opts: ['ThinkPad', 'VM', 'Each new device after a Transfer'] },
+  { id: 'devs-fill', q: 'DEVS: first pass from the repo (every app and its features as items)?', opts: ['Yes, I check them after', 'No, I fill it myself'] },
+  { id: 'devs-test', q: 'DEVS: how is "tested" set?', opts: ['A tick by hand', 'Tick by hand + automatic checks where possible'] },
+  { id: 'intel-dialer', q: 'Intelligence vs the Dialer\'s Notes search', opts: ['Replaces it', 'Sits next to it'] },
+  { id: 'messages', q: 'Messages & notifications in the Dialer', opts: ['One list, newest first', 'Two tabs in one part'] },
+  { id: 'dial-ai', q: 'The Dialer\'s AI part shows…', opts: ['Input + the last answer', 'A short chat history'] },
+  { id: 'names', q: 'Names of the two Settings apps', opts: ['Desktop + System', 'Other (note)'] },
+  { id: 'review-when', q: 'Review before: when?', opts: ['Now, while we plan', 'Right before the build starts'] },
+  { id: 'bootstrap', q: 'Connect → bootstrap a new machine', multi: true, opts: ['Show the one-line command', 'Make a USB installer'] },
+];
+
+const $ = (s, el = document) => el.querySelector(s);
+const answers = {};            // id -> {pick: [], note: ''}
+let db = null;
+
+// ---- apps
+const sw = $('#switcher'), cards = $('#appcards');
+APPS.forEach(a => {
+  const b = document.createElement('button');
+  b.textContent = a.name; b.setAttribute('aria-pressed', 'false'); b.dataset.id = a.id;
+  b.onclick = () => {
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    sw.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    cards.querySelectorAll('.appcard').forEach(c => c.dataset.dim = on && c.dataset.id !== a.id ? '1' : '0');
+  };
+  sw.appendChild(b);
+  const c = document.createElement('div');
+  c.className = 'card appcard'; c.dataset.id = a.id;
+  c.innerHTML = `<span class="chip ${a.kind} tag">${a.kind === 'new' ? 'new app' : 'from Settings'}</span>
+    <h3></h3><p class="dim"></p><ul>${a.items.map(() => '<li></li>').join('')}</ul>`;
+  $('h3', c).textContent = a.name; $('p', c).textContent = a.what;
+  c.querySelectorAll('li').forEach((li, i) => li.textContent = a.items[i]);
+  cards.appendChild(c);
+});
+
+// ---- dialer ring
+(function ring() {
+  const parts = [['Apps', ''], ['Music', ''], ['Notes', ''], ['AI', 'new'], ['Messages', 'merged'], ['System', ''], ['Files', '']];
+  const svg = $('#ring'), cx = 210, cy = 210, r1 = 92, r2 = 180, n = parts.length, gap = 0.03;
+  const ns = 'http://www.w3.org/2000/svg';
+  const pt = (r, a) => [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+  parts.forEach(([name, kind], i) => {
+    const a0 = i / n * 2 * Math.PI + gap, a1 = (i + 1) / n * 2 * Math.PI - gap;
+    const [x0, y0] = pt(r2, a0), [x1, y1] = pt(r2, a1), [x2, y2] = pt(r1, a1), [x3, y3] = pt(r1, a0);
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', `M${x0},${y0} A${r2},${r2} 0 0 1 ${x1},${y1} L${x2},${y2} A${r1},${r1} 0 0 0 ${x3},${y3} Z`);
+    p.setAttribute('fill', kind === 'new' ? 'rgba(25,230,255,.14)' : '#0b0f15');
+    p.setAttribute('stroke', kind === 'new' ? '#19e6ff' : kind === 'merged' ? '#d8d8de' : 'rgba(255,255,255,.18)');
+    if (kind === 'merged') p.setAttribute('stroke-dasharray', '4 3');
+    svg.appendChild(p);
+    const [tx, ty] = pt((r1 + r2) / 2, (a0 + a1) / 2);
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', tx); t.setAttribute('y', ty + (kind ? -2 : 4)); t.setAttribute('text-anchor', 'middle');
+    t.setAttribute('fill', kind === 'new' ? '#19e6ff' : '#d8d8de'); t.setAttribute('font-size', '13'); t.setAttribute('font-weight', '700');
+    t.textContent = name; svg.appendChild(t);
+    if (kind) {
+      const s = document.createElementNS(ns, 'text');
+      s.setAttribute('x', tx); s.setAttribute('y', ty + 13); s.setAttribute('text-anchor', 'middle');
+      s.setAttribute('fill', '#6f7079'); s.setAttribute('font-size', '10'); s.textContent = kind === 'merged' ? '+ notifications' : 'new';
+      svg.appendChild(s);
+    }
+  });
+  const c = document.createElementNS(ns, 'circle');
+  c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', r1 - 14);
+  c.setAttribute('fill', '#05070a'); c.setAttribute('stroke', 'rgba(255,255,255,.18)'); svg.appendChild(c);
+  const t = document.createElementNS(ns, 'text');
+  t.setAttribute('x', cx); t.setAttribute('y', cy + 9); t.setAttribute('text-anchor', 'middle');
+  t.setAttribute('fill', '#d8d8de'); t.setAttribute('font-size', '26'); t.setAttribute('font-weight', '700');
+  t.textContent = '10:42'; svg.appendChild(t);
+})();
+
+// ---- reactions (per section) and questions
+function block(host, id, opts, multi) {
+  host.innerHTML = '';
+  const o = document.createElement('div'); o.className = 'opts';
+  opts.forEach(label => {
+    const b = document.createElement('button'); b.className = 'opt'; b.type = 'button';
+    b.textContent = label; b.setAttribute('aria-pressed', 'false');
+    b.onclick = () => {
+      const a = answers[id] || (answers[id] = { pick: [], note: '' });
+      if (multi) a.pick = a.pick.includes(label) ? a.pick.filter(x => x !== label) : [...a.pick, label];
+      else a.pick = a.pick.includes(label) ? [] : [label];
+      paint(id); save(id);
+    };
+    o.appendChild(b);
+  });
+  const ta = document.createElement('textarea'); ta.id = 'note-' + id;
+  ta.placeholder = 'A note or reaction (optional)';
+  let t = null;
+  ta.oninput = () => {
+    const a = answers[id] || (answers[id] = { pick: [], note: '' });
+    a.note = ta.value; clearTimeout(t); t = setTimeout(() => save(id), 800);
+    status(id, 'typing…');
+  };
+  const s = document.createElement('div'); s.className = 'saved'; s.id = 'saved-' + id;
+  host.append(o, ta, s);
+}
+document.querySelectorAll('.react').forEach(h => {
+  const lbl = document.createElement('span'); lbl.className = 'label'; lbl.textContent = 'your reaction';
+  const box = document.createElement('div'); box.style.display = 'grid'; box.style.gap = '8px';
+  h.append(lbl, box);
+  block(box, h.dataset.r, ['Good like this', 'Change something (note)'], false);
+  box.dataset.id = h.dataset.r;
+});
+QS.forEach((q, i) => {
+  const el = document.createElement('div'); el.className = 'q'; el.id = 'q-' + q.id;
+  el.innerHTML = `<div class="qh"><span class="qn">${String(i + 1).padStart(2, '0')}</span><h3></h3>${q.multi ? '<span class="dim" style="font-size:12px">pick any</span>' : ''}</div><div></div>`;
+  $('h3', el).textContent = q.q;
+  block(el.lastElementChild, q.id, q.opts, q.multi);
+  $('#qs').appendChild(el);
+});
+
+function paint(id) {
+  const a = answers[id] || { pick: [], note: '' };
+  const ta = document.getElementById('note-' + id);
+  if (!ta) return;
+  const host = ta.parentElement;
+  host.querySelectorAll('.opt').forEach(b => b.setAttribute('aria-pressed', a.pick.includes(b.textContent) ? 'true' : 'false'));
+  if (document.activeElement !== ta) ta.value = a.note || '';
+  const q = document.getElementById('q-' + id);
+  if (q) q.dataset.answered = (a.pick.length || (a.note || '').trim()) ? '1' : '0';
+  const n = QS.filter(x => { const v = answers[x.id]; return v && (v.pick.length || (v.note || '').trim()); }).length;
+  $('#count').textContent = `${n} / ${QS.length} answered`;
+}
+function status(id, text, cls) {
+  const s = document.getElementById('saved-' + id);
+  if (s) { s.textContent = text; s.className = 'saved' + (cls ? ' ' + cls : ''); }
+}
+async function save(id) {
+  const a = answers[id];
+  try {
+    const r = await fetch('api/answers/' + encodeURIComponent(id), { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pick: a.pick, note: a.note || '' }) });
+    if (!r.ok) throw new Error((await r.text()) || r.status);
+    status(id, 'saved on the laptop', 'ok');
+  } catch (e) { status(id, 'not saved: ' + (e && e.message || e) + ' (is the laptop on?)', 'err'); }
+}
+QS.forEach(q => paint(q.id));
+
+// copy
+$('#copy').onclick = () => {
+  const text = $('#cmd').textContent;
+  navigator.clipboard.writeText(text).then(() => { $('#copy').textContent = 'Copied'; },
+    () => { const r = document.createRange(); r.selectNodeContents($('#cmd')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); });
+};
+
+// ---- storage: answers live on the laptop (plan/serve.py); refreshed every 5 s
+async function load() {
+  const note = $('#dbnote');
+  try {
+    const r = await fetch('api/answers', { cache: 'no-store' });
+    const all = await r.json();
+    note.hidden = true;
+    for (const [id, v] of Object.entries(all)) {
+      answers[id] = { pick: Array.isArray(v.pick) ? v.pick.map(String) : [], note: String(v.note || '') };
+      paint(id);
+    }
+  } catch (e) {
+    note.hidden = false;
+    note.textContent = 'The laptop does not answer: answers made now are not saved.';
+  }
+}
+load();
+setInterval(load, 5000);
+</script>
+</body>
+</html>
