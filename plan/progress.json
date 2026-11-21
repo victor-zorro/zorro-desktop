@@ -1,156 +1,202 @@
 {
- "updated": "2026-11-21 17:30",
  "steps": [
   {
    "name": "Review before: Settings",
    "state": "done",
    "note": "21 findings",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "11:24",
+   "finished": "11:32",
+   "ran": "Fable"
   },
   {
    "name": "Review before: Dialer, Transfer, login",
    "state": "done",
    "note": "25 findings",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "11:24",
+   "finished": "11:32",
+   "ran": "Fable"
   },
   {
    "name": "Rules in the repo + check",
    "state": "done",
    "note": "RULES.md, tools/check-rules",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:03",
+   "finished": "11:08",
+   "ran": "Fable"
   },
   {
    "name": "Cable keeps its address (.77)",
    "state": "done",
    "note": "also in install.sh",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:20",
+   "finished": "11:25",
+   "ran": "Fable"
   },
   {
    "name": "AI service (zorro-ai): Claude, Mistral cloud, local models",
    "state": "done",
    "note": "works with Claude and a local model; 36 tests",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "11:27",
+   "finished": "11:39",
+   "ran": "Fable"
   },
   {
    "name": "DEVS: web page, catalogue, tests per device",
    "state": "done",
    "note": "189 items from the first fill, 27 tests; switched on at the end",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:27",
+   "finished": "11:41",
+   "ran": "Fable"
   },
   {
    "name": "Fix what the reviews found",
    "state": "done",
    "note": "all 46 handled: 44 fixed, 2 kept in DEVS for later",
    "pct": 100,
-   "eta": 0,
-   "model": "Fable or Opus (security)"
+   "model": "Fable or Opus (security)",
+   "started": "11:32",
+   "finished": "12:13",
+   "est": 35,
+   "est_at": "11:53",
+   "ran": "Fable"
   },
   {
    "name": "Every page opens in a test",
    "state": "done",
    "note": "tools/check-pages: 65 pages",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:26",
+   "finished": "11:28",
+   "ran": "Fable"
   },
   {
    "name": "Split Settings: Desktop, System, Connect + switcher",
    "state": "done",
    "note": "one program, four apps in the top bar",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "11:39",
+   "finished": "11:45",
+   "ran": "Fable"
   },
   {
    "name": "Pages regrouped: menu, submenu, no long pages",
    "state": "done",
    "note": "none longer than a screen, at most 7 per submenu",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:39",
+   "finished": "11:45",
+   "ran": "Fable"
   },
   {
    "name": "Screens page (2nd and 3rd screen)",
    "state": "done",
    "note": "not tried with a real second screen yet",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:41",
+   "finished": "11:45",
+   "ran": "Fable"
   },
   {
    "name": "Dialer: split, six parts, centre info, music output, AI chat",
    "state": "done",
    "note": "48 tests; restart the Dialer to use it (Instructions)",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "11:38",
+   "finished": "12:12",
+   "est": 40,
+   "est_at": "11:53",
+   "ran": "Fable"
   },
   {
    "name": "Intelligence app",
    "state": "done",
    "note": "7 pages, 51 tests; installed",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:40",
+   "finished": "11:58",
+   "est": 40,
+   "est_at": "11:53",
+   "ran": "Fable"
   },
   {
    "name": "Connect: one-liner, ISO, USB stick",
    "state": "done",
    "note": "ISO booted in a VM; USB writer checked for refusing the wrong disk",
    "pct": 100,
-   "eta": 0,
-   "model": "Sonnet"
+   "model": "Sonnet",
+   "started": "11:45",
+   "finished": "11:51",
+   "ran": "Fable"
   },
   {
    "name": "Connect finds devices nearby (the laptop is found by itself)",
    "state": "done",
    "note": "a beacon on every device; 13 new tests; not tried between two real devices yet",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "12:01",
+   "finished": "12:12",
+   "est": 60,
+   "est_at": "11:53",
+   "ran": "Opus (asked for)"
   },
   {
    "name": "ISO carries the setup and Connect, runs during the install",
    "state": "doing",
    "note": "being installed for real in a VM",
    "pct": 70,
-   "eta": 30,
-   "model": "Sonnet + a long test"
+   "model": "Sonnet + a long test",
+   "started": "12:01",
+   "est": 90,
+   "est_at": "11:53",
+   "ran": "Sonnet (asked for)"
   },
   {
    "name": "Switch everything on (services, launchers)",
    "state": "doing",
    "note": "two installs to run once more, a Dialer restart and a reboot (Instructions)",
    "pct": 85,
-   "eta": 5,
-   "model": "Haiku"
+   "model": "Haiku",
+   "started": "11:59",
+   "est": 20,
+   "est_at": "11:53",
+   "ran": "Fable"
   },
   {
    "name": "Review after",
    "state": "done",
    "note": "60 findings: 57 fixed, 3 kept in DEVS for later",
    "pct": 100,
-   "eta": 0,
-   "model": "Opus"
+   "model": "Opus",
+   "started": "12:14",
+   "finished": "12:47",
+   "est": 45,
+   "est_at": "11:53",
+   "ran": "Opus reviewers (asked for); fixes: Fable and Opus"
   },
   {
    "name": "WinBox replacement",
    "state": "todo",
    "note": "design first: use the design area",
    "pct": 0,
-   "eta": 0,
    "model": "design: Opus; build: later"
   },
   {
@@ -158,9 +204,13 @@
    "state": "todo",
    "note": "design first: use the design area",
    "pct": 0,
-   "eta": 0,
    "model": "design: Opus; build: later"
   }
  ],
- "eta_total": 30
+ "run_started": "11:23",
+ "first_estimate": {
+  "at": "11:53",
+  "minutes": 200,
+  "said": "about 3 h 20 min to go"
+ }
 }

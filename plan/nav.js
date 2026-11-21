@@ -17,7 +17,27 @@ function minutes(m) {
   return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
 }
 
-function stepRow(st) {
+function between(from, to) {            // minutes between two HH:MM times of the same day
+  const [a, b] = [from, to].map(t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; });
+  return Math.max(0, b - a);
+}
+
+function timing(st, now) {
+  // what was estimated against what the clock measured
+  const end = st.finished || (st.state === 'doing' ? now : null);
+  const parts = [];
+  if (st.started && end) parts.push((st.finished ? 'took ' : 'running ') + minutes(between(st.started, end)));
+  if (st.est) {
+    parts.push(`estimated ${minutes(st.est)} at ${st.est_at}`);
+    if (end) {
+      const real = between(st.est_at, end);
+      parts.push(st.finished ? `really ${minutes(real)} after that` : `${minutes(real)} so far`);
+    }
+  }
+  return parts.join(' · ');
+}
+
+function stepRow(st, now) {
   const row = document.createElement('div'); row.className = 'step ' + st.state;
   const s = document.createElement('span'); s.className = 's'; s.textContent = st.state;
   const n = document.createElement('span'); n.textContent = st.name;
@@ -27,12 +47,26 @@ function stepRow(st) {
     const p = document.createElement('span'); p.className = 'p';
     const bar = document.createElement('span'); bar.className = 'mini';
     const fill = document.createElement('span'); fill.style.width = st.pct + '%'; bar.appendChild(fill);
-    const t = document.createElement('span');
-    t.textContent = `${st.pct} %` + (st.eta ? ` · about ${minutes(st.eta)}` : '');
-    const m = document.createElement('span'); m.className = 'model'; m.textContent = st.model || '';
+    const t = document.createElement('span'); t.textContent = `${st.pct} %`;
+    const m = document.createElement('span'); m.className = 'model';
+    m.textContent = st.ran ? `ran on ${st.ran}` : `advice: ${st.model || '?'}`;
+    m.title = `advice: ${st.model || '?'}`;
     p.append(bar, t, m); row.appendChild(p);
+    const when = document.createElement('span'); when.className = 'when'; when.textContent = timing(st, now);
+    row.appendChild(when);
   }
   return row;
+}
+
+function measured(p) {
+  // all finished steps that had an estimate: the estimates added up against the clock
+  const both = p.steps.filter(s => s.est && s.finished);
+  if (!both.length) return '';
+  const est = both.reduce((sum, s) => sum + s.est, 0);
+  const real = both.reduce((sum, s) => sum + between(s.est_at, s.finished), 0);
+  const factor = real ? (est / real).toFixed(1) : '?';
+  return `Estimates against the clock: ${both.length} finished steps were estimated at ${minutes(est)} together ` +
+    `and really took ${minutes(real)}: the estimates were ${factor}× too long.`;
 }
 
 async function progress() {
@@ -41,14 +75,15 @@ async function progress() {
     const done = p.steps.filter(s => s.state === 'done').length;
     const doing = p.steps.filter(s => s.state === 'doing');
     const pct = Math.round(p.steps.reduce((sum, s) => sum + (s.pct || 0), 0) / p.steps.length);
-    const left = p.eta_total !== undefined ? p.eta_total : p.steps.reduce((sum, s) => sum + (s.eta || 0), 0);
     $('#fill').style.width = pct + '%';
     $('#pct').textContent = `${pct} % · ${done} of ${p.steps.length} steps done`;
-    $('#eta').textContent = left ? `about ${minutes(left)} to go` : 'finished';
+    $('#eta').textContent = p.run_started ? `running ${minutes(between(p.run_started, p.now))} (since ${p.run_started})` : '';
     $('#now').textContent = doing.length ? 'Now: ' + doing.map(s => s.name).join(' · ') : (p.status || '');
-    $('#progress-at').textContent = 'updated ' + p.updated;
+    $('#progress-at').textContent = `clock ${p.now} · changed ${p.updated}`;
+    $('#measured').textContent = measured(p) + (p.first_estimate
+      ? ` The first overall estimate (${p.first_estimate.at}): "${p.first_estimate.said}".` : '');
     const box = $('#steps'); box.innerHTML = '';
-    p.steps.forEach(st => box.appendChild(stepRow(st)));
+    p.steps.forEach(st => box.appendChild(stepRow(st, p.now)));
   } catch (e) {
     $('#now').textContent = 'The laptop does not answer';
   }

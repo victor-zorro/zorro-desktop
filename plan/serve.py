@@ -45,6 +45,15 @@ def read():
         return {}
 
 
+def progress():
+    """the steps of the run, with the real clock: when the file last changed, and now"""
+    file = HERE / 'progress.json'
+    data = json.loads(file.read_text())
+    data['updated'] = datetime.fromtimestamp(file.stat().st_mtime).strftime('%H:%M')
+    data['now'] = datetime.now().strftime('%H:%M')
+    return data
+
+
 class Page(BaseHTTPRequestHandler):
     timeout = 15                        # a request that dribbles in does not keep a thread
 
@@ -87,7 +96,9 @@ class Page(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed():
             return
-        if self.path in FILES:
+        if self.path == '/progress.json':
+            self.send(200, json.dumps(progress()))
+        elif self.path in FILES:
             name, kind = FILES[self.path]
             self.send(200, (HERE / name).read_bytes(), kind)
         elif self.path == '/api/answers':

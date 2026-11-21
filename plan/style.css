@@ -161,3 +161,5 @@ pre.block { display: block; margin: 0; padding: 10px 12px; overflow-x: auto; whi
 .ask textarea { min-height: 44px }
 textarea.tall { min-height: 44vh }
 @media (max-width: 760px) { .duo { grid-template-columns: 1fr } .step { grid-template-columns: 60px 1fr } .step .p { grid-column: 2; justify-content: flex-start } }
+.step .when { grid-column: 2 / -1; font: 11.5px var(--mono); color: var(--dim) }
+#measured { color: var(--cyan); font: 13px var(--mono); max-width: none }
