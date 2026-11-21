@@ -17,6 +17,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import chat
+
 PORT = int(os.environ.get('ZORRO_PLAN_PORT', '8099'))
 HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')) / 'zorro-plan'
@@ -27,6 +29,7 @@ FILES = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/h
          '/style.css': ('style.css', 'text/css'), '/page.js': ('page.js', 'text/javascript'),
          '/nav.js': ('nav.js', 'text/javascript'),
          '/review.json': ('review.json', 'application/json'),
+         '/chat.js': ('chat.js', 'text/javascript'),
          '/progress.json': ('progress.json', 'application/json')}
 
 
@@ -71,12 +74,16 @@ class Page(BaseHTTPRequestHandler):
         elif self.path == '/api/answers':
             with LOCK:
                 self.send(200, json.dumps(read()))
+        elif self.path.startswith('/api/chat/') and self.path[10:] in chat.BRIEFS:
+            self.send(200, json.dumps(chat.load(STATE, self.path[10:])))
         else:
             self.send(404, 'not found', 'text/plain')
 
     def do_POST(self):
         if not self.allowed():
             return
+        if self.path.startswith('/api/chat/'):
+            return self.post_chat(self.path[10:])
         m = re.fullmatch(r'/api/answers/(.+)', self.path)
         if not m or not ID.fullmatch(m.group(1)):
             return self.send(404, 'not found', 'text/plain')
@@ -99,6 +106,20 @@ class Page(BaseHTTPRequestHandler):
             tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
             tmp.replace(ANSWERS)
         self.send(200, '{"ok": true}')
+
+    def post_chat(self, topic):
+        n = int(self.headers.get('Content-Length') or 0)
+        if topic not in chat.BRIEFS or not 0 < n <= 20000:
+            return self.send(404, 'not found', 'text/plain')
+        try:
+            text = str(json.loads(self.rfile.read(n)).get('text', '')).strip()[:8000]
+        except (ValueError, AttributeError):
+            return self.send(400, 'not JSON', 'text/plain')
+        if not text:
+            return self.send(400, 'empty', 'text/plain')
+        notes = str(read().get(f'{topic}-notes', {}).get('note', ''))
+        ok = chat.ask(STATE, topic, text, notes)
+        self.send(200 if ok else 409, json.dumps({'ok': ok}))
 
     def log_message(self, *a):
         pass

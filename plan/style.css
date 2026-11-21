@@ -42,7 +42,7 @@ html, body { height: 100% }
 .right { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; height: 100vh }
 .status { padding: 14px 28px 12px; border-bottom: 1px solid var(--line); display: grid; gap: 8px }
 .bar { height: 8px; border-radius: 99px; background: var(--raise); overflow: hidden }
-.fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--red), var(--cyan)); transition: width .6s }
+.fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--red), var(--cyan)); }
 .statusline { display: flex; gap: 18px; flex-wrap: wrap; align-items: baseline; font: 13px var(--mono) }
 .statusline #now { color: var(--cyan); min-width: 0 }
 .statusline #progress-at { margin-left: auto }
@@ -146,3 +146,18 @@ textarea { width: 100%; min-height: 58px; resize: vertical; background: var(--bg
 pre.block { display: block; margin: 0; padding: 10px 12px; overflow-x: auto; white-space: pre; user-select: all }
 .scrollbox { max-height: 46vh; overflow-y: auto; padding-right: 4px }
 .step.problem .s::before { content: "fix "; }
+.step { grid-template-columns: 70px minmax(0, 1.1fr) minmax(0, 1fr) minmax(250px, auto) }
+.step .p { display: flex; gap: 10px; align-items: center; font: 11.5px var(--mono); color: var(--dim); justify-content: flex-end; flex-wrap: wrap }
+.mini { width: 70px; height: 5px; border-radius: 9px; background: var(--raise); overflow: hidden; display: inline-block }
+.mini span { display: block; height: 100%; background: var(--cyan) }
+.step.done .mini span { background: var(--green) }
+.model { border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; color: var(--fg) }
+#eta { color: var(--fg) }
+.duo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 14px }
+.chat { height: 46vh; overflow-y: auto; display: grid; gap: 10px; align-content: start; padding-right: 4px }
+.msg { display: grid; gap: 3px; white-space: pre-wrap; overflow-wrap: anywhere }
+.msg.user { background: var(--raise); border-radius: 8px; padding: 8px 10px }
+.ask { display: flex; gap: 8px; align-items: flex-end }
+.ask textarea { min-height: 44px }
+textarea.tall { min-height: 44vh }
+@media (max-width: 760px) { .duo { grid-template-columns: 1fr } .step { grid-template-columns: 60px 1fr } .step .p { grid-column: 2; justify-content: flex-start } }

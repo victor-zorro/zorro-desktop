@@ -20,6 +20,8 @@
     <a href="#how">Reviews</a>
     <a href="#done">Done before</a>
     <a href="#howto">Instructions</a>
+    <span class="label mh">Design</span>
+    <a href="#winbox">WinBox replacement</a>
     <span class="label mh">The plan</span>
     <a href="#apps">Apps</a>
     <a href="#dialer">Dialer</a>
@@ -33,7 +35,7 @@
 <div class="right">
 <header class="status">
   <div class="bar"><div class="fill" id="fill"></div></div>
-  <div class="statusline"><b id="pct">…</b><span id="now"></span><span class="dim" id="progress-at"></span></div>
+  <div class="statusline"><b id="pct">…</b><b id="eta"></b><span id="now"></span><span class="dim" id="progress-at"></span></div>
 </header>
 <main>
 
@@ -41,7 +43,8 @@
   <div class="head">
     <span class="label">the run · live</span>
     <h2>Progress</h2>
-    <p class="dim">Every step of the run, in order. Cyan is being worked on now.</p>
+    <p class="dim">Every step of the run, in order, with how far it is, roughly how long it still takes, and
+      which Claude model fits the job (not everything needs the biggest one). Times are estimates.</p>
   </div>
   <div class="steps" id="steps"></div>
 </section>
@@ -256,6 +259,30 @@ chmod 600 ~/.config/zorro-ai/mistral.key</pre>
   <p class="dim">More instructions appear here as the build needs them.</p>
 </section>
 
+<section id="winbox">
+  <div class="head">
+    <span class="label">next big thing · design area</span>
+    <h2>A replacement for WinBox</h2>
+    <p class="dim">Work on this whenever you like, also while the build runs. Notes on the left are yours and
+      are saved; the chat on the right thinks along (Claude, through the laptop) and reads your notes.</p>
+  </div>
+  <div class="duo">
+    <div class="card">
+      <span class="label">design notes</span>
+      <div data-notes="winbox-notes"></div>
+    </div>
+    <div class="card">
+      <span class="label">design chat</span>
+      <div class="chat" id="chat-winbox"></div>
+      <form class="ask" id="ask-winbox">
+        <textarea id="ask-winbox-text" placeholder="Ask or propose something… (Enter sends, Shift+Enter a new line)"></textarea>
+        <button class="btn" type="submit">Send</button>
+      </form>
+      <div class="saved" id="chat-winbox-state"></div>
+    </div>
+  </div>
+</section>
+
 <section id="questions">
   <div class="head">
     <span class="label">7 · open questions</span>
@@ -270,5 +297,6 @@ chmod 600 ~/.config/zorro-ai/mistral.key</pre>
 
 <script src="page.js"></script>
 <script src="nav.js"></script>
+<script src="chat.js"></script>
 </body>
 </html>

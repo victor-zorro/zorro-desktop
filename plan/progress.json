@@ -1,85 +1,158 @@
 {
- "updated": "2026-11-21 14:10",
+ "updated": "2026-11-21 14:30",
  "steps": [
   {
    "name": "Review before: Settings",
    "state": "done",
-   "note": "46 findings in total, see Reviews"
+   "note": "21 findings",
+   "pct": 100,
+   "eta": 0,
+   "model": "Opus"
   },
   {
    "name": "Review before: Dialer, Transfer, login",
    "state": "done",
-   "note": "46 findings in total, see Reviews"
+   "note": "25 findings",
+   "pct": 100,
+   "eta": 0,
+   "model": "Opus"
   },
   {
    "name": "Rules in the repo + check",
    "state": "done",
-   "note": "RULES.md, tools/check-rules"
+   "note": "RULES.md, tools/check-rules",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
   },
   {
    "name": "Cable keeps its address (.77)",
    "state": "done",
-   "note": "also in install.sh"
+   "note": "also in install.sh",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
   },
   {
    "name": "AI service (zorro-ai): Claude, Mistral cloud, local models",
    "state": "done",
-   "note": "works with Claude and a local model (about 33 words/s with the smallest); 36 tests"
+   "note": "works with Claude and a local model; 36 tests",
+   "pct": 100,
+   "eta": 0,
+   "model": "Opus"
   },
   {
    "name": "DEVS: web page, catalogue, tests per device",
    "state": "done",
-   "note": "built: 189 items from the first fill, 27 tests; switched on at the end"
+   "note": "189 items from the first fill, 27 tests; switched on at the end",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
   },
   {
-   "name": "Fix what the reviews find",
+   "name": "Fix what the reviews found",
    "state": "doing",
-   "note": "Settings and login fixed; Transfer and Dialer being fixed"
+   "note": "Settings and login fixed; Transfer and Dialer being fixed",
+   "pct": 70,
+   "eta": 35,
+   "model": "Fable or Opus (security)"
   },
   {
    "name": "Every page opens in a test",
    "state": "done",
-   "note": "tools/check-pages: 61 pages open; 5 are too long or too full and get regrouped"
+   "note": "tools/check-pages: 65 pages",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
   },
   {
    "name": "Split Settings: Desktop, System, Connect + switcher",
    "state": "done",
-   "note": "one program, four apps in the top bar"
+   "note": "one program, four apps in the top bar",
+   "pct": 100,
+   "eta": 0,
+   "model": "Opus"
   },
   {
    "name": "Pages regrouped: menu, submenu, no long pages",
    "state": "done",
-   "note": "65 pages, none longer than a screen, at most 7 per submenu"
+   "note": "none longer than a screen, at most 7 per submenu",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
   },
   {
-   "name": "Monitors page (2nd and 3rd screen)",
+   "name": "Screens page (2nd and 3rd screen)",
    "state": "done",
-   "note": "System \u2192 Hardware \u2192 Screens (not tried with a real second screen yet)"
+   "note": "not tried with a real second screen yet",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
   },
   {
-   "name": "Dialer: music output picker + Bluetooth tick",
+   "name": "Dialer: split, six parts, centre info, music output, AI chat",
    "state": "doing",
-   "note": "being split and extended"
-  },
-  {
-   "name": "Dialer: AI part, Messages with SMS, System part out, centre info",
-   "state": "doing",
-   "note": "being split and extended"
+   "note": "being built",
+   "pct": 55,
+   "eta": 40,
+   "model": "Opus"
   },
   {
    "name": "Intelligence app",
    "state": "doing",
-   "note": "being built"
+   "note": "being built",
+   "pct": 45,
+   "eta": 40,
+   "model": "Sonnet"
   },
   {
-   "name": "Connect: bootstrap one-liner, USB, ISO",
+   "name": "Connect: one-liner, ISO, USB stick",
    "state": "done",
-   "note": "one-liner, ISO (booted in a VM), USB stick; a full install not run yet"
+   "note": "ISO booted in a VM; USB writer checked for refusing the wrong disk",
+   "pct": 100,
+   "eta": 0,
+   "model": "Sonnet"
+  },
+  {
+   "name": "Connect finds devices nearby (the laptop is found by itself)",
+   "state": "todo",
+   "note": "new: asked during the run",
+   "pct": 0,
+   "eta": 60,
+   "model": "Opus"
+  },
+  {
+   "name": "ISO carries the setup and Connect, runs during the install",
+   "state": "todo",
+   "note": "new: asked during the run; includes a full install in a VM",
+   "pct": 0,
+   "eta": 90,
+   "model": "Sonnet + a long test"
+  },
+  {
+   "name": "Switch everything on (services, launchers)",
+   "state": "todo",
+   "note": "needs a few commands from you",
+   "pct": 0,
+   "eta": 20,
+   "model": "Haiku"
   },
   {
    "name": "Review after",
    "state": "todo",
-   "note": ""
+   "note": "everything the build changed",
+   "pct": 0,
+   "eta": 45,
+   "model": "Opus"
+  },
+  {
+   "name": "WinBox replacement",
+   "state": "todo",
+   "note": "design first: use the design area",
+   "pct": 0,
+   "eta": 0,
+   "model": "design: Opus; build: later"
   }
- ]
+ ],
+ "eta_total": 200
 }
