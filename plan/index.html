@@ -19,6 +19,7 @@
     <a href="#progress">Progress</a>
     <a href="#how">Reviews</a>
     <a href="#done">Done before</a>
+    <a href="#howto">Instructions</a>
     <span class="label mh">The plan</span>
     <a href="#apps">Apps</a>
     <a href="#dialer">Dialer</a>
@@ -212,6 +213,46 @@
         <button class="btn" id="copy">Copy</button></div>
       <p class="dim">Then reboot.</p></div>
   </div>
+</section>
+
+<section id="howto">
+  <div class="head">
+    <span class="label">instructions · things only you can do</span>
+    <h2>Instructions</h2>
+    <p class="dim">Steps that need you: an account, a password, a key. Each one says when it is needed.</p>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <span class="chip open tag">needed for Mistral cloud</span>
+      <h3>Create a Mistral API key</h3>
+      <ol>
+        <li>Open <a href="https://console.mistral.ai" target="_blank" rel="noopener">console.mistral.ai</a> and make an account (or log in).</li>
+        <li>Choose a plan when it asks. There is a free one to experiment with; paid is per use.</li>
+        <li>In the menu, open <b>API Keys</b> and press <b>Create new key</b>. Give it a name, e.g. <code>zorro</code>.</li>
+        <li>Copy the key now: it is shown only once.</li>
+        <li>On the laptop, save it in a file only you can read:</li>
+      </ol>
+      <pre class="cmd block" id="cmd-mistral">mkdir -p ~/.config/zorro-ai
+nano ~/.config/zorro-ai/mistral.key
+chmod 600 ~/.config/zorro-ai/mistral.key</pre>
+      <p class="dim">In nano: paste the key, Ctrl+O, Enter, Ctrl+X. The key never goes into the repo.
+        Never paste it into this page or a chat. The names of the menus on Mistral's site may differ a little.</p>
+    </div>
+    <div class="card">
+      <span class="chip open tag">needed once, then reboot</span>
+      <h3>Password first after boot or hibernate</h3>
+      <p>Installs the new login screen part. It takes effect after a reboot.</p>
+      <pre class="cmd block">sudo ~/zorro-desktop/apps/zorro-dm/install.sh</pre>
+    </div>
+    <div class="card">
+      <span class="chip tag">nothing to do</span>
+      <h3>Claude</h3>
+      <p>Uses the Claude Code login that is already on this laptop. No key needed.</p>
+      <h3>Local models</h3>
+      <p>Downloaded from inside the Intelligence app once it is built. No account needed.</p>
+    </div>
+  </div>
+  <p class="dim">More instructions appear here as the build needs them.</p>
 </section>
 
 <section id="questions">
