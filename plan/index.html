@@ -140,7 +140,7 @@ textarea { width: 100%; min-height: 58px; resize: vertical; background: var(--bg
 </header>
 
 <nav class="bar"><div class="in">
-  <a href="#apps">Five apps</a><a href="#dialer">Dialer</a><a href="#music">Music output</a>
+  <a href="#apps">Apps</a><a href="#dialer">Dialer</a><a href="#music">Music output</a>
   <a href="#ai">AI</a><a href="#how">Reviews</a><a href="#done">Done</a><a href="#questions">Questions</a>
   <span class="count" id="count"></span>
 </div></nav>
@@ -150,9 +150,10 @@ textarea { width: 100%; min-height: 58px; resize: vertical; background: var(--bg
 <section id="apps">
   <div class="head">
     <span class="label">1 · the apps</span>
-    <h2>Five apps, one switcher in the top bar</h2>
-    <p class="dim">Today's Zorro Settings splits in two. DEVS, Intelligence and Connect are new. Every app has the same
-      bar at the top to jump between the five. Click a name to see what it holds.</p>
+    <h2>Four apps in one switcher, Intelligence apart</h2>
+    <p class="dim">Today's Zorro Settings splits in two. DEVS, Connect and Intelligence are new. Desktop, System,
+      DEVS and Connect share one bar at the top to jump between them. Intelligence stands fully apart: it opens from the
+      Dialer and the app list. Click a name to see what it holds.</p>
   </div>
   <div class="switcher" role="group" aria-label="App switcher (mock)" id="switcher"></div>
   <div class="grid" id="appcards"></div>
@@ -303,10 +304,10 @@ const APPS = [
     items: ['Network', 'Audio', 'Power', 'Hardware', 'ThinkPad keys', 'Bluetooth (+ Music shortcut checkbox)', 'Printers', 'System info'] },
   { id: 'devs', name: 'DEVS', kind: 'new', what: 'Everything built and to be built',
     items: ['Bugs, feature wishes, backlog', 'Existing features too', 'Sorted by category and main app', 'Checked and tested, per device', 'A web page served from the laptop: open it on any screen', 'This plan lives in it', 'On the laptop now, to the cloud later'] },
-  { id: 'intel', name: 'Intelligence', kind: 'new', what: 'Search + AI',
-    items: ['Its own app, with a clear interface of its own', 'Search notes and documents by meaning', 'AI answers from your own files', 'Its chat is built into the Dialer (the AI part)', 'Engine: your choice (Claude / Mistral)'] },
   { id: 'connect', name: 'Connect', kind: 'new', what: 'Set up and link devices',
     items: ['Transfer: send and receive settings, apps, files', 'Bootstrap a new machine', 'Install apps (extras)', 'NetBird link'] },
+  { id: 'intel', name: 'Intelligence', kind: 'new', apart: true, what: 'Search + AI · not in the switcher',
+    items: ['Its own app, with a clear interface of its own', 'Search notes and documents by meaning', 'AI answers from your own files', 'Its chat is built into the Dialer (the AI part)', 'Engine: your choice (Claude / Mistral)'] },
 ];
 const QS = [
   { id: 'mistral-where', q: 'Mistral as fallback: where does it run?', opts: ['On the laptop (offline, private)', "Mistral's cloud (API key, needs internet)", 'Both'] },
@@ -341,10 +342,10 @@ APPS.forEach(a => {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     cards.querySelectorAll('.appcard').forEach(c => c.dataset.dim = on && c.dataset.id !== a.id ? '1' : '0');
   };
-  sw.appendChild(b);
+  if (!a.apart) sw.appendChild(b);
   const c = document.createElement('div');
   c.className = 'card appcard'; c.dataset.id = a.id;
-  c.innerHTML = `<span class="chip ${a.kind} tag">${a.kind === 'new' ? 'new app' : 'from Settings'}</span>
+  c.innerHTML = `<span class="chip ${a.kind} tag">${a.apart ? 'new app · apart' : a.kind === 'new' ? 'new app' : 'from Settings'}</span>
     <h3></h3><p class="dim"></p><ul>${a.items.map(() => '<li></li>').join('')}</ul>`;
   $('h3', c).textContent = a.name; $('p', c).textContent = a.what;
   c.querySelectorAll('li').forEach((li, i) => li.textContent = a.items[i]);
