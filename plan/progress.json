@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-21 15:45",
+ "updated": "2026-11-21 16:50",
  "steps": [
   {
    "name": "Review before: Settings",
@@ -125,8 +125,8 @@
    "name": "ISO carries the setup and Connect, runs during the install",
    "state": "doing",
    "note": "being built and installed for real in a VM",
-   "pct": 40,
-   "eta": 50,
+   "pct": 60,
+   "eta": 35,
    "model": "Sonnet + a long test"
   },
   {
@@ -140,9 +140,9 @@
   {
    "name": "Review after",
    "state": "doing",
-   "note": "three reviewers reading everything the build changed",
-   "pct": 10,
-   "eta": 40,
+   "note": "60 findings; 38 fixed, Transfer ones being fixed",
+   "pct": 65,
+   "eta": 30,
    "model": "Opus"
   },
   {
@@ -154,5 +154,5 @@
    "model": "design: Opus; build: later"
   }
  ],
- "eta_total": 75
+ "eta_total": 45
 }

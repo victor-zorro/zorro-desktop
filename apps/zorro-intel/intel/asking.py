@@ -25,6 +25,15 @@ class Asking:
             self.call.cancel()
 
     def run(self):
+        try:
+            return self.asked()
+        except Exception as e:      # noqa: BLE001  e.g. the disk is full: say so, never stay on "Stop"
+            self.answer.error = f'Could not finish: {e}'
+            self.stage = 'end'
+            self.on_change()
+            return self
+
+    def asked(self):
         self.question = chat.question(self.text)
         messages = chat.append(self.question)
         self.on_change()

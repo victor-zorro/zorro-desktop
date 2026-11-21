@@ -26,6 +26,7 @@ class ChatView:
         return max(16 * u, min(sw - W - 16 * u, x)), max(16 * u, min(sh - H - 16 * u, y)), W, H
 
     def draw_chat(self, cr):
+        self.chat.follow()
         x, y, W, H = self.chat_box()
         u, p = self.u, 18 * self.u
         left, width = x + p, W - 2 * p

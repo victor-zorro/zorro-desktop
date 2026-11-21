@@ -7,6 +7,7 @@ root through polkit, which asks the admin password every time.
 Only a whole, removable USB disk is accepted, never a disk the system runs from; the ISO
 must be a real ISO file of the user who asked. Everything on the stick is erased.
 """
+import glob
 import os
 import re
 import stat
@@ -40,6 +41,9 @@ def usb_stick(dev):
 
 def in_use(name):
     """mount points of this disk's partitions; stop when the system itself runs from it"""
+    holders = glob.glob(f'/sys/block/{name}/holders/*') + glob.glob(f'/sys/block/{name}/{name}*/holders/*')
+    if holders:
+        die('the stick is in use (an opened encrypted or combined volume): close it first')
     points = []
     for line in open('/proc/self/mounts'):
         src, point = line.split()[:2]
@@ -56,8 +60,13 @@ def in_use(name):
 def iso_file(path, uid):
     """the ISO, opened once (no link followed): the file that is checked is the file copied"""
     try:
-        src = os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb')
+        before = os.lstat(path)         # looked at before it is opened: never a pipe or a device
+        if not stat.S_ISREG(before.st_mode) or before.st_uid != uid:
+            die('not your ISO file')
+        src = os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb')
         st = os.fstat(src.fileno())
+        if (st.st_dev, st.st_ino) != (before.st_dev, before.st_ino):
+            die('the file changed')
         src.seek(32769)
         magic = src.read(5)
         src.seek(0)

@@ -2,10 +2,10 @@
 three ask once: press the button a second time to go on."""
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import GLib, Gtk  # noqa: E402
+from gi.repository import Gtk  # noqa: E402
 
 from .base import spawn
-from .ui import Pages, button, heading, note
+from .ui import Pages, button, drop_later, heading, later, note
 
 ACTIONS = (('Lock', ['loginctl', 'lock-session'], False),
            ('Sleep', ['systemctl', 'suspend'], False),
@@ -35,13 +35,13 @@ class SessionPages:
         if ask and self.session_asked != label:
             self.session_asked = label
             self.session_msg.set_text(f'{label}? Press {label} again within {ASK_SECONDS} seconds.')
-            self.timers.append(GLib.timeout_add_seconds(ASK_SECONDS, self.session_forget, label))
+            later('session-ask', self.session_forget, ASK_SECONDS * 1000)     # one question at a time
             return
         self.session_asked = None
+        drop_later('session-ask')
         spawn(cmd)
 
-    def session_forget(self, label):
-        if self.session_asked == label:
-            self.session_asked = None
+    def session_forget(self):
+        self.session_asked = None
+        if not getattr(self, 'dead', False):
             self.session_msg.set_text('Log out, Restart and Power off close everything that is open.')
-        return False

@@ -76,6 +76,10 @@ if ! has vm && sudo test -s /var/lib/dhcpcd/duid && command -v nmcli >/dev/null;
     log "Cable $c: keeps the ID the router knows it by (same address as before)"
     printf '[connection-zorro-cable-id-%s]\nmatch-device=interface-name:%s\nipv4.dhcp-client-id=ff:%s:%s\n' \
       "$c" "$c" "$(cut -d: -f3-6 "$dev/address")" "$duid" | sudo tee "$conf" >/dev/null
+    if [[ -z ${SSH_CONNECTION:-} ]]; then     # use it now, not only after the next restart
+      sudo nmcli general reload conf >/dev/null 2>&1 || true
+      sudo nmcli device reapply "$c" >/dev/null 2>&1 || true
+    fi
   done
 fi
 

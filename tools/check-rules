@@ -20,7 +20,9 @@ CODE = {'.py', '.js', '.sh', '.css', '.html'}
 
 
 def sources():
-    for name in subprocess.run(['git', 'ls-files'], cwd=ROOT, capture_output=True, text=True).stdout.splitlines():
+    listing = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard'], cwd=ROOT,
+                             capture_output=True, text=True).stdout       # new files count before their first commit
+    for name in sorted(set(listing.splitlines())):
         p = ROOT / name
         if name.startswith(SKIP) or not p.is_file() or p.is_symlink():
             continue

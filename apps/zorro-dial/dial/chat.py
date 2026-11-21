@@ -1,4 +1,5 @@
 """The AI part's conversation: what was said, the question under way, the answer coming in."""
+import os
 import threading
 
 from . import aiclient, chatfile
@@ -25,6 +26,16 @@ class Chat:
         """the part opens: read the shared conversation, see whether the service is there"""
         self.messages = chatfile.load(self.file)
         threading.Thread(target=self.check, daemon=True).start()
+
+    def follow(self):
+        """Intelligence wrote to the shared conversation meanwhile: show it (one cheap look)"""
+        try:
+            stamp = os.stat(self.file or chatfile.path()).st_mtime_ns
+        except OSError:
+            stamp = 0
+        if stamp != getattr(self, 'stamp', None) and not self.busy:
+            self.stamp = stamp
+            self.messages = chatfile.load(self.file)
 
     def check(self):
         ok = aiclient.available(self.sock)

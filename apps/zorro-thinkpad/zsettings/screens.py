@@ -8,7 +8,9 @@ from .base import load_conf, run
 WHERE = {'right': 'Right of the laptop', 'left': 'Left of the laptop', 'above': 'Above the laptop',
          'below': 'Below the laptop', 'same': 'Same picture', 'off': 'Off'}
 SIDE = {'right': '--right-of', 'left': '--left-of', 'above': '--above', 'below': '--below'}
-HEAD = re.compile(r'^(\S+) (connected|disconnected)( primary)?(?: (\d+)x(\d+)\+(-?\d+)\+(-?\d+))?')
+HEAD = re.compile(r'^(\S+) (connected|disconnected)( primary)?(?: (\d+)x(\d+)\+(-?\d+)\+(-?\d+))?'
+                  r'(?: (left|right|inverted))?')
+MODE_NOW = re.compile(r'^\s+(\d+x\d+)\s.*\*')
 MODE = re.compile(r'^\s+(\d+x\d+)\s+(.*)$')
 
 
@@ -23,8 +25,12 @@ def parse(text):
                         'on': m.group(4) is not None, 'modes': [],
                         'size': f'{m.group(4)}x{m.group(5)}' if m.group(4) else '',
                         'pos': (int(m.group(6)), int(m.group(7))) if m.group(4) else (0, 0),
+                        'turned': m.group(8) or 'normal', 'mode': '',
                         'laptop': name.startswith(('eDP', 'LVDS', 'DSI'))})
             continue
+        now = MODE_NOW.match(line)
+        if now and out:
+            out[-1]['mode'] = now.group(1)      # the real mode: a turned screen's size is swapped
         m = MODE.match(line)
         if m and out and m.group(1) not in out[-1]['modes']:
             out[-1]['modes'].append(m.group(1))
@@ -57,10 +63,10 @@ def plan(screens, conf):
     args, last = [], {}
     others = [s for s in live if s is not laptop]
     laptop_off = choices.get(laptop['name'], {}).get('where') == 'off' and any(
-        choices.get(s['name'], {}).get('where', 'right') != 'off' for s in others)
+        where_of(s, choices) != 'off' for s in others)
     args += ['--output', laptop['name']] + (['--off'] if laptop_off else mode_args(laptop, choices))
     for s in others:
-        where = choices.get(s['name'], {}).get('where', 'right')
+        where = where_of(s, choices)
         args += ['--output', s['name']]
         if where == 'off':
             args.append('--off')
@@ -83,6 +89,11 @@ def plan(screens, conf):
     return args
 
 
+def where_of(screen, choices):
+    """your choice for this screen; without one it stays as it is (off stays off)"""
+    return choices.get(screen['name'], {}).get('where') or ('right' if screen['on'] else 'off')
+
+
 def mode_args(screen, choices):
     mode = choices.get(screen['name'], {}).get('mode')
     return ['--mode', mode] if mode in screen['modes'] else ['--auto']
@@ -93,7 +104,8 @@ def restore_args(screens):
     args = []
     for s in connected(screens):
         args += ['--output', s['name']]
-        args += ['--mode', s['size'], '--pos', f'{s["pos"][0]}x{s["pos"][1]}'] if s['on'] else ['--off']
+        args += ['--mode', s['mode'] or s['size'], '--rotate', s['turned'],
+                 '--pos', f'{s["pos"][0]}x{s["pos"][1]}'] if s['on'] else ['--off']
         if s['primary']:
             args.append('--primary')
     return args

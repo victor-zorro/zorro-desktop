@@ -20,12 +20,12 @@ class ScreensPages:
         box.add(self.scr_rows)
         box.add(note('Changes show at once. Press Keep within a few seconds, or the picture goes back.'))
         self.scr_msg = note()
-        self.scr_keep = button('Keep', self.screens_keep, primary=True)
+        self.scr_keep = button('Keep', self.screens_keep, primary=True, no_show_all=True)
         bottom = Gtk.Box(spacing=12)
         bottom.add(self.scr_keep)
         bottom.add(self.scr_msg)
         box.footer(bottom)
-        self.scr_seen, self.scr_back, self.scr_timer = None, None, None
+        self.scr_seen, self.scr_back, self.scr_timer, self.scr_new = None, None, None, {}
         self.when_shown('hardware', self.screens_fill)
         self.timers.append(GLib.timeout_add_seconds(4, self.screens_tick))
         return box
@@ -79,7 +79,7 @@ class ScreensPages:
 
     def screens_set(self, name=None, main=None, **choice):
         """one choice changed: show it now, and wait for Keep"""
-        conf = dict(screens.saved())
+        conf = dict(self.scr_new if self.scr_back else screens.saved())    # also what waits for Keep
         layout = dict(conf.get('layout') if isinstance(conf.get('layout'), dict) else {})
         if name:
             layout[name] = {**layout.get(name, {}), **choice}
@@ -106,13 +106,19 @@ class ScreensPages:
             self.screens_count()
             return True
         self.scr_timer = None
-        args, _conf = self.scr_back
-        self.scr_back = None
-        screens.apply(args)
-        self.scr_msg.set_text('Put back as it was.')
+        err = self.screens_back()
+        self.scr_msg.set_text(f'Could not put it back: {err}' if err else 'Put back as it was.')
         self.scr_seen = None
         self.screens_fill()
         return False
+
+    def screens_back(self):
+        """undo a change that was not kept (also when the window closes); '' or the error"""
+        if self.scr_timer:
+            GLib.source_remove(self.scr_timer)
+            self.scr_timer = None
+        back, self.scr_back = getattr(self, 'scr_back', None), None
+        return screens.apply(back[0]) if back else ''
 
     def screens_keep(self):
         if self.scr_timer:
@@ -121,6 +127,6 @@ class ScreensPages:
         self.scr_back = None
         update_conf(None, screens=self.scr_new)
         self.scr_keep.hide()
-        self.scr_msg.set_text('Kept: also used the next time you log in or plug it in.')
+        self.scr_msg.set_text('Kept: also used the next time you log in.')
         self.scr_seen = None
         self.screens_fill()

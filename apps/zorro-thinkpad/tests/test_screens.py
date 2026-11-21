@@ -32,6 +32,7 @@ class Screens(unittest.TestCase):
     def test_two_on_the_same_side_line_up(self):
         args = screens.plan(self.now, {'layout': {'HDMI-A-0': {'where': 'right', 'mode': '1920x1080'},
                                                   'DisplayPort-0': {'where': 'right'}}, 'main': 'HDMI-A-0'})
+        self.assertEqual(screens.plan(self.now, {'layout': {}})[-3:], ['--output', 'DisplayPort-0', '--off'])
         self.assertEqual(args, ['--output', 'eDP-1', '--auto',
                                 '--output', 'HDMI-A-0', '--mode', '1920x1080', '--right-of', 'eDP-1',
                                 '--output', 'DisplayPort-0', '--auto', '--right-of', 'HDMI-A-0',
@@ -49,9 +50,18 @@ class Screens(unittest.TestCase):
 
     def test_restore_brings_back_what_is_on(self):
         self.assertEqual(screens.restore_args(self.now),
-                         ['--output', 'eDP-1', '--mode', '1920x1080', '--pos', '0x0', '--primary',
-                          '--output', 'HDMI-A-0', '--mode', '2560x1440', '--pos', '1920x0',
+                         ['--output', 'eDP-1', '--mode', '1920x1080', '--rotate', 'normal', '--pos', '0x0',
+                          '--primary',
+                          '--output', 'HDMI-A-0', '--mode', '2560x1440', '--rotate', 'normal', '--pos', '1920x0',
                           '--output', 'DisplayPort-0', '--off'])
+
+    def test_a_turned_screen_goes_back_turned(self):
+        now = screens.parse('eDP-1 connected primary 1920x1080+0+0 (normal)\n   1920x1080 60.00*+\n'
+                            'HDMI-1 connected 1080x1920+1920+0 left (normal left inverted)\n'
+                            '   1920x1080     60.00*+\n   1280x720 60.00\n')
+        back = screens.restore_args(now)
+        self.assertEqual(back[back.index('HDMI-1'):], ['HDMI-1', '--mode', '1920x1080', '--rotate', 'left',
+                                                       '--pos', '1920x0'])
 
     def test_a_desktop_pc_has_an_anchor(self):
         now = screens.parse('DP-1 connected 1920x1080+0+0 (normal)\n   1920x1080 60.00*+\n')

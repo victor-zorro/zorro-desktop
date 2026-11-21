@@ -93,6 +93,8 @@ def rows(outs, ticked, bt, connecting=None, failed=None, now=None):
 
 def connect(mac):
     """connect a Bluetooth device and play there once its output is there; True when it plays"""
+    if mac in CONNECTING:               # a second tap while it connects: the first one goes on
+        return False
     CONNECTING[mac] = time.time()
     FAILED.pop(mac, None)
     try:

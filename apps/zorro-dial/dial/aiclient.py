@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 CONNECT_LIMIT = 3                       # seconds
-QUIET_LIMIT = 180                       # seconds without a line from the service: give up
+QUIET_LIMIT = 600                       # seconds without a line: longer than a local model's queue and load
 NO_SERVICE = 'The AI service is not running.'
 
 

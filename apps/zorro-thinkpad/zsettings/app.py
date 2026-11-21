@@ -158,7 +158,8 @@ class Win(*PAGES, Gtk.ApplicationWindow):
         """open a page by its address, e.g. power:1 or just power"""
         if ':' not in pid:
             pid += ':0'
-        menu = SECTION_MENU.get(pid.split(':')[0])
+        name = pid.split(':')[0]
+        menu = SECTION_MENU.get(name) or (name if name in MENU_APP else None)   # also: home, devs, a menu
         if not menu:
             return self.show_app('desktop')
         self.show_app(MENU_APP[menu])
@@ -201,6 +202,8 @@ class Win(*PAGES, Gtk.ApplicationWindow):
     def on_destroy(self, _w):
         """stop this window's timers; write slider changes that were still waiting"""
         flush_later()
+        if getattr(self, 'scr_back', None):
+            self.screens_back()         # a screen change you did not keep goes back now
         self.dead = True                # build_rest / menu: nothing more into this window
         if getattr(self, 'rest_id', None):
             GLib.source_remove(self.rest_id)

@@ -9,7 +9,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from .base import APPS, HOME, run
-from .ui import Pages, button, combo, form, heading, in_bg, note
+from .ui import Pages, button, combo, form, heading, in_bg, later, note
 
 REPO = APPS.parent
 BOOTSTRAP = ('sudo apt install -y curl && curl -fsSL '
@@ -48,7 +48,7 @@ class ConnectPages:
 
         box.add(heading('USB stick', 'USB stick'))
         box.add(note('Writes the ISO file to a stick. Everything on the stick is erased.'))
-        self.usb_pick = combo(sticks() or {'': 'No USB stick found'}, '', lambda v: None)
+        self.usb_pick = combo(sticks() or {'': 'No USB stick found'}, '', lambda v: setattr(self, 'usb_sure', None))
         self.usb_pick.set_active(0)
         box.add(form([('Stick', self.usb_pick)]))
         row = Gtk.Box(spacing=8)
@@ -83,20 +83,29 @@ class ConnectPages:
         for dev, text in (sticks() or {'': 'No USB stick found'}).items():
             self.usb_pick.append(dev, f'{text}  ({dev})' if dev else text)
         self.usb_pick.set_active(0)
+        self.usb_sure = None            # another stick may sit there now: ask again
 
     def usb_write(self):
         dev = self.usb_pick.get_active_id()
+        if getattr(self, 'usb_busy', False):
+            return
         if not dev:
             self.usb_msg.set_text('Plug in a USB stick and press Look again.')
             return
         if not ISO.exists():
             self.usb_msg.set_text('Make the ISO file first.')
             return
-        if getattr(self, 'usb_sure', None) != dev:
-            self.usb_sure = dev         # asks once: this cannot be undone
-            self.usb_msg.set_text(f'This erases {self.usb_pick.get_active_text()}. Press Write the stick again to go on.')
+        stick = (dev, sticks().get(dev))    # the stick that is there now, by name and size
+        if not stick[1]:
+            self.usb_refresh()
+            self.usb_msg.set_text('That stick is gone. Pick one and press Write the stick.')
             return
-        self.usb_sure = None
+        if getattr(self, 'usb_sure', None) != stick:
+            self.usb_sure = stick       # asks once: this cannot be undone
+            self.usb_msg.set_text(f'This erases {stick[1]} ({dev}). Press Write the stick again within 10 seconds.')
+            later('usb-ask', lambda: setattr(self, 'usb_sure', None), 10000)
+            return
+        self.usb_sure, self.usb_busy = None, True
         self.usb_msg.set_text('Writing… (your password; a few minutes)')
 
         def work():
@@ -112,7 +121,7 @@ class ConnectPages:
                            (r.stderr.strip().splitlines() or ['failed'])[-1])
                 except (OSError, subprocess.TimeoutExpired) as e:
                     msg = f'Not written: {e}'
-            GLib.idle_add(self.usb_msg.set_text, msg)
+            GLib.idle_add(lambda: (setattr(self, 'usb_busy', False), self.usb_msg.set_text(msg)) and False)
         in_bg(work)
 
     def netbird_link_page(self):
