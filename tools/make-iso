@@ -4,15 +4,22 @@
 # (as a file in a VM, or written to a USB stick), answer name, password and disk; at the
 # first login the desktop installs itself.
 #   tools/make-iso [OUT.iso]        default: ~/Installers/zorro-desktop.iso
+#   tools/make-iso --test-answers OUT.iso   TEST ISO: answers everything and ERASES the
+#                                   first disk without asking. Never use it on real hardware.
+# The ISO also carries a snapshot of this repo (the last commit; uncommitted changes are
+# not in it): the packages install during the Debian install, install.sh at the first login.
 # Needs xorriso (apt install xorriso; or XORRISO=/path/to/xorriso), curl, cpio, gzip.
 set -euo pipefail
 here=$(dirname "$(realpath "$0")")
-out=${1:-$HOME/Installers/zorro-desktop.iso}
+repo=$(dirname "$here")
+test_answers=
+if [[ ${1:-} == --test-answers ]]; then test_answers=1; shift; fi
+out=${1:-$HOME/Installers/zorro-desktop${test_answers:+-TEST-erases-disk}.iso}
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/zorro-iso
 base=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
 xorriso=${XORRISO:-xorriso}
 
-for tool in "$xorriso" curl cpio gzip sha256sum; do
+for tool in "$xorriso" git curl cpio gzip sha256sum; do
   command -v "$tool" >/dev/null || { echo "$tool is missing (sudo apt install xorriso curl cpio)"; exit 1; }
 done
 
@@ -30,7 +37,16 @@ fi
 
 work=$(mktemp -d)
 trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
-cp "$here/iso/preseed.cfg" "$here/iso/zorro-first-login.sh" "$work/"
+cp "$here/iso/preseed.cfg" "$work/"
+cp "$here"/iso/{zorro-first-login,in-install,in-target-packages}.sh "$work/"
+if [[ -n $test_answers ]]; then
+  { echo; cat "$here/iso/test-answers.cfg"; } >> "$work/preseed.cfg"
+fi
+
+# a snapshot of the repo, for the new machine to set itself up from
+mkdir -p "$work/zorro"
+git -C "$repo" archive --format=tar.gz -o "$work/zorro/zorro-desktop.tar.gz" HEAD
+echo "Snapshot: commit $(git -C "$repo" rev-parse --short HEAD) (uncommitted changes are not included)"
 
 # our answers go into the installer's start-up files (text and graphical installer)
 maps=(); n=0
@@ -39,7 +55,7 @@ for rd in /install.amd/initrd.gz /install.amd/gtk/initrd.gz; do
   "$xorriso" -osirrox on -indev "$iso" -extract "$rd" "$f.gz" >/dev/null 2>&1 || continue
   chmod u+w "$f.gz"
   gzip -d "$f.gz"
-  (cd "$work" && printf 'preseed.cfg\nzorro-first-login.sh\n' | cpio -o -H newc -A -F "$f" 2>/dev/null)
+  (cd "$work" && printf 'preseed.cfg\nzorro-first-login.sh\nin-install.sh\nin-target-packages.sh\n' | cpio -o -H newc -A -F "$f" 2>/dev/null)
   gzip -1 "$f"
   maps+=(-map "$f.gz" "$rd")
 done
@@ -47,6 +63,7 @@ done
 
 rm -f "$out.tmp"
 "$xorriso" -indev "$iso" -outdev "$out.tmp" -boot_image any replay -volid ZORRO_DESKTOP \
-  "${maps[@]}" >/dev/null 2>"$work/log" || { tail -3 "$work/log"; exit 1; }
+  -map "$work/zorro" /zorro "${maps[@]}" >/dev/null 2>"$work/log" || { tail -3 "$work/log"; exit 1; }
 mv "$out.tmp" "$out"
+[[ -z $test_answers ]] || echo "WARNING: TEST ISO. It installs without asking and ERASES the first disk."
 echo "Ready: $out ($(du -h "$out" | cut -f1))"
