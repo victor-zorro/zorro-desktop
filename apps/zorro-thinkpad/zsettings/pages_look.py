@@ -8,6 +8,8 @@ from pathlib import Path
 from .base import HOME, RUNTIME, load_conf, spawn, update_conf, write_atomic
 from .look import CBLUR_MODES, CUSTOM_PRESETS, DM_DIR, LOOK_ANIMALS, animal_id, LOOK_BACKGROUNDS, LOOK_DEFAULTS, LOOK_FILE, _look_draft, custom_presets, theme_presets
 from .power import LOOK_HELPER
+
+KEEP_ON_PRESET = ('clock',)     # your own choices a look preset never changes
 from . import ui
 from .ui import Pages, heading, idle, note
 import gi
@@ -88,6 +90,12 @@ class LookPages:
 
     def theme_apply(self, pid, p):
         look = {**LOOK_DEFAULTS, **p['look']}
+        try:                # the clock is your own choice, not part of a look: keep it
+            now = json.loads(Path(LOOK_FILE).read_text())
+        except (OSError, ValueError):
+            now = {}
+        for k in KEEP_ON_PRESET:
+            look[k] = now.get(k, LOOK_DEFAULTS[k])
         self.theme_msg.set_text(f'Applying {p["name"]}… (your password, once)')
 
         def work():
