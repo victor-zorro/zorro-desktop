@@ -1,0 +1,84 @@
+#!/usr/bin/python3
+"""Check the build rules in RULES.md: no file over FILE lines, no function over FUNC.
+Older code that is over a limit is listed in tools/rules-baseline.json with its size:
+it may shrink, never grow (the baseline is then lowered by --update).
+
+  tools/check-rules            check; exit 1 when a rule is broken
+  tools/check-rules --update   after shrinking: write the smaller sizes to the baseline
+"""
+import ast
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+FILE, FUNC = 400, 60
+ROOT = Path(__file__).resolve().parent.parent
+BASE = ROOT / 'tools' / 'rules-baseline.json'
+SKIP = ('apps/zorro-thinkpad/xmm7360/', 'apps/zorro-sweep/obsidian-plugin/main.js')   # other people's code, built files
+CODE = {'.py', '.js', '.sh', '.css', '.html'}
+
+
+def sources():
+    for name in subprocess.run(['git', 'ls-files'], cwd=ROOT, capture_output=True, text=True).stdout.splitlines():
+        p = ROOT / name
+        if name.startswith(SKIP) or not p.is_file() or p.is_symlink():
+            continue
+        try:
+            text = p.read_text()
+        except (UnicodeDecodeError, OSError):
+            continue
+        if p.suffix in CODE or (not p.suffix and text.startswith('#!')):
+            yield name, text
+
+
+def long_functions(name, text):
+    if not (name.endswith('.py') or 'python' in text.split('\n', 1)[0]):
+        return {}
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    out = {}
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            size = n.end_lineno - n.lineno + 1
+            if size > FUNC:
+                out[n.name] = max(size, out.get(n.name, 0))
+    return out
+
+
+def measure():
+    now = {}
+    for name, text in sources():
+        lines = text.count('\n')
+        funcs = long_functions(name, text)
+        if lines > FILE or funcs:
+            now[name] = {'lines': lines if lines > FILE else 0, 'functions': funcs}
+    return now
+
+
+def main():
+    now = measure()
+    if '--update' in sys.argv:
+        BASE.write_text(json.dumps(now, indent=1, sort_keys=True) + '\n')
+        print(f'baseline written: {len(now)} files over a limit')
+        return 0
+    base = json.loads(BASE.read_text()) if BASE.exists() else {}
+    bad = []
+    for name, m in sorted(now.items()):
+        b = base.get(name, {'lines': 0, 'functions': {}})
+        if m['lines'] > max(b['lines'], FILE):
+            bad.append(f'{name}: {m["lines"]} lines (limit {max(b["lines"], FILE)}): split it')
+        for f, size in sorted(m['functions'].items()):
+            limit = max(b['functions'].get(f, 0), FUNC)
+            if size > limit:
+                bad.append(f'{name}: {f}() is {size} lines (limit {limit}): split it')
+    for line in bad:
+        print(line)
+    print(f'{len(bad)} broken' if bad else f'rules ok ({len(now)} older files still over a limit, see the baseline)')
+    return 1 if bad else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

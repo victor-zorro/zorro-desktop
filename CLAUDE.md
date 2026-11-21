@@ -31,6 +31,7 @@ Repo: github.com/victor-zorro/zorro-desktop (public — never commit secrets, to
 - `extras/` — optional apps, added after the minimal setup: `extras/apps.json` is the list (Godot, Unreal Engine, LocalSend…), each with `extras/<id>/install.sh` (runs as the user, pkexec/sudo for root steps; shared bits in `extras/common.sh`). Installed from Settings → Desktop → Install apps or `zorro-apps install ID`. New optional app = an entry in apps.json + its install.sh. DaVinci Resolve (`extras/davinci-resolve/install.sh`, sudo) is not on the list.
 
 ## Rules
+- Build and design rules are in `RULES.md` (files ≤ 400 lines, functions ≤ 60, one page = one file, pages fit one screen, menu → submenu → page). Run `tools/check-rules` before every commit.
 - Every change must also land in the repo so a fresh machine gets it: package → packages/*.txt, config → config/, system file → system/ + an install line in install.sh.
 - Keep install.sh safe to rerun: no blind appends; check before adding lines.
 - Desktop is windows-only Openbox: no panel, no tray. Launcher = the Dialer, zorro-dial (rofi on Super+Shift+Space), info circle = zorro-orb (conky as fallback), notifications = dunst.

@@ -23,6 +23,8 @@ STATE = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state'))
 ANSWERS = STATE / 'answers.json'
 ID = re.compile(r'[a-z0-9-]{1,40}')
 LOCK = threading.Lock()
+FILES = {'/': ('index.html', 'text/html'), '/index.html': ('index.html', 'text/html'),
+         '/style.css': ('style.css', 'text/css'), '/page.js': ('page.js', 'text/javascript')}
 
 
 def read():
@@ -60,8 +62,9 @@ class Page(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.allowed():
             return
-        if self.path in ('/', '/index.html'):
-            self.send(200, (HERE / 'index.html').read_bytes(), 'text/html')
+        if self.path in FILES:
+            name, kind = FILES[self.path]
+            self.send(200, (HERE / name).read_bytes(), kind)
         elif self.path == '/api/answers':
             with LOCK:
                 self.send(200, json.dumps(read()))

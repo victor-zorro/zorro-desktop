@@ -1,0 +1,176 @@
+{
+ "apps/zorro-dial/dialparts/files.py": {
+  "functions": {
+   "file_preview": 63
+  },
+  "lines": 0
+ },
+ "apps/zorro-dial/zorro-dial": {
+  "functions": {
+   "__init__": 79,
+   "draw_hub": 73,
+   "draw_preview": 84,
+   "draw_slices": 61,
+   "draw_tree": 89,
+   "on_click": 62,
+   "on_draw": 81
+  },
+  "lines": 1907
+ },
+ "apps/zorro-dm/theme/js/animals.js": {
+  "functions": {},
+  "lines": 652
+ },
+ "apps/zorro-dm/theme/js/fx.js": {
+  "functions": {},
+  "lines": 804
+ },
+ "apps/zorro-dm/zorro-dm": {
+  "functions": {
+   "greeter_round": 161
+  },
+  "lines": 686
+ },
+ "apps/zorro-drive/zorro-drive": {
+  "functions": {
+   "__init__": 80,
+   "cmd_watch": 95,
+   "on_api_key": 66,
+   "run_app": 711,
+   "sync_folder": 95
+  },
+  "lines": 1231
+ },
+ "apps/zorro-face/faceview.py": {
+  "functions": {
+   "learn": 63
+  },
+  "lines": 552
+ },
+ "apps/zorro-icons/build-icons": {
+  "functions": {
+   "build": 80
+  },
+  "lines": 0
+ },
+ "apps/zorro-orb/zorro-orb": {
+  "functions": {
+   "main": 252
+  },
+  "lines": 503
+ },
+ "apps/zorro-shot/zorro-shot": {
+  "functions": {
+   "__init__": 70,
+   "run_overlay": 345,
+   "serve_clipboard": 98
+  },
+  "lines": 682
+ },
+ "apps/zorro-sweep/zorro-sweep": {
+  "functions": {
+   "__init__": 84,
+   "contents": 67,
+   "do_undo": 68,
+   "draw_tiles": 61,
+   "vault_delete": 61
+  },
+  "lines": 1391
+ },
+ "apps/zorro-thinkpad/zorro-lte": {
+  "functions": {},
+  "lines": 497
+ },
+ "apps/zorro-thinkpad/zsettings/app.py": {
+  "functions": {
+   "__init__": 79
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/hardware.py": {
+  "functions": {
+   "hardware_rows": 83
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/keyd.py": {
+  "functions": {
+   "cmd_keyd": 250
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/pages_apps.py": {
+  "functions": {
+   "apps_install": 81
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/pages_desktop.py": {
+  "functions": {
+   "dial_page": 148,
+   "fx_page": 86,
+   "orb_page": 72,
+   "text_page": 89
+  },
+  "lines": 595
+ },
+ "apps/zorro-thinkpad/zsettings/pages_home.py": {
+  "functions": {
+   "home_refresh": 82
+  },
+  "lines": 644
+ },
+ "apps/zorro-thinkpad/zsettings/pages_look.py": {
+  "functions": {
+   "look_page": 129,
+   "theme_page": 66
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/pages_mobile.py": {
+  "functions": {
+   "mobile_page": 79
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/pages_thinkpad.py": {
+  "functions": {
+   "lights_page": 83,
+   "power_page": 61
+  },
+  "lines": 0
+ },
+ "apps/zorro-thinkpad/zsettings/windows.py": {
+  "functions": {
+   "write_theme": 82
+  },
+  "lines": 0
+ },
+ "apps/zorro-transfer/transfer/cli.py": {
+  "functions": {
+   "main": 61
+  },
+  "lines": 0
+ },
+ "apps/zorro-transfer/transfer/engine.py": {
+  "functions": {
+   "fetch_on": 102,
+   "serve": 81
+  },
+  "lines": 661
+ },
+ "apps/zorro-transfer/transfer/gui.py": {
+  "functions": {},
+  "lines": 497
+ },
+ "apps/zorro-winpos/zorro-winpos": {
+  "functions": {},
+  "lines": 505
+ },
+ "extras/evernote-to-obsidian/evernote-to-vaults": {
+  "functions": {
+   "main": 70
+  },
+  "lines": 570
+ }
+}
