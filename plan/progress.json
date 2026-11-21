@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-21 16:50",
+ "updated": "2026-11-21 17:30",
  "steps": [
   {
    "name": "Review before: Settings",
@@ -124,25 +124,25 @@
   {
    "name": "ISO carries the setup and Connect, runs during the install",
    "state": "doing",
-   "note": "being built and installed for real in a VM",
-   "pct": 60,
-   "eta": 35,
+   "note": "being installed for real in a VM",
+   "pct": 70,
+   "eta": 30,
    "model": "Sonnet + a long test"
   },
   {
    "name": "Switch everything on (services, launchers)",
    "state": "doing",
-   "note": "all services on; waiting for your password steps and a Dialer restart",
-   "pct": 80,
+   "note": "two installs to run once more, a Dialer restart and a reboot (Instructions)",
+   "pct": 85,
    "eta": 5,
    "model": "Haiku"
   },
   {
    "name": "Review after",
-   "state": "doing",
-   "note": "60 findings; 38 fixed, Transfer ones being fixed",
-   "pct": 65,
-   "eta": 30,
+   "state": "done",
+   "note": "60 findings: 57 fixed, 3 kept in DEVS for later",
+   "pct": 100,
+   "eta": 0,
    "model": "Opus"
   },
   {
@@ -162,5 +162,5 @@
    "model": "design: Opus; build: later"
   }
  ],
- "eta_total": 45
+ "eta_total": 30
 }
