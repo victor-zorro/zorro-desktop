@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-21 13:15",
+ "updated": "2026-11-21 14:10",
  "steps": [
   {
    "name": "Review before: Settings",
@@ -28,13 +28,13 @@
   },
   {
    "name": "DEVS: web page, catalogue, tests per device",
-   "state": "doing",
-   "note": "being built"
+   "state": "done",
+   "note": "built: 189 items from the first fill, 27 tests; switched on at the end"
   },
   {
    "name": "Fix what the reviews find",
    "state": "doing",
-   "note": "Settings and login fixed; Transfer being hardened; Dialer next"
+   "note": "Settings and login fixed; Transfer and Dialer being fixed"
   },
   {
    "name": "Every page opens in a test",
@@ -43,18 +43,18 @@
   },
   {
    "name": "Split Settings: Desktop, System, Connect + switcher",
-   "state": "doing",
-   "note": ""
+   "state": "done",
+   "note": "one program, four apps in the top bar"
   },
   {
    "name": "Pages regrouped: menu, submenu, no long pages",
-   "state": "todo",
-   "note": ""
+   "state": "done",
+   "note": "65 pages, none longer than a screen, at most 7 per submenu"
   },
   {
    "name": "Monitors page (2nd and 3rd screen)",
-   "state": "todo",
-   "note": ""
+   "state": "done",
+   "note": "System \u2192 Hardware \u2192 Screens (not tried with a real second screen yet)"
   },
   {
    "name": "Dialer: music output picker + Bluetooth tick",
@@ -73,8 +73,8 @@
   },
   {
    "name": "Connect: bootstrap one-liner, USB, ISO",
-   "state": "todo",
-   "note": ""
+   "state": "done",
+   "note": "one-liner, ISO (booted in a VM), USB stick; a full install not run yet"
   },
   {
    "name": "Review after",
