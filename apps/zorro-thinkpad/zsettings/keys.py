@@ -9,14 +9,37 @@ from .base import APPS, STAR_ACTIONS, STATE, load_conf, osd, run, spawn, write_a
 
 # ---- key actions ----------------------------------------------------------------------
 
-def volume():
-    out = run('wpctl', 'get-volume', '@DEFAULT_AUDIO_SINK@')
-    m = re.search(r'([\d.]+)', out)
-    return (round(float(m.group(1)) * 100) if m else 0), '[MUTED]' in out
+def key_sink():
+    """the output the keys work on: where sound is playing now (the newest stream that is
+    not paused), else the default output. The equaliser is a filter in between: its
+    real device is meant, so keys, Settings and the Dialer show the same level."""
+    try:
+        sinks = {x['index']: x['name'] for x in json.loads(run('pactl', '-f', 'json', 'list', 'sinks') or '[]')}
+        playing = [x for x in json.loads(run('pactl', '-f', 'json', 'list', 'sink-inputs') or '[]')
+                   if not x.get('corked') and x.get('properties', {}).get('node.name') != 'zorro_eq.out']
+    except ValueError:
+        sinks, playing = {}, []
+    name = sinks.get(max(playing, key=lambda x: x['index'])['sink']) if playing else None
+    name = name or run('pactl', 'get-default-sink').strip()
+    if name == 'zorro_eq':
+        from . import eq
+        name = eq.settings().get('target') or name
+    return name or '@DEFAULT_SINK@'
 
 
-def show_volume():
-    vol, muted = volume()
+def volume(sink=None):
+    sink = sink or key_sink()
+    try:
+        info = next(x for x in json.loads(run('pactl', '-f', 'json', 'list', 'sinks') or '[]')
+                    if x['name'] == sink)
+        vols = [int(str(c['value_percent']).rstrip('%')) for c in info['volume'].values()]
+        return (max(vols) if vols else 0), bool(info['mute'])
+    except (ValueError, StopIteration, KeyError):
+        return 0, False
+
+
+def show_volume(sink=None):
+    vol, muted = volume(sink)
     if muted:
         osd('audio-volume-muted-symbolic', vol, 'Muted')
     else:
@@ -26,14 +49,19 @@ def show_volume():
 
 
 def key_volume(step):
-    run('wpctl', 'set-mute', '@DEFAULT_AUDIO_SINK@', '0')   # turning it up means: unmute
-    run('wpctl', 'set-volume', '-l', '1.0', '@DEFAULT_AUDIO_SINK@', f'{abs(step)}%{"+" if step > 0 else "-"}')
-    show_volume()
+    sink = key_sink()
+    run('pactl', 'set-sink-mute', sink, '0')                 # turning it up means: unmute
+    vol, _ = volume(sink)
+    # up stops at 100 %, but a level set above it in Settings is never pulled down by "up"
+    new = max(0, vol + step) if step < 0 else max(vol, min(100, vol + step))
+    run('pactl', 'set-sink-volume', sink, f'{new}%')
+    show_volume(sink)
 
 
 def key_mute():
-    run('wpctl', 'set-mute', '@DEFAULT_AUDIO_SINK@', 'toggle')
-    show_volume()
+    sink = key_sink()
+    run('pactl', 'set-sink-mute', sink, 'toggle')
+    show_volume(sink)
 
 
 def key_mic_mute():
