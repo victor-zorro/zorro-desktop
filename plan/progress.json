@@ -1,0 +1,19 @@
+{"updated": "2026-11-21 11:45",
+ "steps": [
+  {"name": "Review before: Settings", "state": "doing", "note": "reviewer reading the code"},
+  {"name": "Review before: Dialer, Transfer, login", "state": "doing", "note": "reviewer reading the code"},
+  {"name": "Rules in the repo + check", "state": "done", "note": "RULES.md, tools/check-rules"},
+  {"name": "Cable keeps its address (.77)", "state": "done", "note": "also in install.sh"},
+  {"name": "AI service (zorro-ai): Claude, Mistral cloud, local models", "state": "doing", "note": "being built"},
+  {"name": "DEVS: web page, catalogue, tests per device", "state": "doing", "note": "being built"},
+  {"name": "Fix what the reviews find", "state": "todo", "note": ""},
+  {"name": "Every page opens in a test", "state": "todo", "note": ""},
+  {"name": "Split Settings: Desktop, System, Connect + switcher", "state": "todo", "note": ""},
+  {"name": "Pages regrouped: menu, submenu, no long pages", "state": "todo", "note": ""},
+  {"name": "Monitors page (2nd and 3rd screen)", "state": "todo", "note": ""},
+  {"name": "Dialer: music output picker + Bluetooth tick", "state": "todo", "note": ""},
+  {"name": "Dialer: AI part, Messages with SMS, System part out, centre info", "state": "todo", "note": ""},
+  {"name": "Intelligence app", "state": "todo", "note": ""},
+  {"name": "Connect: bootstrap one-liner, USB, ISO", "state": "todo", "note": ""},
+  {"name": "Review after", "state": "todo", "note": ""}
+ ]}

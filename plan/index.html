@@ -11,7 +11,7 @@
 <body>
 
 <header class="top wrap">
-  <span class="label">zorro-desktop · build plan · 21 Nov 2026 · still planning, nothing built yet</span>
+  <span class="label">zorro-desktop · build plan · 21 Nov 2026 · the build is running</span>
   <h1>Zorro Build Plan</h1>
   <p class="dim">Everything we agreed so far, on one screen. React anywhere: the buttons and notes save
     by themselves on the laptop, and Claude reads them there. Red numbers are questions still open.</p>
@@ -23,12 +23,21 @@
 </header>
 
 <nav class="bar"><div class="in">
-  <a href="#apps">Apps</a><a href="#dialer">Dialer</a><a href="#music">Music output</a>
+  <a href="#progress">Progress</a><a href="#apps">Apps</a><a href="#dialer">Dialer</a><a href="#music">Music output</a>
   <a href="#ai">AI</a><a href="#how">Reviews</a><a href="#rules">Rules</a><a href="#done">Done</a><a href="#questions">Questions</a>
   <span class="count" id="count"></span>
 </div></nav>
 
 <main class="wrap">
+
+<section id="progress">
+  <div class="head">
+    <span class="label">the run · live</span>
+    <h2>Progress</h2>
+    <p class="dim" id="progress-at"></p>
+  </div>
+  <div class="steps" id="steps"></div>
+</section>
 
 <section id="apps">
   <div class="head">

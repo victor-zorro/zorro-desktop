@@ -114,3 +114,12 @@ textarea { width: 100%; min-height: 58px; resize: vertical; background: var(--bg
   .qs { grid-template-columns: 1fr }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+.steps { display: grid; gap: 4px }
+.step { display: grid; grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: baseline;
+  padding: 7px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); font-size: 14px }
+.step .s { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim) }
+.step.doing { border-color: var(--cyan) } .step.doing .s { color: var(--cyan) }
+.step.done .s { color: var(--green) } .step.done { opacity: .75 }
+.step.problem { border-color: var(--red) } .step.problem .s { color: var(--red) }
+.step .n { color: var(--dim); font-size: 13px }
+@media (max-width: 760px) { .step { grid-template-columns: 60px 1fr } .step .n { grid-column: 2 } }

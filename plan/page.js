@@ -182,3 +182,21 @@ async function load() {
 }
 load();
 setInterval(load, 5000);
+
+// ---- progress of the run (plan/progress.json, written by Claude)
+async function progress() {
+  try {
+    const p = await (await fetch('progress.json', { cache: 'no-store' })).json();
+    $('#progress-at').textContent = 'Updated ' + p.updated + '. Refreshes by itself.';
+    const box = $('#steps'); box.innerHTML = '';
+    p.steps.forEach(st => {
+      const row = document.createElement('div'); row.className = 'step ' + st.state;
+      const s = document.createElement('span'); s.className = 's'; s.textContent = st.state;
+      const n = document.createElement('span'); n.textContent = st.name;
+      const d = document.createElement('span'); d.className = 'n'; d.textContent = st.note || '';
+      row.append(s, n, d); box.appendChild(row);
+    });
+  } catch (e) { /* the next round tries again */ }
+}
+progress();
+setInterval(progress, 10000);
