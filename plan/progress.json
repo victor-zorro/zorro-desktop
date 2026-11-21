@@ -205,6 +205,13 @@
    "note": "design first: use the design area",
    "pct": 0,
    "model": "design: Opus; build: later"
+  },
+  {
+   "name": "Windows setup analyser",
+   "state": "todo",
+   "note": "design first: use the design area",
+   "pct": 0,
+   "model": "design: Opus; build: Sonnet"
   }
  ],
  "run_started": "11:23",

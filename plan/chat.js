@@ -1,9 +1,12 @@
 // The design area: notes (saved like the answers) and a chat answered through the laptop.
 document.querySelectorAll('[data-notes]').forEach(host => {
   block(host, host.dataset.notes, [], false);
-  host.querySelector('textarea').placeholder = host.dataset.notes === 'discogs-notes'
-    ? 'What you want it for: your collection, wantlist, looking up records, selling, ideas…'
-    : 'What it must do, what annoys you in WinBox, routers you have, ideas…';
+  const hints = {
+    'discogs-notes': 'What you want it for: your collection, wantlist, looking up records, selling, ideas…',
+    'winmove-notes': 'Which Windows PC, the apps you cannot miss, where your files are, what worries you about moving…',
+  };
+  host.querySelector('textarea').placeholder = hints[host.dataset.notes] ||
+    'What it must do, what annoys you in WinBox, routers you have, ideas…';
   host.querySelector('textarea').classList.add('tall');
 });
 
@@ -53,3 +56,4 @@ function chat(topic) {
 }
 chat('winbox');
 chat('discogs');
+chat('winmove');
