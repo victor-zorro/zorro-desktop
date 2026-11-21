@@ -1,5 +1,5 @@
 {
- "updated": "2026-11-21 15:05",
+ "updated": "2026-11-21 15:45",
  "steps": [
   {
    "name": "Review before: Settings",
@@ -51,10 +51,10 @@
   },
   {
    "name": "Fix what the reviews found",
-   "state": "doing",
-   "note": "Settings, login and Transfer fixed (39 of 46); the Dialer ones come with its split",
-   "pct": 85,
-   "eta": 25,
+   "state": "done",
+   "note": "all 46 handled: 44 fixed, 2 kept in DEVS for later",
+   "pct": 100,
+   "eta": 0,
    "model": "Fable or Opus (security)"
   },
   {
@@ -91,10 +91,10 @@
   },
   {
    "name": "Dialer: split, six parts, centre info, music output, AI chat",
-   "state": "doing",
-   "note": "being built",
-   "pct": 70,
-   "eta": 25,
+   "state": "done",
+   "note": "48 tests; restart the Dialer to use it (Instructions)",
+   "pct": 100,
+   "eta": 0,
    "model": "Opus"
   },
   {
@@ -115,34 +115,34 @@
   },
   {
    "name": "Connect finds devices nearby (the laptop is found by itself)",
-   "state": "doing",
-   "note": "being built (running on Opus)",
-   "pct": 15,
-   "eta": 50,
+   "state": "done",
+   "note": "a beacon on every device; 13 new tests; not tried between two real devices yet",
+   "pct": 100,
+   "eta": 0,
    "model": "Opus"
   },
   {
    "name": "ISO carries the setup and Connect, runs during the install",
    "state": "doing",
-   "note": "being built and installed for real in a VM (running on Sonnet)",
-   "pct": 10,
-   "eta": 80,
+   "note": "being built and installed for real in a VM",
+   "pct": 40,
+   "eta": 50,
    "model": "Sonnet + a long test"
   },
   {
    "name": "Switch everything on (services, launchers)",
    "state": "doing",
-   "note": "AI service, DEVS, Intelligence and the launchers are on; the password steps wait for you",
-   "pct": 60,
-   "eta": 10,
+   "note": "all services on; waiting for your password steps and a Dialer restart",
+   "pct": 80,
+   "eta": 5,
    "model": "Haiku"
   },
   {
    "name": "Review after",
-   "state": "todo",
-   "note": "everything the build changed",
-   "pct": 0,
-   "eta": 45,
+   "state": "doing",
+   "note": "three reviewers reading everything the build changed",
+   "pct": 10,
+   "eta": 40,
    "model": "Opus"
   },
   {
@@ -154,5 +154,5 @@
    "model": "design: Opus; build: later"
   }
  ],
- "eta_total": 150
+ "eta_total": 75
 }

@@ -257,6 +257,12 @@ sudo ~/zorro-desktop/apps/zorro-thinkpad/install.sh
 sudo ~/zorro-desktop/apps/zorro-transfer/install-system.sh</pre>
     </div>
     <div class="card">
+      <span class="chip open tag">needed once</span>
+      <h3>Restart the Dialer</h3>
+      <p>The running Dialer is still the old one. This stops it and starts the new one (six parts, AI chat, output picker).</p>
+      <pre class="cmd block">pkill -f 'zorro-dial --daemon'; zorro-dial --daemon &</pre>
+    </div>
+    <div class="card">
       <span class="chip tag">nothing to do</span>
       <h3>Claude</h3>
       <p>Uses the Claude Code login that is already on this laptop. No key needed.</p>
