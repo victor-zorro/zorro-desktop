@@ -308,6 +308,8 @@ class LookPages:
 
     def look_reset(self):
         _look_draft.update(LOOK_DEFAULTS)
+        for k in KEEP_ON_PRESET:            # your own choices stay (the clock)
+            _look_draft[k] = getattr(self, 'look', {}).get(k, LOOK_DEFAULTS[k])
         app = self.get_application()
         self.destroy()
         win = type(self)(app, select='look:0')
