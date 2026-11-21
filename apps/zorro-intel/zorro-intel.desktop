@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Intelligence
+GenericName=Search and AI
+Comment=Search and ask about your own notes and documents
+Exec=zorro-intel
+Icon=system-search
+Terminal=false
+Categories=Utility;
+Keywords=ai;search;notes;chat;ask;claude;mistral;
+StartupWMClass=zorro-intel

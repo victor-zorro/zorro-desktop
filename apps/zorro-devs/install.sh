@@ -9,7 +9,11 @@ ln -sfn "$here/zorro-devs" ~/.local/bin/zorro-devs
 ln -sfn "$here/zorro-devs.desktop" ~/.local/share/applications/zorro-devs.desktop
 ln -sfn "$here/zorro-devs.service" ~/.config/systemd/user/zorro-devs.service
 "$here/zorro-devs" fill
+# the build plan page that DEVS shows under Plan
+ln -sfn "$here/../../plan/zorro-plan.service" ~/.config/systemd/user/zorro-plan.service
 systemctl --user daemon-reload
 systemctl --user enable zorro-devs.service >/dev/null 2>&1
 systemctl --user restart zorro-devs.service
+systemctl --user enable zorro-plan.service >/dev/null 2>&1
+systemctl --user restart zorro-plan.service
 echo "DEVS runs: http://127.0.0.1:8098 (also from the home network and NetBird)"

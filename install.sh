@@ -228,6 +228,10 @@ log "Info circle on the desktop (apps/zorro-orb)"
 apps/zorro-orb/install.sh
 log "Search by meaning (apps/zorro-search)"
 apps/zorro-search/install.sh
+# the AI service all apps ask, DEVS (the catalogue, a web page on port 8098) and Intelligence
+apps/zorro-ai/install.sh
+apps/zorro-devs/install.sh
+apps/zorro-intel/install.sh
 log "Sweep notes (apps/zorro-sweep)"
 apps/zorro-sweep/install.sh
 
