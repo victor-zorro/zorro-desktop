@@ -1,0 +1,27 @@
+#!/usr/bin/python3
+"""fake bluetoothctl for the Dialer's screenshots: two audio devices, one connected; 'connect'
+takes two seconds. What is connected is kept in $FAKE_STATE/bt.json"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+FILE = Path(os.environ['FAKE_STATE']) / 'bt.json'
+NAMES = {'AA:BB:CC:00:00:01': 'Kitchen speaker', 'AA:BB:CC:00:00:02': 'Headphones'}
+try:
+    connected = json.loads(FILE.read_text())
+except (OSError, ValueError):
+    connected = ['AA:BB:CC:00:00:01']
+args = sys.argv[1:]
+if args[:1] == ['info'] and args[1] in NAMES:
+    yes = 'yes' if args[1] in connected else 'no'
+    print(f'Device {args[1]} (public)\n\tName: {NAMES[args[1]]}\n\tAlias: {NAMES[args[1]]}\n'
+          f'\tIcon: audio-headphones\n\tPaired: yes\n\tConnected: {yes}')
+elif args[:1] == ['info']:
+    print(f'Device {args[1]} not available')
+elif args[:1] == ['connect'] and args[1] in NAMES:
+    time.sleep(2)
+    connected.append(args[1])
+    FILE.write_text(json.dumps(connected))
+    print('Connection successful')

@@ -1,0 +1,36 @@
+#!/usr/bin/python3
+"""fake dunstctl for the Dialer's screenshots: a history kept in $FAKE_STATE/dunst.json"""
+import json
+import os
+import sys
+from pathlib import Path
+
+FILE = Path(os.environ['FAKE_STATE']) / 'dunst.json'
+UP = float(Path('/proc/uptime').read_text().split()[0])
+FIRST = [(4, 'Signal', 'Mira', 'Are you coming on Friday?', 120),
+         (3, 'Firefox', 'WhatsApp', 'Book club: new date', 900),
+         (2, 'Thunderbird', 'Invoice 2026-114', 'Thank you for your order', 5400),
+         (1, 'zorro-drive', 'Drive', 'Documents is in sync', 86400 * 2)]
+
+
+def load():
+    try:
+        return json.loads(FILE.read_text())
+    except (OSError, ValueError):
+        return {'paused': False, 'items': [
+            {'id': {'data': i}, 'appname': {'data': app}, 'summary': {'data': s}, 'body': {'data': b},
+             'timestamp': {'data': int((UP - age) * 1e6)}} for i, app, s, b, age in FIRST]}
+
+
+state, args = load(), sys.argv[1:]
+if args == ['history']:
+    print(json.dumps({'type': 'aa{sv}', 'data': [state['items']]}))
+elif args == ['is-paused']:
+    print('true' if state['paused'] else 'false')
+elif args == ['set-paused', 'toggle']:
+    state['paused'] = not state['paused']
+elif args[:1] == ['history-rm']:
+    state['items'] = [m for m in state['items'] if str(m['id']['data']) != args[1]]
+elif args == ['history-clear']:
+    state['items'] = []
+FILE.write_text(json.dumps(state))

@@ -1,0 +1,3 @@
+#!/bin/sh
+# fake nmcli for the Dialer's screenshots: one Wi-Fi connection
+printf 'wlan0:wifi:connected:Harbour\\: 5G\nlo:loopback:connected (externally):lo\neth0:ethernet:unavailable:\n'

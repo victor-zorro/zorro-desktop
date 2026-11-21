@@ -1,13 +1,18 @@
 """Notes: the Obsidian vault, as a tree"""
-# flake8: noqa: F403,F405 - helpers come from base (and earlier parts)
-from .base import *
-from .messages import *
-from .system import *
-from .files import *
+import json
+import os
+import re
+import socket
+import threading
+import time
+from pathlib import Path
+from urllib.parse import quote
 
+from .. import config
+from .base import HOME, Part, ago, loading, spawn, tile
 
-# ---- Notes: the Obsidian vault, as a tree ---------------------------------------------------
 TAG = re.compile(r'(?:^|\s)#([A-Za-z][\w/-]{1,40})')
+MEANING_ROUNDS = 40                     # searches by meaning in a row, while you type
 SEARCH_SOCK = Path(os.environ.get('XDG_RUNTIME_DIR', '/tmp')) / 'zorro-search.sock'
 
 
@@ -21,6 +26,8 @@ def ask_search(text, n=30):
             return json.loads(s.makefile().readline() or '[]')
     except (OSError, ValueError):
         return []
+
+
 HEADING = re.compile(r'^(#{1,3})\s+(.+?)\s*#*\s*$', re.M)
 
 
@@ -28,13 +35,12 @@ class Notes(Part):
     """a tree: new note, pinned, recent, your folders (notebooks), tags; a note unfolds into
     its headings. Typing searches every note, title and text."""
     key, title = 'notes', 'Notes'
-    tree = True
 
     def vaults(self):
         """every vault Obsidian knows except those unticked in the app (Accounts → Obsidian);
         the one open in Obsidian first"""
         try:
-            from zorro_util import vault_entries         # apps/zorro-fx (on the path via zorro-dial)
+            from zorro_util import vault_entries         # apps/zorro-fx (on the path: parts/base.py)
             vs = vault_entries()
         except ImportError:
             try:
@@ -42,10 +48,7 @@ class Notes(Part):
             except (OSError, ValueError):
                 vs = []
             vs.sort(key=lambda v: (not v.get('open'), os.path.basename(v.get('path', '')).lower()))
-        try:
-            hide = json.loads((HOME / '.config/zorro-dial/config.json').read_text()).get('notes_hide_vaults', [])
-        except (OSError, ValueError):
-            hide = []
+        hide = config.load_conf()['notes_hide_vaults']
         return [Path(v['path']) for v in vs if os.path.isdir(v.get('path', '')) and v['path'] not in hide]
 
     def fetch(self):
@@ -136,8 +139,8 @@ class Notes(Part):
         return self._tags
 
     def roots(self):
-        if not getattr(self, 'ready', False):
-            return [tile('lucide:ellipsis', 'Loading…', '', None, id='loading')]
+        if not self.ready:
+            return loading()
         if getattr(self, '_roots', None) is None:
             self._roots = self.make_roots()
         return self._roots
@@ -179,9 +182,6 @@ class Notes(Part):
                                           for tg, ps in tags[:40]]))
         return out
 
-    def rings(self):
-        return [self.roots(), [], []]
-
     def search_tiles(self, text):
         """notes whose title or text has every word (titles first, newest first), then the
         notes zorro-search finds by meaning (they come in a moment later)"""
@@ -220,8 +220,10 @@ class Notes(Part):
             self._asking = True
 
             def work():
-                while self._want and self._want not in self._meaning:
+                for _ in range(MEANING_ROUNDS):     # what was typed meanwhile: ask that too
                     t = self._want
+                    if not t or t in self._meaning:
+                        break
                     self._meaning[t] = ask_search(t)
                 self._asking = False
             threading.Thread(target=work, daemon=True).start()

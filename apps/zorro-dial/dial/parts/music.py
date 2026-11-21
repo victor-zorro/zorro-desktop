@@ -1,51 +1,22 @@
-"""Music: whichever player plays (MPRIS), and zorro-music for SoundCloud"""
-# flake8: noqa: F403,F405 - helpers come from base (and earlier parts)
-from .base import *
-from .messages import *
-from .system import *
-from .files import *
-from .notes import *
+"""Music: where it plays (the output picker), whichever player plays (MPRIS), and zorro-music
+for SoundCloud."""
+import copy
+import math
+import random
+import sys
+import time
 
+from .. import config
+from . import player, sound
+from .base import APPS, Part, loading, run, spawn, tile
 
-# ---- Music: whichever player plays (MPRIS), and zorro-music for SoundCloud -------------------
 MUSIC = APPS / 'zorro-music' / 'zorro-music'
-
-
-def mpris_players():
-    """[(bus name, props)] of the media players on the session bus"""
-    try:
-        from gi.repository import Gio, GLib
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        names = bus.call_sync('org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus',
-                              'ListNames', None, None, 0, 1000, None).unpack()[0]
-    except Exception:                   # noqa: BLE001 - no bus: no players
-        return []
-    out = []
-    for n in names:
-        if not n.startswith('org.mpris.MediaPlayer2.'):
-            continue
-        try:
-            props = bus.call_sync(n, '/org/mpris/MediaPlayer2', 'org.freedesktop.DBus.Properties', 'GetAll',
-                                  GLib.Variant('(s)', ('org.mpris.MediaPlayer2.Player',)),
-                                  None, 0, 500, None).unpack()[0]
-            out.append((n, props))
-        except Exception:               # noqa: BLE001 - a player that does not answer
-            continue
-    return out
-
-
-def mpris_call(name, method):
-    try:
-        from gi.repository import Gio
-        Gio.bus_get_sync(Gio.BusType.SESSION, None).call_sync(
-            name, '/org/mpris/MediaPlayer2', 'org.mpris.MediaPlayer2.Player', method, None, None, 0, 2000, None)
-    except Exception as e:              # noqa: BLE001 - the player went away: say so in the log
-        print(f'zorro-dial: {name} {method}: {e}', file=sys.stderr)
+CALLS = {'toggle': 'PlayPause', 'play': 'Play', 'pause': 'Pause', 'stop': 'Stop',
+         'next': 'Next', 'prev': 'Previous'}
 
 
 def scapi():
     """the SoundCloud API helper next to zorro-music (None when it is missing)"""
-    sys.path.insert(0, str(APPS / 'zorro-music'))
     try:
         import scapi as m
         return m
@@ -54,19 +25,13 @@ def scapi():
 
 
 class Music(Part):
-    """a tree: your likes, your styles, discover, playlists; tracks unfold into Play / Play
-    next / Like. The player's controls sit in the centre of the circle."""
+    """a tree: the outputs first, then your likes, your styles, discover, playlists; tracks
+    unfold into Play / Play next / Like. The player's controls sit in the centre of the circle."""
     key, title = 'music', 'Music'
-    tree = True
 
     def fetch(self):
-        try:                            # the sound output tile (dialparts/sound.py)
-            from . import sound
-            self.sound = sound.node()
-        except Exception as e:          # noqa: BLE001 - no sound tile, the rest still works
-            print('zorro-dial: sound:', e, file=sys.stderr)
-            self.sound = None
-        self.fetch_np()
+        self.read_sound()
+        self.read_player()
         self.sc = scapi()
         self.likes, self.lists, self.signed_in = [], [], False
         if self.sc:
@@ -78,31 +43,36 @@ class Music(Part):
         self.liked = {t['id'] for t in self.likes}
         self.ready = True
 
-    # -- the player
+    def renewed(self):
+        """the outputs and the player read again; the likes stay (SoundCloud is slow)"""
+        if not self.ready:
+            return super().renewed()
+        fresh = copy.copy(self)
+        fresh.read_sound()
+        fresh.read_player()
+        return fresh
+
+    def read_sound(self):
+        self.ticked, self.outs, self.bt = [], [], {}
+        try:
+            self.ticked = config.music_outputs()
+            self.outs = sound.outputs()
+            self.bt = sound.bt_devices(self.ticked)
+        except Exception as e:          # noqa: BLE001 - no output tiles, the rest still works
+            print('zorro-dial: sound:', e, file=sys.stderr)
+
+    def read_player(self):
+        self.np = player.now_playing()
+        self.fetched = time.time()
+
     def control(self, what):
+        """a player button; the dial reads the new state after it (renewed)"""
         np = self.np or {}
         if np.get('player'):
-            mpris_call(np['player'], {'toggle': 'PlayPause', 'play': 'Play', 'pause': 'Pause', 'stop': 'Stop',
-                                      'next': 'Next', 'prev': 'Previous'}[what])
+            player.mpris_call(np['player'], CALLS[what])
         else:
             run(str(MUSIC), what)
         time.sleep(0.4)
-        self.fetch_np()
-
-    def fetch_np(self):
-        players = mpris_players()
-        self.np = None
-        for name, props in sorted(players, key=lambda p: (p[1].get('PlaybackStatus') != 'Playing', 'mpv' not in p[0])):
-            md = props.get('Metadata') or {}
-            if not md.get('xesam:title') and props.get('PlaybackStatus') == 'Stopped':
-                continue
-            artist = md.get('xesam:artist') or ['']
-            self.np = {'player': name, 'title': md.get('xesam:title') or 'Playing',
-                       'artist': artist[0] if artist else '', 'playing': props.get('PlaybackStatus') == 'Playing',
-                       'pos': (props.get('Position') or 0) / 1e6, 'dur': (md.get('mpris:length') or 0) / 1e6,
-                       'app': name.split('.')[3].split('_')[0]}
-            break
-        self.fetched = time.time()
 
     def position(self):
         np = self.np or {}
@@ -111,7 +81,6 @@ class Music(Part):
 
     # -- what to play
     def queue(self, tracks, shuffle=False):
-        import random
         urls = [t['url'] for t in tracks if t.get('url')]
         if shuffle:
             random.shuffle(urls)
@@ -157,20 +126,24 @@ class Music(Part):
                                                            lambda ts=ts: ts, f'artist:{style}:{a}') for a, ts in top]))
         return out + [self.track_node(t) for t in mine[:12]]
 
+    def likes_tiles(self):
+        out = [tile('lucide:star', 'My likes', f'{len(self.likes)} tracks', None, id='likes',
+                    kids=lambda: [tile('lucide:play', 'Play all', 'shuffled',
+                                       lambda: self.queue(self.likes, shuffle=True), id='likes:shuffle'),
+                                  tile('lucide:list', 'Newest first', '',
+                                       lambda: self.queue(self.likes), id='likes:newest')]
+                    + [self.track_node(t) for t in self.likes[:14]])]
+        for style, n in (self.sc.styles(self.likes, 5) if self.sc else []):
+            out.append(tile('lucide:music', style.title()[:16], f'{n} likes', None, id=f'style:{style}',
+                            kids=lambda s=style: self.style_kids(s)))
+        return out
+
     def roots(self):
-        if not getattr(self, 'ready', False):
-            return [tile('lucide:ellipsis', 'Loading…', '', None, id='loading')]
-        out = [self.sound] if getattr(self, 'sound', None) else []     # where it plays: first
+        if not self.ready:
+            return loading()
+        out = sound.tiles(self.outs, self.ticked, self.bt)      # where it plays: first
         if self.likes:
-            out.append(tile('lucide:star', 'My likes', f'{len(self.likes)} tracks', None, id='likes',
-                            kids=lambda: [tile('lucide:play', 'Play all', 'shuffled',
-                                               lambda: self.queue(self.likes, shuffle=True), id='likes:shuffle'),
-                                          tile('lucide:list', 'Newest first', '',
-                                               lambda: self.queue(self.likes), id='likes:newest')]
-                            + [self.track_node(t) for t in self.likes[:14]]))
-            for style, n in (self.sc.styles(self.likes, 5) if self.sc else []):
-                out.append(tile('lucide:music', style.title()[:16], f'{n} likes', None, id=f'style:{style}',
-                                kids=lambda s=style: self.style_kids(s)))
+            out += self.likes_tiles()
         if self.sc:
             pub = [s for s, _ in self.sc.styles(self.likes, 5)] if self.likes else self.sc.PUBLIC_STYLES
             out.append(tile('lucide:globe', 'Discover', 'new in your styles' if self.likes else 'free tracks',
@@ -187,9 +160,6 @@ class Music(Part):
                         id='paste'))
         return out
 
-    def rings(self):
-        return [self.roots(), [], []]
-
     def play_clipboard(self):
         url = run('xclip', '-o', '-selection', 'clipboard').strip()
         if url.startswith('http'):
@@ -199,7 +169,7 @@ class Music(Part):
         spawn(str(MUSIC), 'play', 'search', text)
 
     def preview(self):
-        np = getattr(self, 'np', None)
+        np = self.np
         if not np:
             return 'MUSIC', 'SoundCloud', ['nothing playing' if self.ready else '…']
         t = int(self.position())
@@ -209,9 +179,7 @@ class Music(Part):
 
     def draw_rim(self, dial, cr, cx, cy, rings, a0, a1):
         """the playing track as a thin band of particles just outside the fan; played: white"""
-        import math
-        import random
-        np = getattr(self, 'np', None)
+        np = self.np
         if not np:
             return
         u = getattr(dial, 'u', 1.0)

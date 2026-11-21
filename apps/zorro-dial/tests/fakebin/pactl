@@ -1,0 +1,34 @@
+#!/usr/bin/python3
+"""fake pactl for the Dialer's screenshots: the laptop's speakers and one sink per connected
+fake Bluetooth device. The default sink is kept in $FAKE_STATE/sink"""
+import json
+import os
+import sys
+from pathlib import Path
+
+STATE = Path(os.environ['FAKE_STATE'])
+OWN = 'alsa_output.pci-0000_00_1f.3.analog-stereo'
+try:
+    connected = json.loads((STATE / 'bt.json').read_text())
+except (OSError, ValueError):
+    connected = ['AA:BB:CC:00:00:01']
+sinks = [{'index': 1, 'name': OWN, 'description': 'Built-in Audio Analog Stereo', 'mute': False,
+          'volume': {}, 'properties': {'device.bus': 'pci'}}]
+sinks += [{'index': 10 + i, 'name': f'bluez_output.{mac.replace(":", "_")}.1', 'description': mac,
+           'mute': False, 'volume': {}, 'properties': {'device.bus': 'bluetooth'}}
+          for i, mac in enumerate(connected)]
+try:
+    default = (STATE / 'sink').read_text().strip()
+except OSError:
+    default = OWN
+args = [a for a in sys.argv[1:] if a not in ('-f', 'json')]
+if args == ['get-default-sink']:
+    print(default)
+elif args == ['list', 'sinks']:
+    print(json.dumps(sinks))
+elif args == ['list', 'short', 'sinks']:
+    print('\n'.join(f'{s["index"]}\t{s["name"]}\tPipeWire\ts16le 2ch 48000Hz\tIDLE' for s in sinks))
+elif args[:1] == ['set-default-sink']:
+    (STATE / 'sink').write_text(args[1])
+elif args == ['list', 'sink-inputs']:
+    print('[]')
