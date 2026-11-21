@@ -15,15 +15,32 @@ Desktop → Transfer, or the Dialer: type "transfer").
 4. Off: when everything is there, press **Put in place** yourself. A file it replaces is
    kept as `NAME.before-transfer` either way.
 
-Safety: a transfer can only start with Transfer open on both devices. The code works once;
-after 3 wrong tries a new one is made. Pairing uses SPAKE2 (as magic-wormhole does), so
-listening in does not reveal the code; the copy goes over TLS 1.3 with the paired key. One
-device at a time.
+Safety: a transfer can only start with Transfer open on both devices. The code works once.
+One device pairs at a time; each wrong code makes the next try wait longer (2 s, 4 s… up to a
+minute), every 3 wrong tries a new code is made, and after 10 no code is offered until you
+press **New code**. Pairing uses SPAKE2 (as magic-wormhole does), so listening in does not
+reveal the code; the copy goes over TLS 1.3 with the paired key (this needs Python 3.13 or
+newer on both devices; Transfer says so when it is older).
 
-Interrupted (network gone, laptop closed)? It retries for half an hour (the sender waits as
-long, also with its window closed), then stops; open
+The new device does not take the sender's word for it:
+- It accepts only files that belong to the groups you ticked, checked against its own list
+  of what a group holds. Anything else in the sender's list is refused and counted.
+- Every file is checked with a SHA-256 from the sender. A copy that does not match is thrown
+  away and fetched again (3 times at most); then it is noted as "not received" and the rest
+  goes on. A file the sender cannot read is noted the same way.
+- Received files wait in a folder only you can read (0700, files 0600). In place they get
+  the permissions they had (keys stay 0600, scripts stay runnable), never setuid, setgid or
+  writable by everyone; folders with keys and logins (`.ssh`, keyrings…) are yours only.
+- A path that is a symbolic link, or lies behind one (`~/.config/openbox` into the repo), is
+  left alone.
+- New accounts are shown with their groups before you type a password for them.
+
+Interrupted (network gone, laptop closed)? It retries for half an hour after the last byte
+that arrived (the sender waits as long, also with its window closed), then stops; open
 Transfer on both devices (Send again on the sender) and it goes on where it stopped, without
-a new code. A cable is faster than Wi-Fi, but Wi-Fi and NetBird work too.
+a new code. The sender forgets a transfer half an hour after its last sign of life, and at
+once when it is done; after that you pair again. A cable is faster than Wi-Fi, but Wi-Fi and
+NetBird work too.
 
 What can go along (`transfer/items.py`):
 - **Installers**: `~/Installers` (Unreal, DaVinci…).
@@ -35,8 +52,9 @@ What can go along (`transfer/items.py`):
   the login look with the login-screen helper (asks your password).
 - **Logins and keys**: Firefox and the web-app profiles (logins, saved passwords), SSH keys,
   the keyring (it opens with the old device's password), Wi-Fi networks (read with nmcli,
-  added on the new device; the password file is deleted when sending stops), Drive accounts
-  (rclone), GitHub login.
+  added on the new device through nmcli's input, so the password is never on a command line;
+  the password file is deleted when sending stops; networks with a company login are set up
+  by hand), Drive accounts (rclone), GitHub login.
 - **Apps' settings and data**: Obsidian, Claude, LocalSend, Blender, Godot, darktable,
   Scribus, MQTTX, mpv. Not Signal: a copied Signal stops working; link the new device to your
   phone instead.
@@ -53,8 +71,9 @@ What can go along (`transfer/items.py`):
 
 Caches are left out (they rebuild themselves). Small files travel in batches, so thousands of
 notes don't each wait for the network. "Put in place" waits until the apps whose files it
-would replace are closed (Firefox, Obsidian…); the sender shows which of them are open on the
-sending device (close them there for a clean copy).
+would replace are closed (Firefox, Obsidian…), for a day at most; then it asks you to press
+**Put in place**. The sender shows which of them are open on the sending device (close them
+there for a clean copy). A home folder called `system` or `generated` cannot go along.
 
     zorro-transfer [--send|--get]  the window (on the sending / getting side)
     zorro-transfer send            offer this device (the window runs this)
@@ -64,6 +83,18 @@ sending device (close them there for a clean copy).
     zorro-transfer apply           put in place
     zorro-transfer status          both sides' progress (JSON)
 
-State: `~/.local/state/zorro-transfer/` (sender.json, receiver.json, 0600). Received files wait
-in `~/.local/share/zorro-transfer/SESSION/` until they are put in place. Port 47820 (TCP) and
-47821 (UDP, finding devices on the local network).
+State: `~/.local/state/zorro-transfer/` (sender.json, receiver.json, 0600; receiver.lock: one
+fetch at a time). Received files wait in `~/.local/share/zorro-transfer/SESSION/` until they
+are put in place; what an abandoned transfer left there is removed at the next pairing. Port
+47820 (TCP) and 47821 (UDP, finding devices on the local network); `ZORRO_TRANSFER_PORT`
+moves both (tests).
+
+Code (`transfer/`): `sender.py` + `serve.py` the sending side, `receiver.py` + `fetch.py` the
+getting side, `place.py` + `after.py` putting in place, `check.py` everything the other device
+says is checked there, `items.py` + `generated.py` what goes along, `net.py` the wire,
+`state.py` state files, `find.py` finding senders, `cli.py`, `pages/` the window (one page
+per file).
+
+Tests: `python3 -m unittest discover apps/zorro-transfer/tests`: two made-up devices in a
+temporary folder talk over localhost; nmcli, pkexec and the root helper are stand-ins
+(`tests/bin`), nothing touches your real home.

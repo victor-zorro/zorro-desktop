@@ -152,112 +152,112 @@
    "area": "Transfer",
    "level": "critical",
    "title": "A sending device can make the receiver write (and delete) outside the transfer folder",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T2",
    "area": "Transfer",
    "level": "critical",
    "title": "Keys and logins arrive readable by other users; SSH keys unusable; scripts lose their run bit",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T3",
    "area": "Transfer",
    "level": "high",
    "title": "Old sessions never expire: a device that once received can come back for everything",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T4",
    "area": "Transfer",
    "level": "high",
    "title": "One unreadable file makes the transfer retry for ever",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T5",
    "area": "Transfer",
    "level": "high",
    "title": "The receiver takes files it did not ask for, and writes through linked folders into the repo",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T6",
    "area": "Transfer",
    "level": "high",
    "title": "Files are not checked after transfer (a damaged or cut file counts as done)",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T7",
    "area": "Transfer",
    "level": "high",
    "title": "The 6-digit code can be guessed without limit",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T8",
    "area": "Transfer",
    "level": "medium",
    "title": "The window freezes or stops updating while comparing received files",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T9",
    "area": "Transfer",
    "level": "medium",
    "title": "\"Close the apps\" loop on any permission error; other errors stop the background step",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T10",
    "area": "Transfer",
    "level": "medium",
    "title": "Two fetches can run at once and damage a file",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T11",
    "area": "Transfer",
    "level": "medium",
    "title": "After a sender ended, the next \"Send\" stops within a second",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T12",
    "area": "Transfer",
    "level": "medium",
    "title": "The sender stops under a reopened window",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T13",
    "area": "Transfer",
    "level": "medium",
    "title": "Folders of abandoned transfers (with copied keys) are never removed",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T14",
    "area": "Transfer",
    "level": "medium",
    "title": "On Ubuntu 24.04 pairing hangs (needs Python 3.13)",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T15",
    "area": "Transfer",
    "level": "medium",
    "title": "Wi-Fi names/passwords with : or \\\\ import wrong; password visible on a command line",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "T16",
    "area": "Transfer",
    "level": "medium",
    "title": "Bad data from the other side leaves the window on \"Connecting\u2026\"",
-   "state": "being fixed"
+   "state": "fixed"
   },
   {
    "id": "D17",

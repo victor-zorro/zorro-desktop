@@ -1,0 +1,14 @@
+#!/usr/bin/python3
+"""A stand-in for zorro-transfer-helper: writes what it was asked to $ZT_HELPER_LOG and
+answers as the real one would."""
+import json
+import os
+import sys
+
+req = json.load(sys.stdin)
+json.dump(req, open(os.environ['ZT_HELPER_LOG'], 'w'))
+others = [a['name'] for a in req['accounts'] if not a.get('me')]
+print(json.dumps({'look': None if req['look'] is None else True,
+                  'me': any(a.get('me') for a in req['accounts']) or None,
+                  'made': [n for n in others if req['passwords'].get(n)],
+                  'skipped': [n for n in others if not req['passwords'].get(n)], 'failed': []}))

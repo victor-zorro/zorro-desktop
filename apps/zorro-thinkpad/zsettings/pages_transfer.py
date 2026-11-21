@@ -40,12 +40,14 @@ def summary():
         if busy:
             s = busy[0]
             return f"Sending to {s.get('peer', '?')}: {gb(s.get('done'))} of {gb(s.get('total'))}"
+        if snd.get('status') == 'locked':
+            return 'Too many wrong codes: open Transfer and press "New code".'
         return 'This device is ready to send (the code is in the Transfer window).'
     st = rcv.get('status')
     frm = rcv.get('sender', 'the other device')
     if st in ('starting', 'receiving', 'reconnecting') and alive(rcv.get('pid')):
         return f"Getting the setup from {frm}: {gb(rcv.get('done'))} of {gb(rcv.get('total'))}"
-    if st in ('received', 'waiting for apps') and alive(rcv.get('pid')):
+    if st in ('received', 'waiting for apps', 'putting in place') and alive(rcv.get('pid')):
         return f"Putting it in place… {rcv.get('error') and 'close ' + rcv['error'] or ''}"
     if st in ('starting', 'receiving', 'reconnecting', 'interrupted'):
         return f'Stopped while getting the setup from {frm}: open Transfer to go on where it stopped.'

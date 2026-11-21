@@ -2,7 +2,8 @@
 
 Pairing: the receiver types the 6-digit code the sender shows. SPAKE2 (as in magic-wormhole)
 turns that short code into a strong shared key: someone who listens in learns nothing, and a
-wrong guess costs a whole new try (the sender makes a new code after 3 wrong ones). The key
+wrong guess costs a whole new try (the sender allows one try at a time, waits longer after
+each wrong one and stops offering after 10). The key
 becomes the pre-shared key of a TLS 1.3 connection (no certificates needed: only the two who
 know the code can finish the handshake). After pairing, the sender hands out a session secret
 so an interrupted transfer continues without a new code.
@@ -11,13 +12,35 @@ Messages are length-prefixed frames: JSON for requests, raw bytes for file data.
 import hashlib
 import hmac
 import json
+import os
 import socket
 import ssl
 import struct
+import sys
 
-PORT = 47820                    # the sender listens here (LAN and NetBird)
-DISCOVER_PORT = 47821           # UDP: "who sends?" on the local network
-MAGIC = b'zorro-transfer/1'
+# the sender listens on PORT (LAN and NetBird); the next one, UDP: "who sends?" on the local
+# network. The variable is for tests.
+PORT = int(os.environ.get('ZORRO_TRANSFER_PORT') or 47820)
+DISCOVER_PORT = PORT + 1
+MAGIC = b'zorro-transfer/2'
+IDLE = 60                       # seconds a side waits for the other's next message
+
+
+class TooOld(Exception):
+    """this Python cannot do TLS with a pre-shared key"""
+
+
+def need_psk():
+    """TLS 1.3 with a pre-shared key came with Python 3.13 (Ubuntu 24.04 has 3.12)"""
+    if not hasattr(ssl.SSLContext, 'set_psk_server_callback'):
+        have = '.'.join(map(str, sys.version_info[:2]))
+        raise TooOld(f'Transfer needs Python 3.13 or newer; this device has {have}.')
+
+
+def patience(offset):
+    """how long to wait for a file that continues at offset: the other side first reads
+    (and checks) what came before"""
+    return IDLE + offset // (10 << 20)
 
 
 def send_frame(sock, data):
@@ -46,7 +69,10 @@ def send_json(sock, obj):
 
 
 def recv_json(sock):
-    return json.loads(recv_frame(sock).decode())
+    msg = json.loads(recv_frame(sock).decode())
+    if not isinstance(msg, dict):
+        raise ValueError('not a message')
+    return msg
 
 
 def kdf(key, label):
@@ -76,6 +102,7 @@ def _ctx(server, psk):
 
 def secure(sock, key, server):
     """wrap the socket in TLS 1.3 with a key from pairing or the session secret"""
+    need_psk()
     psk = kdf(key, 'tls')
     return _ctx(server, psk).wrap_socket(sock, server_side=server)
 

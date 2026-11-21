@@ -1,22 +1,4 @@
 {
- "apps/zorro-dial/dialparts/files.py": {
-  "functions": {
-   "file_preview": 63
-  },
-  "lines": 0
- },
- "apps/zorro-dial/zorro-dial": {
-  "functions": {
-   "__init__": 79,
-   "draw_hub": 73,
-   "draw_preview": 84,
-   "draw_slices": 61,
-   "draw_tree": 89,
-   "on_click": 62,
-   "on_draw": 81
-  },
-  "lines": 1907
- },
  "apps/zorro-dm/theme/js/animals.js": {
   "functions": {},
   "lines": 652
@@ -138,17 +120,6 @@
    "write_theme": 82
   },
   "lines": 0
- },
- "apps/zorro-transfer/transfer/engine.py": {
-  "functions": {
-   "fetch_on": 102,
-   "serve": 81
-  },
-  "lines": 661
- },
- "apps/zorro-transfer/transfer/gui.py": {
-  "functions": {},
-  "lines": 497
  },
  "apps/zorro-winpos/zorro-winpos": {
   "functions": {},

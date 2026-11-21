@@ -1,0 +1,44 @@
+#!/usr/bin/python3
+"""A stand-in for nmcli: the connections live in the JSON file $ZT_NM; every call is logged
+to $ZT_NM.log (so a test can see that no password was on the command line)."""
+import json
+import os
+import sys
+
+DB = os.environ['ZT_NM']
+a = sys.argv[1:]
+with open(DB + '.log', 'a') as log:
+    log.write(json.dumps(a) + '\n')
+try:
+    nets = json.load(open(DB))
+except (OSError, ValueError):
+    nets = []
+
+
+def field(name):
+    return a[a.index(name) + 1] if name in a else ''
+
+
+if 'edit' in a:
+    new = {'name': a[a.index('con-name') + 1], 'uuid': f'uuid-{len(nets)}', 'key_mgmt': '',
+           'psk': '', 'hidden': False}
+    keys = {'802-11-wireless.ssid': 'ssid', '802-11-wireless-security.key-mgmt': 'key_mgmt',
+            '802-11-wireless-security.psk': 'psk', '802-11-wireless.hidden': 'hidden'}
+    for line in sys.stdin.read().splitlines():
+        word, _, rest = line.partition(' ')
+        if word == 'set':
+            key, _, value = rest.partition(' ')
+            new[keys[key]] = value.strip() == 'yes' if key.endswith('hidden') else value.strip()
+        elif word == 'save':
+            json.dump(nets + [new], open(DB, 'w'))
+elif field('-f') == 'TYPE,UUID,NAME':
+    for n in nets:
+        print(f"802-11-wireless:{n['uuid']}:{n['name']}")
+    print('802-3-ethernet:uuid-wired:Wired connection 1')
+elif field('-f') == 'NAME':
+    for n in nets:
+        print(n['name'])
+elif '-g' in a:
+    for n in nets:
+        if n['uuid'] == a[-1]:
+            print(n['ssid'], n['key_mgmt'], n['psk'], 'yes' if n['hidden'] else 'no', sep='\n')

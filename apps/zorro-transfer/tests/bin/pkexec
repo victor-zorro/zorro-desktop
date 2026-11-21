@@ -1,0 +1,3 @@
+#!/bin/sh
+# A stand-in for pkexec: no password, no root; it just runs the command.
+exec "$@"
